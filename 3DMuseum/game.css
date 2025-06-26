@@ -1,0 +1,322 @@
+/* game.css */
+
+/* Flexbox utilities
+.flex {
+    display: flex;
+}
+
+.flex-col {
+    flex-direction: column;
+}
+
+.justify-center {
+    justify-content: center;
+}
+
+.items-center {
+    align-items: center;
+}
+
+.gap-5 {
+    gap: 5px;
+}
+
+.gap-15 {
+    gap: 15px;
+}
+
+.gap-10 {
+    gap: 10px;
+} */
+
+
+canvas{
+    display: block;
+}
+/* Loading Container */
+.loading-container {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    display: flex; /* Initially flex to show */
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+#loading-bar {
+    width: 300px;
+    height: 20px;
+    background-color: #555;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+#progress {
+    height: 100%;
+    width: 0%; /* Initial width, updated by JS */
+    background-color: #4CAF50;
+    border-radius: 10px;
+}
+
+/* Menu Container */
+.menu-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.9);
+    display: none; /* Hidden by default, shown by JS */
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    box-sizing: border-box;
+    z-index: 999;
+    overflow-y: auto; /* Enable scrolling if content overflows */
+}
+
+.menu-container .flex {
+    width: 100%;
+    justify-content: flex-end; /* Aligns the close icon to the right */
+}
+
+.menu-container h2 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.menu-container hr {
+    width: 80%;
+    border: none;
+    border-top: 1px solid #ccc;
+    margin-top: 30px; /* Specific margin from HTML */
+}
+
+#menu-close {
+    font-size: 2em;
+    cursor: pointer;
+    color: #333;
+}
+
+#menu-selection-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 80%;
+    margin-top: 20px;
+}
+
+.menu-item {
+    padding: 10px 15px;
+    background-color: #f0f0f0;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    text-align: center;
+    transition: background-color 0.3s ease;
+}
+
+.menu-item:hover {
+    background-color: #e0e0e0;
+}
+
+.menu-container ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 14px;
+    color: #2a2a2a;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Toast Alert */
+.toast-alert {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 1000;
+    display: none; /* Hidden by default, shown by JS */
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+}
+
+/* Upload Modal */
+.upload-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    padding: 20px;
+    width: 90%;
+    max-width: 500px;
+    z-index: 1001;
+    display: none; /* Hidden by default, shown by JS */
+    box-sizing: border-box;
+}
+
+.upload-modal-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 1.5em;
+    cursor: pointer;
+    color: #555;
+}
+
+.upload-header h2 {
+    margin-top: 0;
+    text-align: center;
+    color: #333;
+}
+
+.upload-container {
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    margin-bottom: 20px;
+    height: 200px; /* Fixed height for consistency */
+    position: relative;
+    overflow: hidden;
+}
+
+#upload-text {
+    color: #777;
+    font-size: 1.2em;
+    position: absolute;
+}
+
+.upload-preview {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: none; /* Hidden by default, shown when image is selected */
+}
+
+.upload-details {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.upload-details input[type="text"],
+.upload-details textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-size: 1em;
+}
+
+.upload-details textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.btn {
+    background-color: #007bff;
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    text-align: center;
+    transition: background-color 0.3s ease;
+}
+
+.btn:hover {
+    background-color: #0056b3;
+}
+
+.spinner {
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top: 3px solid #fff;
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    animation: spin 1s linear infinite;
+    display: none; /* Hidden by default, shown by JS */
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Upload Cropper Container */
+.upload-cropper-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: none; /* Hidden by default, shown by JS */
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1002;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.upload-cropper {
+    width: 80%;
+    max-width: 600px;
+    height: auto; /* Adjust height dynamically with content */
+    background-color: #333;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+.crop-preview {
+    max-width: 100%;
+    display: block;
+}
+
+#crop-btn {
+    background-color: #28a745;
+}
+
+#crop-btn:hover {
+    background-color: #218838;
+}
+
+/* Model Container (where the Three.js scene will render) */
+#model-container {
+    width: 100dvw;
+    height: 100dvh;
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+    z-index: 1; /* Ensure it's behind modals/menus */
+}
