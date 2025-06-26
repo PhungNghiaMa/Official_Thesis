@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite App</title>
+    <link rel="stylesheet" href="./style.css" />
+    <link rel="stylesheet" href="./landingpage.css" />
+    <link rel="stylesheet" href="./game.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+
+  </head>
+  <body style="width: 100%; height:100%; overflow: hidden; margin: 0; padding: 0;">
+    <div id="landingpageContainer" class="GeneralContainer w-full min-h-full  overflow-y-auto overflow-x-hidden absolute top-0 left-0 bg-amber-100" >
+      <div class="Page_1_Container w-full h-full overflow-hidden ">
+        <div class="NavigationContainer w-full h-auto flex flex-row py-3 text-gray-300">
+          <div class="MuseumNameContainer w-2/12 h-auto flex justify-center items-center">
+            <h1 class="museum_name text-2xl font-semibold" data-i18n="Homepage.museum_name"></h1>
+          </div>
+
+          <div class="NavBarContainer w-10/12 h-auto flex flex-row items-center justify-end-safe px-5">
+            <nav class="NavBar w-auto h-auto flex items-center justify-around text-md ">
+              <a class="navigation about px-2" href="/about">About us</a>
+              <a class="navigation gallery px-2" href="/gallery">Gallery</a>
+              <a class="navigation contact px-2" href="/contact">Contact</a>
+            </nav>
+            <div class="LanguageSwitcherContainer w-auto h-auto flex flex-row items-center transition-all ease-in-out 10s text-xs font-semibold">
+            <div class="VietBtn flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
+              <button href="/" onclick="changeLanguage('vi')">VI</button>
+            </div>
+            <div class="EnBtn hidden mx-2 border-2 border-gray-400 hover:border-orange-400 rounded-lg text-gray-300">
+              <button href="/" onclick="changeLanguage('en')">EN</button>
+            </div>
+          </div>
+          </div>
+
+        </div>
+
+        <div class="ContentContainer w-full h-auto overflow-hidden my-3 bg-transparent">
+          <div class="WrapContainer w-auto overflow-hidden" style="max-height: fit-content;">
+            <div class="PagesContainer w-full h-auto overflow-auto">
+              <div id="landingpage" class="landingpage w-full" style="height: fit-content"></div>
+            </div>
+          </div>
+        </div>
+
+        <footer class="Footer w-full h-auto">
+          <div class="w-full h-auto flex flex-row items-center justify-center CircleWrapContainer">
+            <div class="WrapperCircle rounded-2xl mx-2 flex items-center justify-center">
+              <div class="Circle rounded-2xl"></div>
+            </div>
+            <div class="WrapperCircle rounded-2xl mx-2 flex items-center justify-center">
+              <div class="Circle rounded-2xl"></div>
+            </div>
+            <div class="WrapperCircle rounded-2xl mx-2 flex items-center justify-center">
+              <div class="Circle rounded-2xl"></div>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+
+    <!--  Game Container -->
+    <div class="loading-container" id="loading-container" style="display: none;">
+      <div id="loading-bar">
+        <div id="progress"></div>
+      </div>
+    
+      <div class="flex flex-col gap-15 text-center">
+        <div>Loading gallery. Please wait...</div>
+        <div> Tip: use WASD keys to look around </div>
+      </div>
+    </div>
+    
+    <div class="menu-container" id="menu-container">
+      <div class="flex" style="width:100%;">
+        <i class="bi bi-x" id="menu-close"></i>
+      </div>
+    
+      <h2>Menu</h2>
+    
+      <div style="font-size: 18px; font-weight: 600;">
+        Select the Gallery / Museum
+      </div>
+    
+      <div id="menu-selection-list"></div>
+    
+      <hr>
+      <div>
+        <ul>
+          <li>Use WASD to move around</li>
+          <li>Use space to Jump</li>
+          <li>Escape key to open/close menu</li>
+          <li>Hover on annotation for details</li>
+          <li>Click on annotation to upload image</li>
+        </ul>
+      </div>
+    </div>
+    
+    <div class="toast-alert" id="toast-alert"></div>
+    
+    <div class="upload-modal" id="upload-modal">
+      <div id="upload-close" class="upload-modal-close">
+        <i class="bi bi-x"></i>
+      </div>
+    
+      <div class="upload-header">
+        <h2>Upload Image</h2>
+      </div>
+    
+      <div class="upload-container" id="upload-container">
+        <div id="upload-text">Upload image here</div>
+        <img src="" class="upload-preview" id="upload-preview">
+        <input type="file" id="upload-input" accept=".png, .jpg, .jpeg">
+      </div>
+    
+      <div class="upload-details">
+        <input type="text" name="" id="upload-title" placeholder="title" maxlength="30">
+        <textarea name="" id="upload-description" placeholder="description"></textarea>
+        <input type="text" name="" id="upload-handle" placeholder="twitter handle" maxlength="30">
+        <button type="submit" id="upload-btn" class="btn flex justify-center items-center gap-5">
+          Upload
+          <div class="spinner" id="upload-spinner"></div>
+        </button>
+      </div>
+    </div>
+    
+    <div class="upload-cropper-container" id="upload-cropper-container">
+      <div id="cropper-container" class="upload-cropper">
+        <img src="" class="crop-preview" id="crop-preview">
+      </div>
+      <div class="btn" id="crop-btn">Crop</div>
+    </div>
+
+    <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
+
+    <script type="module">
+    import { initI18next, updateContent, changeLanguage } from './src/i18next.js';
+    import landingPageHTML from './template/landingpage_template.js';
+    import { initializeGame } from './src/game_logic/index.js';
+    initI18next().then(() => {
+      // After i18next is ready, load landing page HTML and update translations
+      document.getElementById('landingpage').innerHTML = landingPageHTML;
+      updateContent();
+
+      // --- MOVED AND CORRECTED CODE ---
+      // Now that the landing page is in the DOM, we can safely find the button
+      const startButton = document.getElementById('start_button');
+      const generalContainer = document.getElementById('landingpageContainer');
+      const modelContainer = document.getElementById('model-container');
+
+      if (startButton) {
+        startButton.addEventListener('click', () => {
+          console.log('Start button clicked. Initializing game...');
+          if(generalContainer) generalContainer.style.display = 'none';
+          if(modelContainer) modelContainer.style.display = 'block';
+
+          // Call the function to initialize and start the 3D game
+          requestAnimationFrame(() => {
+            initializeGame('model-container');
+          });
+        });
+      } else {
+        console.error('Start button still not found. Check template IDs.');
+      }
+    });
+    
+    window.changeLanguage = changeLanguage;
+
+
+
+    // Change button visibility based on language
+    const vietBtn = document.querySelector('.VietBtn');
+    const enBtn = document.querySelector('.EnBtn');
+    let currentLanguage = 'vi';
+    enBtn.addEventListener('click', () => {
+      if(currentLanguage === 'en'){
+        vietBtn.innerHTML = 'VI';
+        enBtn.innerHTML = 'EN';
+        currentLanguage = 'vi';
+        localStorage.setItem('language', 'vi');
+        changeLanguage('vi');
+      }else if (currentLanguage === 'vi'){
+        vietBtn.innerHTML = 'EN';
+        enBtn.innerHTML = 'VI';
+        currentLanguage = 'en';
+        localStorage.setItem('language', 'en');
+        changeLanguage('en');
+      }
+    });
+
+  </script>
+  </body>
+</html>
