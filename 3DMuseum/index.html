@@ -11,8 +11,8 @@
 
   </head>
   <body style="width: 100%; height:100%; overflow: hidden; margin: 0; padding: 0;">
-    <div id="landingpageContainer" class="GeneralContainer w-full min-h-full  overflow-y-auto overflow-x-hidden absolute top-0 left-0 bg-amber-100" >
-      <div class="Page_1_Container w-full h-full overflow-hidden ">
+    <div id="landingpageContainer" class="GeneralContainer w-full min-h-full  overflow-y-auto overflow-x-hidden absolute top-0 left-0" >
+      <div class="Page_1_Container w-full h-full overflow-hidden py-5">
         <div class="NavigationContainer w-full h-auto flex flex-row py-3 text-gray-300">
           <div class="MuseumNameContainer w-2/12 h-auto flex justify-center items-center">
             <h1 class="museum_name text-2xl font-semibold" data-i18n="Homepage.museum_name"></h1>
@@ -20,15 +20,15 @@
 
           <div class="NavBarContainer w-10/12 h-auto flex flex-row items-center justify-end-safe px-5">
             <nav class="NavBar w-auto h-auto flex items-center justify-around text-md ">
-              <a class="navigation about px-2" href="/about">About us</a>
-              <a class="navigation gallery px-2" href="/gallery">Gallery</a>
-              <a class="navigation contact px-2" href="/contact">Contact</a>
+              <a id="#about" class="navigation about px-2" href="/about">About us</a>
+              <a id="#gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
+              <a id="#contact" class="navigation contact px-2" href="/contact">Contact</a>
             </nav>
             <div class="LanguageSwitcherContainer w-auto h-auto flex flex-row items-center transition-all ease-in-out 10s text-xs font-semibold">
-            <div class="VietBtn flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
+            <div class="VietBtn lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
               <button href="/" onclick="changeLanguage('vi')">VI</button>
             </div>
-            <div class="EnBtn hidden mx-2 border-2 border-gray-400 hover:border-orange-400 rounded-lg text-gray-300">
+            <div class="EnBtn lang hidden mx-2 border-2 border-gray-400 hover:border-orange-400 rounded-lg text-gray-300">
               <button href="/" onclick="changeLanguage('en')">EN</button>
             </div>
           </div>
