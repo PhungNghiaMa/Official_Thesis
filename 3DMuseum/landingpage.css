@@ -115,8 +115,14 @@
     -ms-user-select: none; /* IE10+/Edge */
     user-select: none; /* Standard */
 }
+.button{
+  width: max-content;
+  height: 5.5dvh;
+}
 
-@media screen and (min-width:1500px) {
+
+
+@media screen and (min-width:1650px) {
     .SubMuseumName{
         padding-right: 6.5dvw;
         padding-left: 6.5dvw;
@@ -136,11 +142,12 @@
         justify-content: end;
     }
     .button{
-        width: 8dvw;
+        width: 10dvw;
     }
     .button .wrap{
-        font-size: 1.3rem;
+        font-size: 1.2rem;
         font-weight: 900;
     }
 
 }
+

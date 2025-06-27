@@ -16,8 +16,8 @@ body {
 
 
 .VietBtn , .EnBtn{
-    width: 30px;
-    height: 30px;
+    width: 35px;
+    height: 35px;
 }
 
 .LanguageSwitcherContainer:hover .EnBtn{
@@ -63,8 +63,23 @@ body {
    
 }
 
+.MuseumNameContainer{
+    margin-left: -20px;
+}
 
-@media screen and (min-width: 1500px) {
+.navigation{
+    font-size: large;
+}
+
+.navigation:hover{
+    color: orange;
+}
+
+.lang{
+    font-size: small;
+}
+
+@media screen and (device-width: 1700px) {
     .WrapContainer{
         height: 91dvh;
     }
