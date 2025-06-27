@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+
+
+body{
+  font-family: 'Noto Serif Display', serif;
+
+}
+
 .LandingPageContainer , .LandingPageWrapContainer{
     height: inherit;
 }
@@ -28,8 +35,8 @@
 }
 .button .wrap {
   font-size: 1rem;
-  font-weight: 800;
-  color: rgba(247, 236, 217, 0.7);
+  font-weight: 700;
+  color: rgb(219, 219, 219);
   padding: 15px 50px;
   border-radius: inherit;
   position: relative;
@@ -117,15 +124,15 @@
 }
 .button{
   width: max-content;
-  height: 5.5dvh;
+  height: 55px;
 }
 
 
 
-@media screen and (min-width:1650px) {
+@media screen and (min-width: 2500px) and (resolution: 1.5dppx) {
     .SubMuseumName{
-        padding-right: 6.5dvw;
-        padding-left: 6.5dvw;
+        padding-right: 6.5vw;
+        padding-left: 6.5vw;
     }
     .Vietnam{
         font-size: 10rem;
@@ -136,18 +143,22 @@
     .Graph_1_Container h1 , .Graph_2_Container h1{
         font-size: larger;
         padding-left: 1vw;
+        font-weight: 500;
     }
     .StartBtn{
         display: flex;
         justify-content: end;
     }
     .button{
-        width: 10dvw;
+        width: max-content;
+        height: max-content;
     }
     .button .wrap{
         font-size: 1.2rem;
-        font-weight: 900;
+        font-weight: 800;
+        color: rgb(219, 219, 219);
     }
+
 
 }
 
