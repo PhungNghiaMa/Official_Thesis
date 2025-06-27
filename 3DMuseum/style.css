@@ -48,8 +48,8 @@ body {
     background: rgba(119, 115, 115, 0.56);
     border-radius: 16px;
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(2.1px);
     -webkit-backdrop-filter: blur(2.1px);
+    backdrop-filter: blur(2.1px);
     border: 1px solid rgba(119, 115, 115, 1);
     align-items: center;
 }
@@ -60,7 +60,6 @@ body {
 
 .WrapContainer{
     scrollbar-width: none;
-   
 }
 
 .MuseumNameContainer{
