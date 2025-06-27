@@ -45,12 +45,12 @@ body {
     width: 14px;
     height: 14px;
     /* From https://css.glass */
-    background: rgba(119, 115, 115, 0.56);
+    background: rgba(36, 36, 36, 0.56);
     border-radius: 16px;
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
     -webkit-backdrop-filter: blur(2.1px);
     backdrop-filter: blur(2.1px);
-    border: 1px solid rgba(119, 115, 115, 1);
+    border: 1px solid rgb(52, 50, 50);
     align-items: center;
 }
 
@@ -63,7 +63,7 @@ body {
 }
 
 .MuseumNameContainer{
-    margin-left: -20px;
+    margin-left: -10px;
 }
 
 .navigation{
@@ -78,7 +78,7 @@ body {
     font-size: small;
 }
 
-@media screen and (device-width: 1700px) {
+@media screen and (min-width: 2500px) and (resolution: 1.5dppx) {
     .WrapContainer{
         height: 91dvh;
     }

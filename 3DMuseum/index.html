@@ -8,6 +8,9 @@
     <link rel="stylesheet" href="./landingpage.css" />
     <link rel="stylesheet" href="./game.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin = "anonymous" referrerpolicy="no-referrer">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 
   </head>
   <body style="width: 100%; height:100%; overflow: hidden; margin: 0; padding: 0;">
@@ -73,28 +76,29 @@
       </div>
     </div>
     
-    <div class="menu-container" id="menu-container">
-      <div class="flex" style="width:100%;">
-        <i class="bi bi-x" id="menu-close"></i>
-      </div>
-    
-      <h2>Menu</h2>
-    
-      <div style="font-size: 18px; font-weight: 600;">
-        Select the Gallery / Museum
-      </div>
-    
-      <div id="menu-selection-list"></div>
-    
-      <hr>
-      <div>
-        <ul>
-          <li>Use WASD to move around</li>
-          <li>Use space to Jump</li>
-          <li>Escape key to open/close menu</li>
-          <li>Hover on annotation for details</li>
-          <li>Click on annotation to upload image</li>
-        </ul>
+    <div class="MenuContainerWrapper w-full h-full flex items-center justify-center bg-amber-300">
+      <div class="menu-container" id="menu-container" style="display: none;">
+        <div class="flex items-center justify-end pr-10" style="width:100%; background-color: bisque;">
+          <i class="bi bi-x" id="menu-close"></i>
+        </div>
+      
+        <h2>Menu</h2>
+      
+        <div style="font-size: 18px; font-weight: 600;">
+          Select the Gallery / Museum
+        </div>
+      
+        <div id="menu-selection-list"></div>
+      
+        <hr>
+        <div>
+          <ul>
+            <li>Use WASD to move around</li>
+            <li>Escape key to open/close menu</li>
+            <li>Hover on annotation for details</li>
+            <li>Click on annotation to upload image</li>
+          </ul>
+        </div>
       </div>
     </div>
     
@@ -136,6 +140,7 @@
     <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
 
     <script type="module">
+    console.log(window.innerWidth, window.devicePixelRatio);
     import { initI18next, updateContent, changeLanguage } from './src/i18next.js';
     import landingPageHTML from './template/landingpage_template.js';
     import { initializeGame } from './src/game_logic/index.js';
@@ -149,12 +154,14 @@
       const startButton = document.getElementById('start_button');
       const generalContainer = document.getElementById('landingpageContainer');
       const modelContainer = document.getElementById('model-container');
+      const menuContainer = document.getElementById('menu-container');
 
       if (startButton) {
         startButton.addEventListener('click', () => {
           console.log('Start button clicked. Initializing game...');
           if(generalContainer) generalContainer.style.display = 'none';
           if(modelContainer) modelContainer.style.display = 'block';
+          if(menuContainer) menuContainer.style.display = 'flex'
 
           // Call the function to initialize and start the 3D game
           requestAnimationFrame(() => {

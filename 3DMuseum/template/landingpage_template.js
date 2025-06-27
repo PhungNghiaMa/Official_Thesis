@@ -29,13 +29,13 @@ export default
             </div>
           </div>
         </div>
-        <div class="SecondCol w-3/12 h-full ">
+        <div class="SecondCol w-3/12 h-full">
           <div class="ContentWrapperContainer w-full h-screen flex flex-col items-start justify-center">
             <div class="Graph_1_Container w-full max-h-1/2 px-6 py-5">
-              <h1 data-i18n= "Homepage.Des1" class="Description_1 text-xs font-semibold italic text-blue-100"></h1>
+              <h1 data-i18n= "Homepage.Des1" class="Description_1 text-sm font-normal italic text-blue-100"></h1>
             </div>
-            <div class="Graph_2_Container w-full max-h-1/2 px-6 mx-auto flex flex-wrap-reverse items-end justify-center">
-              <h1 data-i18n = "Homepage.Des2" class="Description_2 text-start text-xs font-semibold italic whitespace-pre-wrap text-blue-100"></h1>
+            <div class="Graph_2_Container w-full max-h-1/2 px-6 py-2 mx-auto flex flex-wrap-reverse items-end justify-center">
+              <h1 data-i18n = "Homepage.Des2" class="Description_2 text-start text-sm font-normal italic whitespace-pre-wrap text-blue-100"></h1>
             </div>
           </div>
         </div>
