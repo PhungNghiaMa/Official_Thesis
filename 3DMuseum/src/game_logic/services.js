@@ -7,7 +7,6 @@ const BACKEND_URL =
 
 export async function getMuseumList(museumId) {
     const url = `${BACKEND_URL}/list/${museumId}`
-    console.log("FETCHING DATA FROM ENDPOINT: ", url);
     const response =  await fetch(url, {
         method: 'GET'
     })
