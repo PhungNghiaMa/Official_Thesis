@@ -111,7 +111,7 @@ function setImageToMesh(mesh, imgUrl) {
 }
 
 document.body.addEventListener("uploadevent", (event) => {
-    const { img_id, title, description, img_url } = event.detail;
+    const { img_id, title, description, img_url , name } = event.detail;
 
     if (annotationMesh[img_id]) {
         annotationMesh[img_id].annotationDiv.setAnnotationDetails(title, description, name);
@@ -183,7 +183,7 @@ function loadModel() {
             animation = gltf.animations;
             mixer = new THREE.AnimationMixer(gltf.scene);
 
-            let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null;
+            let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null, count = 0;
 
             gltf.scene.traverse((child) => {
                 child.updateMatrixWorld(true);
@@ -249,7 +249,8 @@ function loadModel() {
                     const box = new THREE.Box3().setFromObject(imagePlane);
                     const center = box.getCenter(new THREE.Vector3());
 
-                    const annotationDiv = new AnnotationDiv(imagePlane.name, imagePlane);
+                    const annotationDiv = new AnnotationDiv(count, imagePlane);
+                    count++;
                     const label = new CSS2DObject(annotationDiv.getElement());
                     label.position.copy(center);
                     scene.add(label);
@@ -258,7 +259,8 @@ function loadModel() {
 
                     annotationDiv.onAnnotationClick = () => {
                         const { width, height } = getMeshSizeInPixels(imagePlane, camera, renderer);
-                        displayUploadModal(width / height, { img_id: imagePlane.name, museum: currentMuseumId });
+                        const aspectRatio = width / height
+                        displayUploadModal(aspectRatio, { img_id: imagePlane.name, museum: currentMuseumId });
                     };
                 }
             });

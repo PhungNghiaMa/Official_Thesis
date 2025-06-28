@@ -70,33 +70,31 @@
         <div id="progress"></div>
       </div>
     
-      <div class="flex flex-col gap-15 text-center">
+      <div class="flex text-center">
         <div>Loading gallery. Please wait...</div>
-        <div> Tip: use WASD keys to look around </div>
       </div>
     </div>
     
     <div class="MenuContainerWrapper w-full h-full flex items-center justify-center bg-amber-300">
       <div class="menu-container" id="menu-container" style="display: none;">
-        <div class="flex items-center justify-end pr-10" style="width:100%; background-color: bisque;">
-          <i class="bi bi-x" id="menu-close"></i>
+        <div class="MenuCloseContainer flex items-center justify-end" style="width:100%;">
+          <i class="menu_close bi bi-x bg-orange-400 rounded-2xl" id="menu-close" ></i>
         </div>
       
         <h2>Menu</h2>
       
-        <div style="font-size: 18px; font-weight: 600;">
+        <div style="font-size: 18px; font-weight: 600; color: ivory;">
           Select the Gallery / Museum
         </div>
       
         <div id="menu-selection-list"></div>
-      
         <hr>
-        <div>
+        <div class="GuidanceContainer py-5 text-gray-300 text-center">
           <ul>
-            <li>Use WASD to move around</li>
-            <li>Escape key to open/close menu</li>
-            <li>Hover on annotation for details</li>
-            <li>Click on annotation to upload image</li>
+            <li class="text-gray-300">Use WASD to move around</li>
+            <li class="text-gray-300">Escape key to open/close menu</li>
+            <li class="text-gray-300">Hover on annotation for details</li>
+            <li class="text-gray-300">Click on annotation to upload image</li>
           </ul>
         </div>
       </div>
