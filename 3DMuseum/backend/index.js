@@ -5,8 +5,6 @@ dotenv.config();
 import cors from 'cors'
 import { createClient } from '@supabase/supabase-js'
 import multer, { memoryStorage } from 'multer'
-import bodyParser from 'body-parser'
-
 import { PinataSDK } from "pinata-web3"
 
 import { isNumeric } from './utils.js'

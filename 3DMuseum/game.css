@@ -77,14 +77,26 @@ canvas{
 }
 
 #menu-close {
-    font-size: 2em;
+    font-size: 2rem;
     cursor: pointer;
-    color: #333;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    padding: .28rem;
 }
+
+#menu-close:hover {
+    background-color: rgb(182, 174, 160);
+    transform: rotateZ(180deg);
+    transition: 0.5s ease-out;
+}
+
 
 #menu-selection-list {
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
     gap: 10px;
     width: 80%;
     margin-top: 20px;
@@ -93,9 +105,11 @@ canvas{
 .menu-item {
     padding: 10px 15px;
     background-color: #f0f0f0;
+    width: 50%;
+    height: auto;
     border-radius: 5px;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 12px;
     text-align: center;
     transition: background-color 0.3s ease;
 }
@@ -294,4 +308,30 @@ canvas{
     left: 0;
     overflow: hidden;
     z-index: 1; /* Ensure it's behind modals/menus */
+}
+
+.expanded-annotation {
+    position: absolute;
+    left: 30px;
+    padding: 0px;
+    width: 0px;
+    height: 0px;
+    min-width: 0px;
+    overflow: hidden;
+    color: #fff;
+    border-radius: 5px;
+    background-color: #000000e4;
+    transition: width 0.4s, min-width 0.4s, height 0.4s;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    cursor: default;
+}
+
+.annotation:hover .expanded-annotation {
+    width: 250px;
+    height: 200px;
+    padding: 10px;
+    min-width: 100px;
+    border: 1px solid #fff;
 }
