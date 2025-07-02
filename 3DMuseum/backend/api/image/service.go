@@ -26,6 +26,11 @@ func (ImageService *ImageService) UploadAsset(context context.Context, DetailUpl
 	if err != nil {
 		return err
 	}
+	if(PinataUploadResponse.IpfsHash == ""){
+		fmt.Println("CANNOT GET THE IPFS_HASH")
+	}else{
+		fmt.Println("IPFS_HASH: ", PinataUploadResponse.IpfsHash)
+	}
 
 	ErrorAssetExist = fmt.Errorf("asset already exists at the Mesh %v in the Room %v", DetailUploadInfor.MeshName, DetailUploadInfor.RoomID)
 	exists, err := ImageService.ImageRepo.CheckSimilarAsset(context, PinataUploadResponse.IpfsHash)

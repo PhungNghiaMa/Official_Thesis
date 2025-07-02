@@ -3,14 +3,13 @@
 import "../../game.css";
 
 import * as THREE from 'three';
-
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS3DRenderer } from 'three/addons/renderers/CSS3DRenderer.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import FirstPersonPlayer from './control';
 import AnnotationDiv from "./annotationDiv";
 import { displayUploadModal, getMeshSizeInPixels, initUploadModal} from "./utils";
-import { getMuseumList } from "./services";
+import { GetRoomAsset } from "./services";
 import { Museum } from "./constants";
 import { Capsule} from "three/examples/jsm/Addons.js";
 
@@ -30,9 +29,10 @@ let animation = null;
 let mixer = null;
 let hasLoadPlayer = false;
 let physiscsReady = false;
+let currentScence = null
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "art_gallery/AnimateDoorModel.gltf",
+    [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_1.gltf",
 }
 
@@ -76,7 +76,7 @@ function showAnnotations() {
     });
 }
 
-function setImageToMesh(mesh, imgUrl) {
+function setImageToMesh(scene,meshName, imgUrl) {
     const textureLoader = new THREE.TextureLoader();
     textureLoader.load(imgUrl,
         (loadedTexture) => {
@@ -96,11 +96,15 @@ function setImageToMesh(mesh, imgUrl) {
                 side: THREE.DoubleSide,
             });
 
-            mesh.material = material;
-            mesh.material.needsUpdate = true;
-
-            if (mesh.geometry?.attributes.uv) {
-                mesh.geometry.attributes.uv.needsUpdate = true;
+            let mesh = scene.getObjectByName(meshName)
+            if (mesh && mesh.isMesh){
+                mesh.material = material;
+                mesh.material.needsUpdate = true;
+                if (mesh.geometry?.attributes.uv) {
+                    mesh.geometry.attributes.uv.needsUpdate = true;
+                }
+            }else{
+                console.warn(`Cannot find mesh for ${meshName}`)
             }
         },
         undefined,
@@ -111,11 +115,11 @@ function setImageToMesh(mesh, imgUrl) {
 }
 
 document.body.addEventListener("uploadevent", (event) => {
-    const { img_id, title, description, img_url , name } = event.detail;
+    const { asset_mesh_name, title, vietnamse_description, english_description, img_url } = event.detail;
 
-    if (annotationMesh[img_id]) {
-        annotationMesh[img_id].annotationDiv.setAnnotationDetails(title, description, name);
-        setImageToMesh(annotationMesh[img_id].mesh, img_url);
+    if (annotationMesh[asset_mesh_name]) {
+        annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamse_description,english_description);
+        setImageToMesh(currentScence,asset_mesh_name, img_url);
     }
 });
 
@@ -179,7 +183,7 @@ function loadModel() {
         (gltf) => {
             scene.add(gltf.scene);
             gltf.scene.updateMatrixWorld(true);
-
+            currentScence = gltf.scene
             animation = gltf.animations;
             mixer = new THREE.AnimationMixer(gltf.scene);
 
@@ -187,18 +191,6 @@ function loadModel() {
 
             gltf.scene.traverse((child) => {
                 child.updateMatrixWorld(true);
-
-                if (child.isMesh && (child.name.includes('LightProbe') || child.name.includes('ReflectionProbe') || child.name.includes('IrradianceProbe'))) {
-                    console.warn(`Hiding likely helper object: ${child.name}`);
-                    child.visible = false;
-                    return; // Skip further processing for this object
-                }
-                // --- END OF NEW FIX ---
-
-
-                if (child.isLight) {
-                    child.visible = false;
-                }
 
                 if (child.isMesh) {
                     const pos = new THREE.Vector3();
@@ -222,17 +214,16 @@ function loadModel() {
                         }
                     }
 
-                    if (child.parent?.name === "Door001") {
+                    if (child.parent?.name === "Door") {
                         doorBoundingBox = new THREE.Box3().setFromObject(child);
                     }
                     
-                    if (child.name === "Handle002") {
-                        child.material = new THREE.MeshPhongMaterial({ color: 0xF4EBC7, metalness: 1, roughness: 0.2 });
+                    if (child.name === "Handle") {
+                        child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1, roughness: 5 });
                     }
                 }
 
                 if (child.isMesh && /^ImageMesh\d+$/.test(child.name)) {
-                    // ... (rest of the image mesh logic is unchanged)
                     const imagePlane = child;
                     const material = new THREE.MeshBasicMaterial({
                         color: 0xffffff,
@@ -260,7 +251,7 @@ function loadModel() {
                     annotationDiv.onAnnotationClick = () => {
                         const { width, height } = getMeshSizeInPixels(imagePlane, camera, renderer);
                         const aspectRatio = width / height
-                        displayUploadModal(aspectRatio, { img_id: imagePlane.name, museum: currentMuseumId });
+                        displayUploadModal(aspectRatio, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
                     };
                 }
             });
@@ -279,7 +270,7 @@ function loadModel() {
 
             const playerCollider = new Capsule(
                 new THREE.Vector3(playerStart.x, playerStart.y, playerStart.z),
-                new THREE.Vector3(playerStart.x, playerStart.y + 1.5 - 0.35, playerStart.z),
+                new THREE.Vector3(playerStart.x, playerStart.y + 1.8 - 0.35, playerStart.z),
                 0.35
             );
 
@@ -291,12 +282,22 @@ function loadModel() {
             
             document.getElementById('loading-container').style.display = 'none';
 
-            getMuseumList(currentMuseumId).then( data => {
-                data?.data?.forEach(item => {
-                    const { img_id, title, description, img_cid, name } = item;
-                    if (annotationMesh[img_id]) {
-                        annotationMesh[img_id].annotationDiv.setAnnotationDetails(title, description, name);
-                        setImageToMesh(annotationMesh[img_id].mesh, `https://gateway.pinata.cloud/ipfs/${img_cid}`);
+            GetRoomAsset(currentMuseumId).then(items => {
+                console.log("RAW API RESPONSE:", items);
+                (Array.isArray(items) ? items : []).forEach(item => {
+                    if (!item) {
+                        console.log("Cannot get item from API");
+                        return;
+                    }
+                    console.log("Found item!", item);
+                    const { asset_mesh_name, asset_cid, title, vietnamese_description, english_description } = item;
+                    if (annotationMesh[asset_mesh_name]) {
+                        if (localStorage.getItem('language') === 'vi') {
+                            annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamese_description, english_description);
+                        } else {
+                            annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(item.title, item.vietnamese_description, item.english_description);
+                        }
+                        setImageToMesh(currentScence, asset_mesh_name, `https://gateway.pinata.cloud/ipfs/${asset_cid}`);
                     }
                 });
             }).catch(error => {
@@ -433,9 +434,10 @@ export function initializeGame(targetContainerId = 'model-container') {
 
         if (intersects.length > 0) {
             let clickedObject = intersects[0].object;
+            console.log("Click object parent: ", clickedObject.parent.name);
             if (clickedObject.parent?.name === "Door001" && mixer && animation?.length > 0) {
                 animation.forEach((clip) => {
-                    if (["DoorAction.002", "HandleAction.002", "Latch.001Action.002"].includes(clip.name)) {
+                    if (["DoorAction", "HandleAction", "Latch.001Action"].includes(clip.name)) {
                         const action = mixer.clipAction(clip);
                         action.clampWhenFinished = true;
                         action.loop = THREE.LoopOnce;
