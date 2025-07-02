@@ -90,6 +90,7 @@ func (Handler *Handler) GetAsset(context *gin.Context) {
 
 	if assetList == nil {
 		context.JSON(http.StatusOK, gin.H{"message": "No data for asset found in database !"})
+		return
 	}
 
 	context.JSON(http.StatusOK, assetList)

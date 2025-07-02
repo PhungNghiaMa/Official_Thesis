@@ -1,7 +1,3 @@
-
-
-
-
 export default class AnnotationDiv{
 
     constructor(text, id, onAnnotationClick, onAnnotationDblClick){
@@ -58,14 +54,19 @@ export default class AnnotationDiv{
         }
     }
 
-    setAnnotationDetails(title, description, artist){
-
+    // SET INFROMATION DISPLAY WHEN HOVER THE PICTURE
+    setAnnotationDetails(title, vietnamese_description, english_description){
+        const systemLanguage = localStorage.getItem("language")
+        let descriptionToShow
+        if (systemLanguage === 'vi'){
+            descriptionToShow = vietnamese_description
+        }else{
+            descriptionToShow = english_description
+        }
         this.expandedDiv.innerHTML = `
                 <p class="art-title">${title}</p>
-                <p class="art-description">${description}</p>
-                <a class="twitter-acc" href="https://x.com/${artist}" target="_blank" rel="noopener noreferrer">@${artist}</a>
-    `
-
+                <p class="art-description EnglishDescription">${descriptionToShow}</p>
+        `
     }
 
     getElement(){

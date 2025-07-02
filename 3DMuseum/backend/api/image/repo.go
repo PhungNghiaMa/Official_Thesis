@@ -2,9 +2,10 @@ package image
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"main/model"
-	"errors"
+
 	"gorm.io/gorm"
 )
 
@@ -26,12 +27,11 @@ func (Repository *ImgRepo) UploadAsset(ctx context.Context, ImageInfor model.Ima
 
 	// DATA GET FROM FRONT-END: VietnameseDescription , EnglishDescription , RoomID
 
-
 	FileSize := int64(len(DetailUploadInfor.FileBuffer)) // calculate file size
 	// CREATE Asset OBJECT TO INSERT INTO Asset TABLE
 	Asset := model.Asset{
 		AssetCID:              ImageInfor.IpfsHash,
-		AssetMeshName: 		   DetailUploadInfor.MeshName,
+		AssetMeshName:         DetailUploadInfor.MeshName,
 		AssetName:             ImageInfor.Filename,
 		Title:                 DetailUploadInfor.Title,
 		VietnameseDescription: DetailUploadInfor.VietnameseDescription,
