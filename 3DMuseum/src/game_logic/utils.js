@@ -1,5 +1,5 @@
 import Cropper from "cropperjs";
-import { uploadItem } from "./services";
+import {UploadItem } from "./services";
 
 import * as THREE from "three"
 
@@ -9,18 +9,15 @@ const uploadContainer = document.getElementById('upload-container');
 const uploadInput = document.getElementById('upload-input');
 const uploadText = document.getElementById('upload-text');
 const uploadPreview = document.getElementById('upload-preview');
-
 const uploadTitle = document.getElementById("upload-title")
-const uploadDescription = document.getElementById("upload-description")
-const uploadHandle = document.getElementById("upload-handle")
+const uploadEnDes = document.getElementById("upload-english-description")
+const uploadVietDes = document.getElementById("upload-vietnamese-description")
 
 const uploadSpinner = document.getElementById("upload-spinner")
-
 const uploadSubmit = document.getElementById("upload-btn");
 
 const cropperContainer = document.getElementById("upload-cropper-container")
 const cropPreview = document.getElementById("crop-preview")
-
 const cropBtn = document.getElementById("crop-btn")
 
 const toastAlert = document.getElementById("toast-alert");
@@ -31,8 +28,8 @@ let file = null;
 let cropAspectRatio = 1 / 1;
 
 let uploadProperties = {
-    museum: 0,
-    img_id: null
+    roomID: 0,
+    asset_mesh_name: null
 }
 
 
@@ -55,10 +52,9 @@ export function closeUploadModal() {
     uploadPreview.style.display = 'none';
     uploadText.style.display = 'block';
     uploadInput.value = null; // Clear file input
-
     uploadTitle.value = "";
-    uploadDescription.value = "";
-    uploadHandle.value = "";
+    uploadEnDes.value = "";
+    uploadVietDes.value = "";
 }
 
 
@@ -78,11 +74,8 @@ export function displayUploadModal(cropAspect, uploadProps) {
 }
 
 export function initUploadModal() {
-
     console.log("init")
-
     const closeBtn = document.getElementById("upload-close")
-
     closeBtn.addEventListener("click", closeUploadModal)
 
     const openInput = () => {
@@ -90,13 +83,12 @@ export function initUploadModal() {
     }
 
     const fileChange = (event) => {
-        console.log("upload inpit: ", file)
+        console.log("upload input: ", file)
         file = event.target.files[0];
         handleFile(file);
     }
 
     const submitCallback = () => {
-
         if (!file) {
             return toastMessage("Select an image.")
         }
@@ -105,20 +97,17 @@ export function initUploadModal() {
         uploadSpinner.style.display = 'block';
         uploadSubmit.disabled = true;
 
+        const { roomID , asset_mesh_name } = uploadProperties;
 
-        const { img_id, museum } = uploadProperties;
-
-        uploadItem(file, uploadTitle.value, uploadDescription.value, uploadHandle.value, null, img_id, museum).then((res) => {
+        UploadItem(file, asset_mesh_name , uploadTitle.value, uploadVietDes.value, uploadEnDes.value, roomID).then((res) => {
             uploadSpinner.style.display = 'none';
             uploadSubmit.disabled = false;
-
-
             const uploadEvent = new CustomEvent("uploadevent", {
                 detail: {
                     ...uploadProperties,
                     title: uploadTitle.value,
-                    description: uploadDescription.value,
-                    name: uploadHandle.value,
+                    vietnamese_description: uploadVietDes.value,
+                    english_description: uploadEnDes.value,
                     img_url: URL.createObjectURL(file)
                 }
             });
@@ -127,13 +116,12 @@ export function initUploadModal() {
 
             if (res.success) {
                 closeUploadModal()
-
             }
 
 
         }).catch((error) => {
-            console.log("error 2: ", error.message)
-            toastMessage(`${error.message}`)
+            console.log("error 2: ", error)
+            toastMessage(error.message || error.toString());
 
             uploadSpinner.style.display = 'none';
             uploadSubmit.disabled = false;
