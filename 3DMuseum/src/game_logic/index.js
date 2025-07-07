@@ -9,8 +9,6 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import FirstPersonPlayer from './control';
 import AnnotationDiv from "./annotationDiv";
 import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
-import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
-import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
 import { GetRoomAsset } from "./services";
 import { Museum } from "./constants";
 import { Capsule} from "three/examples/jsm/Addons.js";
@@ -543,7 +541,6 @@ export function initializeGame(targetContainerId = 'model-container') {
     initUploadModal();
     initMenu();
     loadModel();
-    // initPostProcessing();
 
     if (animationFrameId === null) {
         animate();
