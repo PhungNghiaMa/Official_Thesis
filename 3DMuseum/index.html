@@ -23,9 +23,9 @@
 
           <div class="NavBarContainer w-10/12 h-auto flex flex-row items-center justify-end-safe px-5">
             <nav class="NavBar w-auto h-auto flex items-center justify-around text-md ">
-              <a id="#about" class="navigation about px-2" href="/about">About us</a>
-              <a id="#gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
-              <a id="#contact" class="navigation contact px-2" href="/contact">Contact</a>
+              <a data-i18n="MenuBar.about" id="#about" class="navigation about px-2" href="/about">About</a>
+              <a data-i18n="MenuBar.gallery" id="#gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
+              <a data-i18n="MenuBar.contact" id="#contact" class="navigation contact px-2" href="/contact">Contact</a>
             </nav>
             <div class="LanguageSwitcherContainer w-auto h-auto flex flex-row items-center transition-all ease-in-out 10s text-xs font-semibold">
             <div class="VietBtn lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
@@ -112,9 +112,11 @@
       </div>
     
       <div class="upload-container" id="upload-container">
-        <div id="upload-text">Upload image here</div>
-        <img src="" class="upload-preview" id="upload-preview">
-        <input type="file" id="upload-input" accept=".png, .jpg, .jpeg">
+        <label for="upload-input" class="upload-label">
+          <div id="upload-text" class="flex items-center justify-center text-gray-300">Upload file here</div>
+          <img src="" alt="" class="upload-preview" id="upload-preview" style="display: none;">
+        </label>
+        <input type="file" id="upload-input" accept="image/png, image/jpeg, image/webP, image/jpg" style="display: none;">
       </div>
     
       <div class="upload-details">
@@ -127,48 +129,59 @@
         </button>
       </div>
     </div>
-    
-    <div class="upload-cropper-container" id="upload-cropper-container">
-      <div id="cropper-container" class="upload-cropper">
-        <img src="" class="crop-preview" id="crop-preview">
+
+    <div id="ImageShowContainer" class="ImageShowContainer" id="image-show-container" style="display: none;">
+      <div class="FirstColContainer w-1/2 h-full flex items-center justify-center">
+        <div id="FirstCol" class="FirstCol w-auto max-w-full h-full py-5 object-contain"></div>
       </div>
-      <div class="btn" id="crop-btn">Crop</div>
+      <div id="SecondCol" class="SecondCol w-1/2 h-auto overflow-hidden mx-5 my-5">
+        <div id="TopContainer" class="TopContainer w-full max-h-2/12 flex flex-row">
+          <div id="TitleContainer" class="TitleContainer w-11/12 flex items-center justify-center"></div>
+          <div id="CancelBtnContainer" class="CancelBtnContainer w-1/12 flex items-center justify-center cursor-pointer">
+            <i class="display_image_closeBtn bi bi-x"></i>
+          </div>
+        </div>
+        <hr class="Seperator">
+        <div id="BottomContainer" class="BottomContainer  w-full flex flex-wrap max-h-10/12 overflow-auto px-5 py-8"></div>
+      </div>
     </div>
+    
+
 
     <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
 
     <script type="module">
-    console.log(window.innerWidth, window.devicePixelRatio);
-    import { initI18next, updateContent, changeLanguage } from './src/i18next.js';
-    import landingPageHTML from './template/landingpage_template.js';
-    import { initializeGame } from './src/game_logic/index.js';
-    initI18next().then(() => {
-      // After i18next is ready, load landing page HTML and update translations
-      document.getElementById('landingpage').innerHTML = landingPageHTML;
-      updateContent();
+      console.log(window.innerWidth, window.devicePixelRatio);
+      import { initI18next, updateContent, changeLanguage } from './src/i18next.js';
+      import landingPageHTML from './template/landingpage_template.js';
+      import { initializeGame } from './src/game_logic/index.js';
+      localStorage.setItem('language', 'vi');
+      initI18next().then(() => {
+        // After i18next is ready, load landing page HTML and update translations
+        document.getElementById('landingpage').innerHTML = landingPageHTML;
+        updateContent();
 
-      // --- MOVED AND CORRECTED CODE ---
-      // Now that the landing page is in the DOM, we can safely find the button
-      const startButton = document.getElementById('start_button');
-      const generalContainer = document.getElementById('landingpageContainer');
-      const modelContainer = document.getElementById('model-container');
-      const menuContainer = document.getElementById('menu-container');
+        // --- MOVED AND CORRECTED CODE ---
+        // Now that the landing page is in the DOM, we can safely find the button
+        const startButton = document.getElementById('start_button');
+        const generalContainer = document.getElementById('landingpageContainer');
+        const modelContainer = document.getElementById('model-container');
+        const menuContainer = document.getElementById('menu-container');
 
-      if (startButton) {
-        startButton.addEventListener('click', () => {
-          console.log('Start button clicked. Initializing game...');
-          if(generalContainer) generalContainer.style.display = 'none';
-          if(modelContainer) modelContainer.style.display = 'block';
-          if(menuContainer) menuContainer.style.display = 'flex'
+        if (startButton) {
+          startButton.addEventListener('click', () => {
+            if(generalContainer) generalContainer.style.display = 'none';
+            if(modelContainer) modelContainer.style.display = 'block';
+            if(menuContainer) menuContainer.style.display = 'flex'
 
-          // Call the function to initialize and start the 3D game
-          requestAnimationFrame(() => {
-            initializeGame('model-container');
+            // Call the function to initialize and start the 3D game
+            requestAnimationFrame(() => {
+              initializeGame('model-container');
+            });
           });
-        });
-      } else {
-        console.error('Start button still not found. Check template IDs.');
-      }
+        } else {
+          console.error('Start button still not found. Check template IDs.');
+        }
     });
     
     window.changeLanguage = changeLanguage;

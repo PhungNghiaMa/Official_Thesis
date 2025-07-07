@@ -18,7 +18,7 @@ export default
               <div class="StartBtn w-full h-fit overflow-hidden flex items-start justify-end pt-16">
                 <button type="button" id="start_button" class="button h-auto overflow-hidden flex items-center justify-center">
                     <div class="wrap">
-                      <p>
+                      <p data-i18n="Homepage.StartBtn">
                         <span>✧</span>
                         <span>✦</span>
                         Start
