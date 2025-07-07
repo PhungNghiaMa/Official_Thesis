@@ -13,6 +13,9 @@ export default class AnnotationDiv{
 
         this.expandedDiv = document.createElement('div');
         this.expandedDiv.className = 'expanded-annotation';
+        this.vietnamese_description;
+        this.english_description;
+        this.title;
 
         const uploadBtn = document.createElement("button")
         uploadBtn.textContent = "Upload";

@@ -64,7 +64,5 @@ export const UploadItem = async (file, mesh_name , title, vietnamese_description
         console.error('Error uploading item:', error)
         throw error
     }
-
-
 }
 
