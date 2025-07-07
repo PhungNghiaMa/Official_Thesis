@@ -18,16 +18,6 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
-import RaycasterManager from "./raycaster.js"
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-import RaycasterManager from "./raycaster.js"
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
 // --- Global variables for the game, now scoped within this module ---
 const clock = new THREE.Clock();
@@ -55,11 +45,24 @@ const doorState = {
 }
 let interactedDoor;
 const FrameToImageMeshMap = {};
+let currentScene = null
+
+let composer , outlinePass , renderPass;
+let currentlyHoveredObject = null;
+const doorState = {
+    Door001: false,
+    Door002: false
+}
+let interactedDoor;
+const FrameToImageMeshMap = {};
 
 const ModelPaths = {
     [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_1.gltf",
 }
+let raycasterManager = null
+let pictureFramesArray = []
+let imageMeshesArray = []
 let raycasterManager = null
 let pictureFramesArray = []
 let imageMeshesArray = []
@@ -180,7 +183,6 @@ function clearSceneObjects(obj) {
     physiscsReady = false;
     imageMeshesArray = [];
     pictureFramesArray = [];
-    FrameToImageMeshMap = {};
 }
 
 function checkPlayerPosition() {
@@ -541,6 +543,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     initUploadModal();
     initMenu();
     loadModel();
+    // initPostProcessing();
 
     if (animationFrameId === null) {
         animate();
