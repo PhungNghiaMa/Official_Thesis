@@ -16,8 +16,6 @@ import RaycasterManager from "./raycaster.js"
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
 // --- Global variables for the game, now scoped within this module ---
 const clock = new THREE.Clock();
