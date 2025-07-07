@@ -91,18 +91,6 @@ function createImageMaterial(textureUrl, meshAspect = 1 / 1, geometry) {
 
 	const textureLoader = new THREE.TextureLoader();
 	textureLoader.load(textureUrl, function (texture) {
-		// const imageBounds = new THREE.Vector2(texture.image.width, texture.image.height);
-		// ImageMaterial.uniforms.imageBounds.value.copy(imageBounds);
-		// ImageMaterial.uniforms.map.value = texture;
-		// cover(texture, meshAspect);
-
-		// ImageMaterial.uniforms.map.value = THREE.TextureUtils.cover(texture, meshAspect);
-
-		// texture.wrapS = THREE.RepeatWrapping;
-		// texture.wrapT = THREE.RepeatWrapping;
-
-		// adjustUVsToImage(geometry, texture)
-
 		texture.minFilter = THREE.LinearMipMapLinearFilter
 		texture.magFilter = THREE.LinearFilter
 

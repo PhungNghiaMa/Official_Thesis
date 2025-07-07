@@ -1,12 +1,15 @@
 export default class AnnotationDiv{
 
-    constructor(text, id, onAnnotationClick, onAnnotationDblClick){
+    constructor(text, id, onAnnotationClick){
 
         this.__id = id
 
         this.annotationDiv = document.createElement('div');
         this.annotationDiv.className = 'annotation';
         this.annotationDiv.textContent = `${text}`;
+        this.title;
+        this.vietnamese_description;
+        this.english_description;
 
         this.expandedDiv = document.createElement('div');
         this.expandedDiv.className = 'expanded-annotation';
@@ -32,12 +35,9 @@ export default class AnnotationDiv{
         this.annotationDiv.appendChild(this.expandedDiv);
 
         this.onAnnotationClick = onAnnotationClick;
-        this.onAnnotationDblClick = onAnnotationDblClick;
 
         this.annotationDiv.addEventListener("click", this.clickEvent.bind(this))
 
-        this.annotationDiv.addEventListener("dblclick", this.dblClickEvent.bind(this))
-    
         this.setAnnotationDetails = this.setAnnotationDetails.bind(this)
     
     }
@@ -48,14 +48,11 @@ export default class AnnotationDiv{
         }
     }
 
-    dblClickEvent(event){
-        if (!this.expandedDiv.contains(event.target)){
-            this.onAnnotationDblClick({event: event, id: this.__id})
-        }
-    }
-
     // SET INFROMATION DISPLAY WHEN HOVER THE PICTURE
     setAnnotationDetails(title, vietnamese_description, english_description){
+        this.title = title;
+        this.vietnamese_description = vietnamese_description;
+        this.english_description = english_description;
         const systemLanguage = localStorage.getItem("language")
         let descriptionToShow
         if (systemLanguage === 'vi'){
@@ -70,11 +67,23 @@ export default class AnnotationDiv{
     }
 
     getElement(){
-        return this.annotationDiv
+        return this.annotationDiv;
     }
 
     getId(){
-        return this.__id
+        return this.__id;
+    }
+
+    getTitle(){
+        return this.title;
+    }
+
+    getVietDes(){
+        return this.vietnamese_description;
+    }
+
+    getEngDes(){
+        return this.english_description;
     }
 
 }   

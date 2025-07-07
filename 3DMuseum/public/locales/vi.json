@@ -4,6 +4,14 @@
         "Vietnam": "Việt Nam /",
         "Traditional_art": "NGHỆ THUẬT TRUYỀN THỐNG",
         "Des1": "Hãy cùng bước vào một thế giới vượt thời gian nơi truyền thống được thể hiện sống động thông qua hình ảnh và âm thanh. Bảo tàng Hát Bội ảo, opera cổ điển danh giá của Việt Nam, mời bạn tham gia vào một hành trình vào trái tim của hình thức nghệ thuật hàng thế kỷ này. Dạo bước qua những hành lang được sắp đặt đẹp mắt, tràn ngập những hình ảnh hiếm hoi thể hiện sự thanh lịch, trang phục và những khoảnh khắc biểu tượng của các nghệ sĩ Hát Bội. Trải nghiệm những giai điệu xúc động và nhịp điệu kịch tính của các bài hát và video mang đến một kho báu văn hóa đã hình thành di sản nghệ thuật của Việt Nam.",
-        "Des2": "Bảo tàng được thiết kế không chỉ là một nơi tham quan đơn thuần mà còn là không gian đặc biệt dành cho những ai yêu lịch sử và nghệ thuật biểu diễn, mang đến một trải nghiệm thật sự độc đáo. Ở đây, mỗi ngóc ngách đều là sự tôn vinh tinh thần Hát Bội, mời gọi bạn khám phá, lắng nghe và đắm mình vào thế giới nơi truyền thống giao hòa cùng trí tưởng tượng. Dù bạn là một người hâm mộ lâu năm hay chỉ là du khách tò mò muốn tìm hiểu văn hóa, Bảo tàng Hát Bội ảo luôn sẵn lòng chào đón để bạn cảm nhận trọn vẹn dòng chảy văn hóa của Việt Nam từ quá khứ, một di sản được gìn giữ tuyệt đẹp cho hôm nay và mai sau."
+        "Des2": "Bảo tàng được thiết kế không chỉ là một nơi tham quan đơn thuần mà còn là không gian đặc biệt dành cho những ai yêu lịch sử và nghệ thuật biểu diễn, mang đến một trải nghiệm thật sự độc đáo. Ở đây, mỗi ngóc ngách đều là sự tôn vinh tinh thần Hát Bội, mời gọi bạn khám phá, lắng nghe và đắm mình vào thế giới nơi truyền thống giao hòa cùng trí tưởng tượng. Dù bạn là một người hâm mộ lâu năm hay chỉ là du khách tò mò muốn tìm hiểu văn hóa, Bảo tàng Hát Bội ảo luôn sẵn lòng chào đón để bạn cảm nhận trọn vẹn dòng chảy văn hóa của Việt Nam từ quá khứ, một di sản được gìn giữ tuyệt đẹp cho hôm nay và mai sau.",
+        "StartBtn": "Bắt đầu"
+    },
+
+    "MenuBar": {
+        "about": "Giới thiệu",
+        "gallery": "Thư viện",
+        "contact": "Liên hệ"
     }
+
 }
