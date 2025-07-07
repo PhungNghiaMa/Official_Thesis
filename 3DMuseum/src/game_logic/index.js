@@ -10,9 +10,16 @@ import FirstPersonPlayer from './control';
 import AnnotationDiv from "./annotationDiv";
 import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
 import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
+import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
 import { GetRoomAsset } from "./services";
 import { Museum } from "./constants";
 import { Capsule} from "three/examples/jsm/Addons.js";
+import RaycasterManager from "./raycaster.js"
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import RaycasterManager from "./raycaster.js"
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -50,24 +57,11 @@ const doorState = {
 }
 let interactedDoor;
 const FrameToImageMeshMap = {};
-let currentScene = null
-
-let composer , outlinePass , renderPass;
-let currentlyHoveredObject = null;
-const doorState = {
-    Door001: false,
-    Door002: false
-}
-let interactedDoor;
-const FrameToImageMeshMap = {};
 
 const ModelPaths = {
     [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_1.gltf",
 }
-let raycasterManager = null
-let pictureFramesArray = []
-let imageMeshesArray = []
 let raycasterManager = null
 let pictureFramesArray = []
 let imageMeshesArray = []
@@ -107,7 +101,6 @@ function showAnnotations() {
         if (label && label.element) label.element.style.opacity = "100";
     });
 }
-
 
 
 function setImageToMesh(scene,meshName, imgUrl) {
@@ -150,14 +143,8 @@ function setImageToMesh(scene,meshName, imgUrl) {
 
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
-    const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
 
     if (annotationMesh[asset_mesh_name]) {
-        annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamese_description,english_description);
-        annotationMesh[asset_mesh_name].title = title;
-        annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
-        annotationMesh[asset_mesh_name].eng_des = english_description;
-        setImageToMesh(currentScene,asset_mesh_name, img_url);
         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamese_description,english_description);
         annotationMesh[asset_mesh_name].title = title;
         annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
@@ -192,9 +179,6 @@ function clearSceneObjects(obj) {
     for (const key in doorState){
         doorState[key] = false;
     }
-    for (const key in doorState){
-        doorState[key] = false;
-    }
     physiscsReady = false;
     imageMeshesArray = [];
     pictureFramesArray = [];
@@ -204,7 +188,6 @@ function clearSceneObjects(obj) {
 function checkPlayerPosition() {
     if (doorBoundingBox && !hasEnteredNewScene && hasLoadPlayer) {
         const playerPosition = fpView.getPlayerPosition();
-        if (doorBoundingBox.distanceToPoint(playerPosition) < 4 && doorState[interactedDoor]) {
         if (doorBoundingBox.distanceToPoint(playerPosition) < 4 && doorState[interactedDoor]) {
             hasEnteredNewScene = true;
             const nextMuseum = currentMuseumId === Museum.ART_GALLERY ? Museum.LOUVRE : Museum.ART_GALLERY;
@@ -228,7 +211,6 @@ function loadModel() {
     const ambientLight = new THREE.AmbientLight("#FFFFFF", 4);
     scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight("#FFFFFF", 2);
-    const directionalLight = new THREE.DirectionalLight("#FFFFFF", 2);
     scene.add(directionalLight);
     
     loader.load(
@@ -236,7 +218,6 @@ function loadModel() {
         (gltf) => {
             scene.add(gltf.scene);
             gltf.scene.updateMatrixWorld(true);
-            currentScene = gltf.scene
             currentScene = gltf.scene
             animation = gltf.animations;
             mixer = new THREE.AnimationMixer(gltf.scene);
@@ -248,7 +229,6 @@ function loadModel() {
 
                 if (child.isMesh) {
                     console.log(child.name)
-                    console.log(child.name)
                     const pos = new THREE.Vector3();
                     child.getWorldPosition(pos);
                     const size = new THREE.Box3().setFromObject(child).getSize(new THREE.Vector3());
@@ -257,10 +237,6 @@ function loadModel() {
                         fallbackY = pos.y;
                         fallbackX = pos.x;
                         fallbackZ = pos.z;
-                    }
-
-                    if (/^Picture_Frame\d+$/.test(child.name)){
-                        pictureFramesArray.push(child)
                     }
 
                     if (/^Picture_Frame\d+$/.test(child.name)){
@@ -289,7 +265,6 @@ function loadModel() {
 
                 if (child.isMesh && /^ImageMesh\d+$/.test(child.name)) {
                     imageMeshesArray.push(child)
-                    imageMeshesArray.push(child)
                     const imagePlane = child;
                     const material = new THREE.MeshBasicMaterial({
                         color: 0xffffff,
@@ -316,15 +291,10 @@ function loadModel() {
 
                     annotationDiv.onAnnotationClick = () => {
                         const aspectRatio = 1/1
-                        const aspectRatio = 1/1
                         displayUploadModal(aspectRatio, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
                     };
                 }
             });
-
-            raycasterManager.setPictureFrames(pictureFramesArray)
-
-            Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap , pictureFramesArray , imageMeshesArray)
 
             raycasterManager.setPictureFrames(pictureFramesArray)
 
@@ -363,10 +333,7 @@ function loadModel() {
                         return;
                     }
                     const { asset_mesh_name, asset_cid, title, viet_des, en_des } = item;
-                    const { asset_mesh_name, asset_cid, title, viet_des, en_des } = item;
                     if (annotationMesh[asset_mesh_name]) {
-                        annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des);
-                        setImageToMesh(currentScene, asset_mesh_name, `https://gateway.pinata.cloud/ipfs/${asset_cid}`);
                         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des);
                         setImageToMesh(currentScene, asset_mesh_name, `https://gateway.pinata.cloud/ipfs/${asset_cid}`);
                     }
@@ -457,11 +424,7 @@ function animate() {
     // RENDER THE SCENCE USING THE COMPOSER
     // composer.render();
 
-    // // RENDER THE SCENCE USING THE COMPOSER
-    // composer.render();
-
     // if (renderer) renderer.render(scene, camera);
-    if (composer) composer.render();
     if (composer) composer.render();
     if (cssRenderer) cssRenderer.render(scene, camera);
     if (css3dRenderer) css3dRenderer.render(scene, camera);
@@ -502,25 +465,6 @@ export function initializeGame(targetContainerId = 'model-container') {
     container.tabIndex = 0;
     setTimeout(() => container.focus(), 50);
 
-    composer = new EffectComposer(renderer);
-    const renderPass = new RenderPass(scene , camera);
-    composer.addPass(renderPass);
-
-    outlinePass = new OutlinePass(new THREE.Vector2(container.clientWidth, container.clientHeight), scene , camera);
-    outlinePass.edgeStrength = 8;
-    outlinePass.edgeGlow = 1;
-    outlinePass.edgeThickness = 3.5;
-    outlinePass.pulsePeriod = 2;
-    outlinePass.visibleEdgeColor.set("#ffffff");
-    outlinePass.hiddenEdgeColor.set("#ffffff");
-    composer.addPass(outlinePass);
-
-    // // Optional: FXAA
-    // const fxaaPass = new ShaderPass(FXAAShader);
-    // fxaaPass.material.uniforms['resolution'].value.set(1 / container.clientWidth*1.5, 1 / container.clientHeight*1.5);
-    // composer.addPass(fxaaPass);
-
-  
     composer = new EffectComposer(renderer);
     const renderPass = new RenderPass(scene , camera);
     composer.addPass(renderPass);
@@ -587,67 +531,18 @@ export function initializeGame(targetContainerId = 'model-container') {
                 if (isDoorOpen) action.time = action.getClip().duration;
                 action.reset().play();
                 doorState[parentName] = !isDoorOpen
-
-    raycasterManager = new RaycasterManager(camera, scene, container, {
-         doorNames: Object.keys(doorState),
-         onHoverPictureFrame: () => {},
-         onClickPictureFrame: (frameName) =>{
-            const imageMeshName = FrameToImageMeshMap[frameName];
-            const imageData = annotationMesh[imageMeshName]
-
-            if(!imageMeshName || !imageData){
-                console.warn("No image mapped for: ", frameName)
-                return;
-            }
-
-            const imageURL = imageData.mesh.material.map?.image?.src || '';
-            const {annotationDiv} = imageData
-            // const {annotationDiv} = imageData;
-            console.log(`User clicked frame: ${frameName} → mapped to: ${imageMeshName}`);
-            console.log("Viet description: ", annotationMesh[imageMeshName].annotationDiv.getVietDes())
-            console.log("Eng description: ", annotationMesh[imageMeshName].annotationDiv.getEngDes())
-            DisplayImageOnDiv(imageURL , annotationDiv.title , annotationDiv.vietnamese_description , annotationDiv.english_description)
-         },
-        onDoorClick: (clickedObject) => {
-            const parentName = clickedObject.parent?.name;
-            if (!parentName || !mixer || !animation?.length) return;
-
-            // Check if this is a configured door
-            if (!raycasterManager.doorNames.includes(parentName)) return;
-
-            interactedDoor = parentName
-
-            isDoorOpen = doorState[parentName]
-
-            // Play door-related animations
-            animation.forEach((clip) => {
-            const validClips = ["DoorAction", "HandleAction", "Latch.001Action"];
-            if (validClips.includes(clip.name)) {
-                const action = mixer.clipAction(clip);
-                action.clampWhenFinished = true;
-                action.loop = THREE.LoopOnce;
-                action.timeScale = isDoorOpen ? -1 : 1;
-                if (isDoorOpen) action.time = action.getClip().duration;
-                action.reset().play();
-                doorState[parentName] = !isDoorOpen
             }
             });
-        },
-
-        onHoverPictureFrame: (object, isHovering) => {    });
         },
 
         onHoverPictureFrame: (object, isHovering) => {}
     });
     raycasterManager.setOutlinePass(outlinePass);
 
-    raycasterManager.setOutlinePass(outlinePass);
-
 
     initUploadModal();
     initMenu();
     loadModel();
-    // initPostProcessing();
     // initPostProcessing();
 
     if (animationFrameId === null) {
