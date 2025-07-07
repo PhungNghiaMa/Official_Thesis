@@ -16,8 +16,6 @@ import RaycasterManager from "./raycaster.js"
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
 // --- Global variables for the game, now scoped within this module ---
 const clock = new THREE.Clock();
@@ -50,6 +48,9 @@ const ModelPaths = {
     [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_1.gltf",
 }
+let raycasterManager = null
+let pictureFramesArray = []
+let imageMeshesArray = []
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let doorBoundingBox = null;
@@ -462,13 +463,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     outlinePass.hiddenEdgeColor.set("#ffffff");
     composer.addPass(outlinePass);
 
-    // // Optional: FXAA
-    // const fxaaPass = new ShaderPass(FXAAShader);
-    // fxaaPass.material.uniforms['resolution'].value.set(1 / container.clientWidth*1.5, 1 / container.clientHeight*1.5);
-    // composer.addPass(fxaaPass);
-
   
-
     window.addEventListener('resize', onWindowResize);
     container.addEventListener("keydown", (e) => e.key === "Shift" && hideAnnotations());
     container.addEventListener("keyup", (e) => e.key === "Shift" && showAnnotations());

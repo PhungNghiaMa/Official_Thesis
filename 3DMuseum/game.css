@@ -229,7 +229,7 @@ canvas{
     max-height: 100%;
     object-fit: contain;
     display: none; /* Hidden by default, shown when image is selected */
-    background:#007bff
+    background:#007bff;
     background:#007bff
 }
 
@@ -293,48 +293,7 @@ canvas{
     100% { transform: rotate(360deg); }
 }
 
-/* Upload Cropper Container */
-.upload-cropper-container {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: rgba(0,0,0,0.6);
-    display: none;
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: rgba(0,0,0,0.6);
-    display: none;
-    justify-content: center;
-    align-items: center;
-    z-index: 10;
-    z-index: 10;
-}
 
-.upload-cropper {
-    width: 100%;
-    height: 100%;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-.crop-preview {
-    max-width: 100%;
-    max-height: 100%;
-    max-height: 100%;
-    display: block;
-}
-
-#crop-btn {
-    background-color: #28a745;
-}
-
-#crop-btn:hover {
-    background-color: #218838;
-}
 
 /* Model Container (where the Three.js scene will render) */
 #model-container {
@@ -412,13 +371,13 @@ canvas{
     background-color: black;
 }
 
- .SecondCol{
+ .SecondIMGCol{
     border: 1.4px solid black;
     border-radius: 5%;
 }
 
 
-.FirstCol img{
+.FirstIMGCol img{
     border: 8px solid rgb(6, 5, 5);
     border-radius: 2%;
 }

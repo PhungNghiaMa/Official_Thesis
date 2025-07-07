@@ -1,4 +1,3 @@
-// Removed: import Cropper from "cropperjs";
 import { UploadItem } from "./services";
 import * as THREE from "three";
 
@@ -13,7 +12,7 @@ const uploadVietDes = document.getElementById("upload-vietnamese-description");
 const uploadSpinner = document.getElementById("upload-spinner");
 const uploadSubmit = document.getElementById("upload-btn");
 const toastAlert = document.getElementById("toast-alert");
-const FirstCol = document.getElementById('FirstCol');
+const FirstIMGCol = document.getElementById('FirstIMGCol');
 const TitleContainer = document.getElementById('TitleContainer');
 const BottomContainer = document.getElementById('BottomContainer');
 const CancelBtnContainer = document.getElementById('CancelBtnContainer');
@@ -118,6 +117,7 @@ export function initUploadModal() {
     });
 
     uploadModal.style.display = "none";
+
 }
 
 
@@ -164,7 +164,7 @@ export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap , pictureFram
 }
 
 export function DisplayImageOnDiv(imageURL, title, vietnamese_description, english_description) {
-    if (!FirstCol || !TitleContainer || !BottomContainer || !ImageShowContainer) {
+    if (!FirstIMGCol || !TitleContainer || !BottomContainer || !ImageShowContainer) {
         console.error("Missing target DOM elements. Check your HTML structure.");
         return;
     }
@@ -173,7 +173,7 @@ export function DisplayImageOnDiv(imageURL, title, vietnamese_description, engli
     const description = language === 'vi' ? vietnamese_description : english_description;
 
     // Clear previous content
-    FirstCol.innerHTML = '';
+    FirstIMGCol.innerHTML = '';
     TitleContainer.innerHTML = '';
     BottomContainer.innerHTML = '';
 
@@ -184,7 +184,7 @@ export function DisplayImageOnDiv(imageURL, title, vietnamese_description, engli
     imgElement.style.width = '100%';
     imgElement.style.height = '100%';
     imgElement.style.objectFit = 'contain';
-    FirstCol.appendChild(imgElement);
+    FirstIMGCol.appendChild(imgElement);
 
     // Insert title
     TitleContainer.innerHTML = `
