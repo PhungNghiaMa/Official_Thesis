@@ -156,7 +156,9 @@ canvas{
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
     padding: 20px;
     width: 100%;
+    width: 100%;
     max-width: 500px;
+    z-index: 999;
     z-index: 999;
     display: none; /* Hidden by default, shown by JS */
     box-sizing: border-box;
@@ -174,11 +176,14 @@ canvas{
 .upload-header h2 {
     margin-top: 0;
     margin-bottom: 20px;
+    margin-bottom: 20px;
     text-align: center;
     color: #333;
 }
 
 .upload-container {
+    position: relative;
+    border: 2px dashed #656565;
     position: relative;
     border: 2px dashed #656565;
     border-radius: 8px;
@@ -189,17 +194,28 @@ canvas{
     cursor: pointer;
     min-height: 200px;
     max-height: max-content; /* Fixed height for consistency */
+    min-height: 200px;
+    max-height: max-content; /* Fixed height for consistency */
     position: relative;
     overflow: hidden;
     object-fit: contain;
+    object-fit: contain;
 }
+
+
 
 
 
 #upload-text {
     display: flex;
     width: 100%;
+    display: flex;
+    width: 100%;
     color: #777;
+    font-size: 1em;
+    font-weight: 500;
+    position: relative;
+    cursor: pointer;
     font-size: 1em;
     font-weight: 500;
     position: relative;
@@ -208,16 +224,19 @@ canvas{
 
 .upload-preview {
     position: relative;
+    position: relative;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     display: none; /* Hidden by default, shown when image is selected */
+    background:#007bff
     background:#007bff
 }
 
 .upload-details {
     display: flex;
     flex-direction: column;
+    margin-top: 8px;
     margin-top: 8px;
     gap: 10px;
 }
@@ -230,12 +249,16 @@ canvas{
     border-radius: 4px;
     box-sizing: border-box;
     font-size: .9em;
+    font-size: .9em;
 }
 
 .upload-details textarea {
     min-height: fit-content;
     max-height: 100px;
+    min-height: fit-content;
+    max-height: 100px;
     resize: vertical;
+    overflow: auto;
     overflow: auto;
 }
 
@@ -277,12 +300,20 @@ canvas{
     width: 100%; height: 100%;
     background: rgba(0,0,0,0.6);
     display: none;
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.6);
+    display: none;
     justify-content: center;
     align-items: center;
+    z-index: 10;
     z-index: 10;
 }
 
 .upload-cropper {
+    width: 100%;
+    height: 100%;
     width: 100%;
     height: 100%;
     display: flex;
@@ -292,6 +323,7 @@ canvas{
 
 .crop-preview {
     max-width: 100%;
+    max-height: 100%;
     max-height: 100%;
     display: block;
 }
