@@ -74,4 +74,16 @@ export default class AnnotationDiv{
         return this.__id;
     }
 
+    getTitle(){
+        return this.title;
+    }
+
+    getVietDes(){
+        return this.vietnamese_description;
+    }
+
+    getEngDes(){
+        return this.english_description;
+    }
+
 }   
