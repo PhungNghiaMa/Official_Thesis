@@ -168,6 +168,7 @@ function clearSceneObjects(obj) {
     physiscsReady = false;
     imageMeshesArray = [];
     pictureFramesArray = [];
+    FrameToImageMeshMap = {};
 }
 
 function checkPlayerPosition() {
