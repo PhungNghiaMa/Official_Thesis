@@ -45,27 +45,11 @@ const doorState = {
 }
 let interactedDoor;
 const FrameToImageMeshMap = {};
-let currentScene = null
-
-let composer , outlinePass , renderPass;
-let currentlyHoveredObject = null;
-const doorState = {
-    Door001: false,
-    Door002: false
-}
-let interactedDoor;
-const FrameToImageMeshMap = {};
 
 const ModelPaths = {
     [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_1.gltf",
 }
-let raycasterManager = null
-let pictureFramesArray = []
-let imageMeshesArray = []
-let raycasterManager = null
-let pictureFramesArray = []
-let imageMeshesArray = []
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let doorBoundingBox = null;
