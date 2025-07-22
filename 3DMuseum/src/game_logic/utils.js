@@ -11,7 +11,7 @@ const uploadEnDes = document.getElementById("upload-english-description");
 const uploadVietDes = document.getElementById("upload-vietnamese-description");
 const uploadSpinner = document.getElementById("upload-spinner");
 const uploadSubmit = document.getElementById("upload-btn");
-const toastAlert = document.getElementById("toast-alert");
+// const toastAlert = document.getElementById("toast-alert");
 const FirstIMGCol = document.getElementById('FirstIMGCol');
 const TitleContainer = document.getElementById('TitleContainer');
 const BottomContainer = document.getElementById('BottomContainer');
@@ -20,7 +20,7 @@ const ImageShowContainer = document.getElementById('ImageShowContainer'); // Get
 
 
 
-toastAlert.style.display = "none";
+// toastAlert.style.display = "none";
 let file = null;
 let uploadProperties = {
     roomID: 0,
