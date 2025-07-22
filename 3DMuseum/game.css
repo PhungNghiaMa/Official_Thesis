@@ -304,6 +304,7 @@ canvas{
     left: 0;
     overflow: hidden;
     z-index: 1; /* Ensure it's behind modals/menus */
+    font-family: Arial, Helvetica, sans-serif;
 }
 
 .expanded-annotation {
