@@ -46,7 +46,7 @@ const FrameToImageMeshMap = {};
 
 const ModelPaths = {
     [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
-    [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_1.gltf",
+    [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
 let pictureFramesArray = []
@@ -168,6 +168,7 @@ function clearSceneObjects(obj) {
     physiscsReady = false;
     imageMeshesArray = [];
     pictureFramesArray = [];
+    currentScene = null;
 }
 
 function checkPlayerPosition() {
@@ -356,7 +357,7 @@ function initMenu() {
     if (menuList) {
         menuList.innerHTML = '';
         const listItem1 = document.createElement("div");
-        listItem1.textContent = "Art Gallery";
+        listItem1.textContent = "Room1";
         listItem1.className = "menu-item";
         listItem1.addEventListener("click", () => {
             setMuseumModel(Museum.ART_GALLERY);
@@ -364,7 +365,7 @@ function initMenu() {
         });
 
         const listItem2 = document.createElement("div");
-        listItem2.textContent = "Louvre Art Museum";
+        listItem2.textContent = "Room2";
         listItem2.className = "menu-item";
         listItem2.addEventListener("click", () => {
             setMuseumModel(Museum.LOUVRE);

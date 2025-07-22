@@ -6,6 +6,7 @@
     <title>Vite App</title>
     <link rel="stylesheet" href="./style.css" />
     <link rel="stylesheet" href="./landingpage.css" />
+    <link rel="stylesheet" href="./gallery.css" />
     <link rel="stylesheet" href="./game.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,21 +24,21 @@
 
           <div class="NavBarContainer w-10/12 h-auto flex flex-row items-center justify-end-safe px-5">
             <nav class="NavBar w-auto h-auto flex items-center justify-around text-md ">
-              <a data-i18n="MenuBar.about" id="#about" class="navigation about px-2" href="/about">About</a>
-              <a data-i18n="MenuBar.gallery" id="#gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
-              <a data-i18n="MenuBar.contact" id="#contact" class="navigation contact px-2" href="/contact">Contact</a>
+              <a data-i18n="MenuBar.about" id="about" class="navigation about px-2" href="/about">About</a>
+              <a data-i18n="MenuBar.gallery" id="gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
+              <a data-i18n="MenuBar.contact" id="contact" class="navigation contact px-2" href="/contact">Contact</a>
             </nav>
             <div class="LanguageSwitcherContainer w-auto h-auto flex flex-row items-center transition-all ease-in-out 10s text-xs font-semibold">
-            <div class="VietBtn lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
-              <button href="/" onclick="changeLanguage('vi')">VI</button>
+              <div class="VietBtn lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
+                <button href="/" onclick="changeLanguage('vi')">VI</button>
+              </div>
+              <div class="EnBtn lang hidden mx-2 border-2 border-gray-400 hover:border-orange-400 rounded-lg text-gray-300">
+                <button href="/" onclick="changeLanguage('en')">EN</button>
+              </div>
             </div>
-            <div class="EnBtn lang hidden mx-2 border-2 border-gray-400 hover:border-orange-400 rounded-lg text-gray-300">
-              <button href="/" onclick="changeLanguage('en')">EN</button>
-            </div>
-          </div>
           </div>
 
-        </div>
+      </div>
 
         <div class="ContentContainer w-full h-auto overflow-hidden my-3 bg-transparent">
           <div class="WrapContainer w-auto overflow-hidden" style="max-height: fit-content;">
@@ -119,7 +120,7 @@
         <input type="file" id="upload-input" accept="image/png, image/jpeg, image/webP, image/jpg" style="display: none;">
       </div>
     
-      <div class="upload-details">
+      <div class="upload-details overflow-auto">
         <input type="text" name="" id="upload-title" placeholder="title" maxlength="30">
         <textarea name="" id="upload-vietnamese-description" placeholder="Vietnamese Description"></textarea>
         <textarea name="" id="upload-english-description" placeholder="English-description"></textarea>
@@ -155,7 +156,9 @@
       import { initI18next, updateContent, changeLanguage } from './src/i18next.js';
       import landingPageHTML from './template/landingpage_template.js';
       import { initializeGame } from './src/game_logic/index.js';
+      import { initGalleryPage } from './src/gallery_logic.js';
       localStorage.setItem('language', 'vi');
+      let galleryContainer = null;
       initI18next().then(() => {
         // After i18next is ready, load landing page HTML and update translations
         document.getElementById('landingpage').innerHTML = landingPageHTML;
@@ -168,13 +171,12 @@
         const modelContainer = document.getElementById('model-container');
         const menuContainer = document.getElementById('menu-container');
 
+        // Handle 3D game start
         if (startButton) {
           startButton.addEventListener('click', () => {
             if(generalContainer) generalContainer.style.display = 'none';
             if(modelContainer) modelContainer.style.display = 'block';
-            if(menuContainer) menuContainer.style.display = 'flex'
-
-            // Call the function to initialize and start the 3D game
+            if(menuContainer) menuContainer.style.display = 'flex';
             requestAnimationFrame(() => {
               initializeGame('model-container');
             });
@@ -182,31 +184,55 @@
         } else {
           console.error('Start button still not found. Check template IDs.');
         }
-    });
-    
-    window.changeLanguage = changeLanguage;
 
+        // Handle Gallery navigation
+        const galleryLink = document.getElementById('gallery');
+        if (galleryLink) {
+          galleryLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            // Hide landing page, show gallery
+            if (!galleryContainer) {
+              galleryContainer = document.createElement('div');
+              galleryContainer.id = 'gallery-main-container';
+              galleryContainer.style.width = '100vw';
+              galleryContainer.style.height = '100vh';
+              galleryContainer.style.background = '#fff';
+              galleryContainer.style.position = 'absolute';
+              galleryContainer.style.top = '0';
+              galleryContainer.style.left = '0';
+              galleryContainer.style.zIndex = '1000';
+              document.body.appendChild(galleryContainer);
+            }
+            if(generalContainer) generalContainer.style.display = 'none';
+            if(modelContainer) modelContainer.style.display = 'none';
+            if(menuContainer) menuContainer.style.display = 'none';
+            galleryContainer.style.display = 'block';
+            initGalleryPage(galleryContainer);
+          });
+        }
+      });
 
+      window.changeLanguage = changeLanguage;
 
-    // Change button visibility based on language
-    const vietBtn = document.querySelector('.VietBtn');
-    const enBtn = document.querySelector('.EnBtn');
-    let currentLanguage = 'vi';
-    enBtn.addEventListener('click', () => {
-      if(currentLanguage === 'en'){
-        vietBtn.innerHTML = 'VI';
-        enBtn.innerHTML = 'EN';
-        currentLanguage = 'vi';
-        localStorage.setItem('language', 'vi');
-        changeLanguage('vi');
-      }else if (currentLanguage === 'vi'){
-        vietBtn.innerHTML = 'EN';
-        enBtn.innerHTML = 'VI';
-        currentLanguage = 'en';
-        localStorage.setItem('language', 'en');
-        changeLanguage('en');
-      }
-    });
+      // Change button visibility based on language
+      const vietBtn = document.querySelector('.VietBtn');
+      const enBtn = document.querySelector('.EnBtn');
+      let currentLanguage = 'vi';
+      enBtn.addEventListener('click', () => {
+        if(currentLanguage === 'en'){
+          vietBtn.innerHTML = 'VI';
+          enBtn.innerHTML = 'EN';
+          currentLanguage = 'vi';
+          localStorage.setItem('language', 'vi');
+          changeLanguage('vi');
+        }else if (currentLanguage === 'vi'){
+          vietBtn.innerHTML = 'EN';
+          enBtn.innerHTML = 'VI';
+          currentLanguage = 'en';
+          localStorage.setItem('language', 'en');
+          changeLanguage('en');
+        }
+      });
 
   </script>
   </body>

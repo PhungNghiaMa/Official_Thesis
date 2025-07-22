@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+.NavigationPageContainer{
+    background-image: linear-gradient(to right, #ff8177 0%, #ff867a 0%, #ff8c7f 21%, #f99185 52%, #eb8699 78%, #cdb6bf 100%);
+}
+.BottomFunctionContainer{
+    margin-top: 10px;
+}
+
+.filter-section{
+    display: flex;
+    width: 100%;
+    height: auto;
+    justify-content: center;
+    align-items: center;
+    font-size: medium;
+}
+
+.filter-options{
+    width: 100%;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    justify-items: center;
+    align-items: center;
+    margin-top: 10px;
+}
+.RoomSelection{
+    display: flex;
+    justify-content: flex-start;
+    column-gap: 15px;
+}
+.room-btn{
+    width: fit-content;
+    height: fit-content;
+    font-size: smaller;
+    font-weight: 500;
+    cursor: pointer;
+    background: whitesmoke;
+    border: 2px solid orange;
+}
+
+.room-btn:hover{
+    background: orange;
+    transition: all 2ms ease-in-out;
+}
+
+.room-btn ::selection{
+    background: red;
+}
+
+.ReturnBtnContainer{
+    display: flex;
+    justify-items: center;
+    justify-content: center;
+    align-items: center;
+    align-content: center;
+}
+
+.houseBtn{
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+/* .VietBtn , .EnBtn{
+    color: black;
+} */
+
+/* .VietBtn{
+    border: 1px solid black;
+} */
+
