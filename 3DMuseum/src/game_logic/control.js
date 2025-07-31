@@ -82,7 +82,7 @@ export default class FirstPersonPlayer {
                 const size = new THREE.Vector3();
                 box.getSize(size);
 
-                if (size.y < 0.1 && child.name === "Floor") {
+                if (child.name === "Floor") {
                     console.warn(`Inflating flat mesh "${child.name}" for Octree.`);
                     const center = new THREE.Vector3();
                     box.getCenter(center);
