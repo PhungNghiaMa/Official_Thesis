@@ -13,7 +13,6 @@ import RaycasterManager from "./raycaster.js"
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
-import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
@@ -159,11 +158,14 @@ function setImageToMesh(scene,meshName, imgUrl) {
 }
 
 document.body.addEventListener("uploadevent", (event) => {
-    const { asset_mesh_name, title, vietnamse_description, english_description, img_url } = event.detail;
+    const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
 
     if (annotationMesh[asset_mesh_name]) {
-        annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamse_description,english_description);
-        setImageToMesh(currentScence,asset_mesh_name, img_url);
+        annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamese_description,english_description);
+        annotationMesh[asset_mesh_name].title = title;
+        annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
+        annotationMesh[asset_mesh_name].eng_des = english_description;
+        setImageToMesh(currentScene,asset_mesh_name, img_url);
     }
 });
 
@@ -195,7 +197,9 @@ function clearSceneObjects(obj) {
             }
         });
     }
-    isDoorOpen = false;
+    for (const key in doorState){
+        doorState[key] = false;
+    }
     physiscsReady = false;
     imageMeshesArray = [];
     pictureFramesArray = [];
@@ -207,7 +211,7 @@ function clearSceneObjects(obj) {
 function checkPlayerPosition() {
     if (doorBoundingBox && !hasEnteredNewScene && hasLoadPlayer) {
         const playerPosition = fpView.getPlayerPosition();
-        if (doorBoundingBox.distanceToPoint(playerPosition) < 4 && isDoorOpen) {
+        if (doorBoundingBox.distanceToPoint(playerPosition) < 4 && doorState[interactedDoor]) {
             hasEnteredNewScene = true;
             const nextMuseum = currentMuseumId === Museum.ART_GALLERY ? Museum.LOUVRE : Museum.ART_GALLERY;
             setMuseumModel(nextMuseum);
@@ -391,7 +395,7 @@ function initMenu() {
     if (menuList) {
         menuList.innerHTML = '';
         const listItem1 = document.createElement("div");
-        listItem1.textContent = "Art Gallery";
+        listItem1.textContent = "Room1";
         listItem1.className = "menu-item";
         listItem1.addEventListener("click", () => {
             setMuseumModel(Museum.ART_GALLERY);
@@ -399,7 +403,7 @@ function initMenu() {
         });
 
         const listItem2 = document.createElement("div");
-        listItem2.textContent = "Louvre Art Museum";
+        listItem2.textContent = "Room2";
         listItem2.className = "menu-item";
         listItem2.addEventListener("click", () => {
             setMuseumModel(Museum.LOUVRE);
@@ -441,7 +445,11 @@ function animate() {
     mixer?.update(deltaTime * 4);
     checkPlayerPosition();
 
-    if (renderer) renderer.render(scene, camera);
+    // RENDER THE SCENCE USING THE COMPOSER
+    // composer.render();
+
+    // if (renderer) renderer.render(scene, camera);
+    if (composer) composer.render();
     if (cssRenderer) cssRenderer.render(scene, camera);
     if (css3dRenderer) css3dRenderer.render(scene, camera);
 }
@@ -558,6 +566,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     initUploadModal();
     initMenu();
     loadModel();
+    // initPostProcessing();
 
     if (animationFrameId === null) {
         animate();
