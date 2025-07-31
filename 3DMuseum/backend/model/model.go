@@ -36,6 +36,7 @@ type Asset struct {
 	CategoryID uint     `gorm:"not null;index" json:"category_id"`
 	Category   Category `gorm:"foreignKey:CategoryID"`
 	Filesize int64 
+	Version int `gorm:"default:1" json:"version"` 
 	CreatedAt             time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt             time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
