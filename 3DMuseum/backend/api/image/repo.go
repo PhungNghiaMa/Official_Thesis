@@ -50,24 +50,24 @@ func (Repository *ImgRepo) UploadAsset(ctx context.Context, ImageInfor model.Ima
 	return Repository.database.WithContext(ctx).Create(&newAsset).Error
 }
 
-
 func (Repository *ImgRepo) GetAsset(ctx context.Context, RoomID int) ([]model.ResponseMetadataInfor, error) {
 	room_id := uint(RoomID)
 	var Assets []model.ResponseMetadataInfor
 
-	// Subquery to get latest version per mesh
-	subQuery := Repository.database.Model(&model.Asset{}).
-		Select("asset_mesh_name, MAX(version) as max_version").
-		Where("room_id = ?", room_id).
-		Group("asset_mesh_name")
-
-	// Join with main Asset table to get full data
-	result := Repository.database.WithContext(ctx).
-		Model(&model.Asset{}).
-		Select("assets.asset_mesh_name", "assets.asset_cid", "assets.title", "assets.vietnamese_description", "assets.english_description").
-		Joins("JOIN (?) as latest ON assets.asset_mesh_name = latest.asset_mesh_name AND assets.version = latest.max_version", subQuery).
-		Where("assets.room_id = ?", room_id).
-		Scan(&Assets)
+	// Using CTE for better readability and potential performance benefits
+	query := `
+	WITH latest_versions AS (
+		SELECT asset_mesh_name, MAX(version) AS max_version
+		FROM assets
+		WHERE room_id = ?
+		GROUP BY asset_mesh_name
+	)
+	SELECT a.asset_mesh_name, a.asset_cid, a.title, a.vietnamese_description, a.english_description
+	FROM assets a
+	JOIN latest_versions lv ON a.asset_mesh_name = lv.asset_mesh_name AND a.version = lv.max_version
+	WHERE a.room_id = ?;
+	`
+	result := Repository.database.WithContext(ctx).Raw(query, room_id, room_id).Scan(&Assets)
 
 	if result.Error != nil {
 		return nil, result.Error
@@ -78,7 +78,6 @@ func (Repository *ImgRepo) GetAsset(ctx context.Context, RoomID int) ([]model.Re
 	}
 	return Assets, nil
 }
-
 
 // CheckSimilarAsset checks if an asset with the given AssetCID already exists in the database.
 // It returns true if the asset exists, false if it does not, and an error for any other database issue.
@@ -99,3 +98,4 @@ func (Repository *ImgRepo) CheckSimilarAsset(ctx context.Context, AssetCID strin
 	// If err is nil, a record was found.
 	return true, nil
 }
+
