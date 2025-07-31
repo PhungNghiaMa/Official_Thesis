@@ -24,12 +24,17 @@ func NewRepository(db *gorm.DB) *ImgRepo {
 }
 
 func (Repository *ImgRepo) UploadAsset(ctx context.Context, ImageInfor model.ImageStruct, DetailUploadInfor model.DetailUploadInfor) error {
+	FileSize := int64(len(DetailUploadInfor.FileBuffer))
 
-	// DATA GET FROM FRONT-END: VietnameseDescription , EnglishDescription , RoomID
+	// Step 1: Get the current max version for this mesh (if any)
+	var maxVersion int
+	Repository.database.WithContext(ctx).
+		Model(&model.Asset{}).
+		Where("asset_mesh_name = ?", DetailUploadInfor.MeshName).
+		Select("COALESCE(MAX(version), 0)").Scan(&maxVersion)
 
-	FileSize := int64(len(DetailUploadInfor.FileBuffer)) // calculate file size
-	// CREATE Asset OBJECT TO INSERT INTO Asset TABLE
-	Asset := model.Asset{
+	// Step 2: Create the asset with next version
+	newAsset := model.Asset{
 		AssetCID:              ImageInfor.IpfsHash,
 		AssetMeshName:         DetailUploadInfor.MeshName,
 		AssetName:             ImageInfor.Filename,
@@ -39,8 +44,10 @@ func (Repository *ImgRepo) UploadAsset(ctx context.Context, ImageInfor model.Ima
 		RoomID:                uint(DetailUploadInfor.RoomID),
 		Filesize:              FileSize,
 		CategoryID:            uint(ImageInfor.CategoryID),
+		Version:               maxVersion + 1, // auto-increment version
 	}
-	return Repository.database.WithContext(ctx).Create(&Asset).Error
+
+	return Repository.database.WithContext(ctx).Create(&newAsset).Error
 }
 
 func (Repository *ImgRepo) GetAsset(ctx context.Context, RoomID int) ([]model.ResponseMetadataInfor, error) {
@@ -65,9 +72,8 @@ func (Repository *ImgRepo) GetAsset(ctx context.Context, RoomID int) ([]model.Re
 	if result.Error != nil {
 		return nil, result.Error
 	}
-
 	if result.RowsAffected == 0 {
-		fmt.Println("No tuple found for Asset table")
+		fmt.Println("No assets found in room")
 		return []model.ResponseMetadataInfor{}, nil
 	}
 	return Assets, nil
