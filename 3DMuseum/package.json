@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "all": "concurrently \"vite\" \"cd backend/cmd && go run .\""
+    "all": "concurrently \"vite\" \"cd backend/cmd && go run .\"",
+    "postinstall": "node ./copy-three-assets.js"
   },
   "devDependencies": {
     "@types/three": "^0.177.0",
@@ -24,6 +25,7 @@
     "cropperjs": "^1.6.2",
     "dotenv": "^16.6.0",
     "express": "^5.1.0",
+    "gltfpack": "^0.24.0",
     "i18next": "^25.2.1",
     "i18next-http-backend": "^3.0.2",
     "multer": "^2.0.1",

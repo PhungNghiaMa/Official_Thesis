@@ -137,20 +137,22 @@ function handleFile(file) {
 
 export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap , pictureFramesArray, imageMeshesArray){
     let imageMeshes = imageMeshesArray; // GET ALL THE ImageMesh from the annotationMesh map
-    console.log("ImageMesh Array: ", imageMeshesArray)
-    console.log("PictureFrame Array: ", pictureFramesArray)
+    // console.log("ImageMesh Array: ", imageMeshesArray)
+    // console.log("PictureFrame Array: ", pictureFramesArray)
+    let position = new THREE.Vector3();
     for (const frame of pictureFramesArray){
         let closest = null;
         let minDistance = Infinity;
 
-        const framePosition = new THREE.Vector3();
-        frame.getWorldPosition(framePosition);
+        // Get the position of the frame
+        frame.getWorldPosition(position);
 
         for (const imgMesh of imageMeshes){
-            const imgPosition = new THREE.Vector3();
-            imgMesh.getWorldPosition(imgPosition)
 
-            const distance = framePosition.distanceTo(imgPosition);
+            // Get the position of the image mesh
+            imgMesh.getWorldPosition(position)
+
+            const distance = position.distanceTo(position);
             if(distance < minDistance){
                 closest = imgMesh;
                 minDistance = distance;

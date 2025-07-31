@@ -4,11 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite App</title>
+    <link rel="preload" href="./style.css" as="style" />
     <link rel="stylesheet" href="./style.css" />
+    <link rel="preload" href="./landingpage.css" as="style" />
     <link rel="stylesheet" href="./landingpage.css" />
     <link rel="stylesheet" href="./gallery.css" />
     <link rel="stylesheet" href="./game.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" as="style" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin = "anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
@@ -157,6 +160,8 @@
       import landingPageHTML from './template/landingpage_template.js';
       import { initializeGame } from './src/game_logic/index.js';
       import { initGalleryPage } from './src/gallery_logic.js';
+      import { Museum } from './src/game_logic/constants.js';
+      import WebWorker from './src/game_logic/web_worker.js?worker';
       localStorage.setItem('language', 'vi');
       let galleryContainer = null;
       initI18next().then(() => {
@@ -164,6 +169,31 @@
         document.getElementById('landingpage').innerHTML = landingPageHTML;
         updateContent();
 
+        // CALL THE WEB_WORKER SO IT CAN LOAD IN THE BACKGROUND AND GIVE ALREADY DATA WHEN THE GAME STARTS
+        window.preloadMetadata = null; // Initialize global preloadMetadata to null and then then pass to the index.js
+        window.preloadRoomAssets = null;
+
+        const preloadWorker = new WebWorker();
+        preloadWorker.onerror = (error) => {
+          console.error('Error in web worker:', error);
+        };
+        preloadWorker.postMessage({
+          type: 'loadModel',
+          modelPath: `/assets/optimizedModel/optimizeModel_2.glb`, // Adjust the path to your model
+          museumId: Museum.ART_GALLERY,
+          roomId: Museum.ART_GALLERY
+        });
+
+        preloadWorker.onmessage = (event) => {
+          if (event.data.type === 'modelProcessed') {
+            console.log('Model loaded successfully in the worker:', event.data.data.model);
+            window.preloadMetadata = event.data.data;
+            window.preloadRoomAssets = event.data.roomAssets;
+          } else if (event.data.type === 'error') {
+            console.error('Error loading model in worker:', event.data.data.message);
+            return;
+          }
+        };
         // --- MOVED AND CORRECTED CODE ---
         // Now that the landing page is in the DOM, we can safely find the button
         const startButton = document.getElementById('start_button');
