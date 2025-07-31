@@ -4,28 +4,20 @@ const BACKEND_URL =
     ? import.meta.env.VITE_PROD_BACKEND_URL // Use VITE_ prefix
     : import.meta.env.VITE_BACKEND_URL;     // Use VITE_ prefix
 
-// API FETCH ALL INFORMATION FOR SPECIFIC ROOM
-export async function GetRoomAsset(roomID) {
-    const url = `${BACKEND_URL}/list/${roomID}`
-    const response =  await fetch(url, {
-        method: 'GET'
-    })
-    return await response.json()
-}
 
 
 const validateData = (data) => {
 
-	if (!data.title || data.title.length > 40) {
-		return 'Title is required and must be at most 40 characters.'
-	}
-	if (!data.vietnamese_description || data.vietnamese_description.length > 500) {
-		return 'Vietnamese description is required and must be at most 500 characters.'
-	}
-	if (!data.english_description.length || data.english_description.length > 500) {
-		return 'English description is required and must be at most 500 characters.'
-	}
-	return ''
+    if (!data.title || data.title.length > 40) {
+        return 'Title is required and must be at most 40 characters.'
+    }
+    if (!data.vietnamese_description || data.vietnamese_description.length > 500) {
+        return 'Vietnamese description is required and must be at most 500 characters.'
+    }
+    if (!data.english_description.length || data.english_description.length > 500) {
+        return 'English description is required and must be at most 500 characters.'
+    }
+    return ''
 }
 
 export const UploadItem = async (file, mesh_name , title, vietnamese_description, english_description, roomID) => {

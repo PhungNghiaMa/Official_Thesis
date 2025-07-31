@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"main/business"
 	"main/model"
+	"os"
+	"path/filepath"
+	"time"
 )
+
 var ErrorAssetExist error
 
 type Service interface {
@@ -22,13 +26,35 @@ func NewService(ImageRepo Repository) *ImageService {
 }
 
 func (ImageService *ImageService) UploadAsset(context context.Context, DetailUploadInfor model.DetailUploadInfor, PinataService *business.PinataService) error {
-	PinataUploadResponse, err := PinataService.UploadToPinata(DetailUploadInfor.FileBuffer, DetailUploadInfor.Filename)
+	var fileBuffer []byte
+	var newFileName string
+	// -STEP 1: Save the original uploaded file to a temporary location
+	tempFileName := fmt.Sprintf("%d-%s", time.Now().UnixNano(), filepath.Base(DetailUploadInfor.Filename))
+	tempFilePath := filepath.Join(os.TempDir(), tempFileName)
+
+	err := os.WriteFile(tempFilePath, DetailUploadInfor.FileBuffer, 0644) // Write the buffer to a temp file
+	if err != nil {
+		return fmt.Errorf("failed to save original file to temporary path: %w", err)
+	}
+	// Defer deletion of the temporary original file. This ensures cleanup even if errors occur.
+	defer func() {
+		if rErr := os.Remove(tempFilePath); rErr != nil {
+			fmt.Printf("Warning: Failed to remove temporary file %s: %v\n", tempFilePath, rErr)
+		}
+	}()
+
+	// -STEP 2: Convert the image to KTX2 format and WebP 
+	if fileBuffer, newFileName, err = business.ConvertToKTX2(tempFilePath) ; err != nil {
+		
+	}
+
+	PinataUploadResponse, err := PinataService.UploadToPinata(fileBuffer, newFileName)
 	if err != nil {
 		return err
 	}
-	if(PinataUploadResponse.IpfsHash == ""){
+	if PinataUploadResponse.IpfsHash == "" {
 		fmt.Println("CANNOT GET THE IPFS_HASH")
-	}else{
+	} else {
 		fmt.Println("IPFS_HASH: ", PinataUploadResponse.IpfsHash)
 	}
 

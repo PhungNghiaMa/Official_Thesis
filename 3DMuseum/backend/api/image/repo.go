@@ -46,10 +46,21 @@ func (Repository *ImgRepo) UploadAsset(ctx context.Context, ImageInfor model.Ima
 func (Repository *ImgRepo) GetAsset(ctx context.Context, RoomID int) ([]model.ResponseMetadataInfor, error) {
 	room_id := uint(RoomID)
 	var Assets []model.ResponseMetadataInfor
-	result := Repository.database.WithContext(ctx).Model(&model.Asset{}).
-		Select("asset_mesh_name", "asset_cid", "title", "vietnamese_description", "english_description").
-		Where("room_id = ?", room_id).
-		Find(&Assets)
+
+	// Using CTE for better readability and potential performance benefits
+	query := `
+	WITH latest_versions AS (
+		SELECT asset_mesh_name, MAX(version) AS max_version
+		FROM assets
+		WHERE room_id = ?
+		GROUP BY asset_mesh_name
+	)
+	SELECT a.asset_mesh_name, a.asset_cid, a.title, a.vietnamese_description, a.english_description
+	FROM assets a
+	JOIN latest_versions lv ON a.asset_mesh_name = lv.asset_mesh_name AND a.version = lv.max_version
+	WHERE a.room_id = ?;
+	`
+	result := Repository.database.WithContext(ctx).Raw(query, room_id, room_id).Scan(&Assets)
 
 	if result.Error != nil {
 		return nil, result.Error
@@ -81,3 +92,4 @@ func (Repository *ImgRepo) CheckSimilarAsset(ctx context.Context, AssetCID strin
 	// If err is nil, a record was found.
 	return true, nil
 }
+

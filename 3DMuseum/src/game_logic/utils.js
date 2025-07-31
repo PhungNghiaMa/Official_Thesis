@@ -9,11 +9,10 @@ const uploadContainer = document.getElementById('upload-container');
 const uploadInput = document.getElementById('upload-input');
 const uploadText = document.getElementById('upload-text');
 const uploadPreview = document.getElementById('upload-preview');
-const uploadTitle = document.getElementById("upload-title")
-const uploadEnDes = document.getElementById("upload-english-description")
-const uploadVietDes = document.getElementById("upload-vietnamese-description")
-
-const uploadSpinner = document.getElementById("upload-spinner")
+const uploadTitle = document.getElementById("upload-title");
+const uploadEnDes = document.getElementById("upload-english-description");
+const uploadVietDes = document.getElementById("upload-vietnamese-description");
+const uploadSpinner = document.getElementById("upload-spinner");
 const uploadSubmit = document.getElementById("upload-btn");
 
 const cropperContainer = document.getElementById("upload-cropper-container")
@@ -262,84 +261,75 @@ function handleFile(file) {
     }
 }
 
+export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap , pictureFramesArray, imageMeshesArray){
+    let imageMeshes = imageMeshesArray; // GET ALL THE ImageMesh from the annotationMesh map
+    // console.log("ImageMesh Array: ", imageMeshesArray)
+    // console.log("PictureFrame Array: ", pictureFramesArray)
+    let position = new THREE.Vector3();
+    for (const frame of pictureFramesArray){
+        let closest = null;
+        let minDistance = Infinity;
 
+        // Get the position of the frame
+        frame.getWorldPosition(position);
 
-export function getMeshSizeInPixels(mesh, camera, renderer) {
-    const vector = new THREE.Vector3();
+        for (const imgMesh of imageMeshes){
 
-    const box = new THREE.Box3().setFromObject(mesh);
-    const size = new THREE.Vector3();
-    box.getSize(size);
+            // Get the position of the image mesh
+            imgMesh.getWorldPosition(position)
 
-    const corners = [
-        new THREE.Vector3(box.min.x, box.min.y, box.min.z),
-        new THREE.Vector3(box.min.x, box.min.y, box.max.z),
-        new THREE.Vector3(box.min.x, box.max.y, box.min.z),
-        new THREE.Vector3(box.min.x, box.max.y, box.max.z),
-        new THREE.Vector3(box.max.x, box.min.y, box.min.z),
-        new THREE.Vector3(box.max.x, box.min.y, box.max.z),
-        new THREE.Vector3(box.max.x, box.max.y, box.min.z),
-        new THREE.Vector3(box.max.x, box.max.y, box.max.z)
-    ];
+            const distance = position.distanceTo(position);
+            if(distance < minDistance){
+                closest = imgMesh;
+                minDistance = distance;
+            }
+        }
 
-    const min = new THREE.Vector2(Infinity, Infinity);
-    const max = new THREE.Vector2(-Infinity, -Infinity);
+        if(closest){
+            FrameToImageMeshMap[frame.name] = closest.name;
+        }
+    }
+}
 
-    // Project each corner to screen space and find the min/max x and y coordinates
-    corners.forEach(corner => {
-        vector.copy(corner).project(camera);
+export function DisplayImageOnDiv(imageURL, title, vietnamese_description, english_description) {
+    if (!FirstIMGCol || !TitleContainer || !BottomContainer || !ImageShowContainer) {
+        console.error("Missing target DOM elements. Check your HTML structure.");
+        return;
+    }
 
-        // Convert the normalized coordinates (-1 to 1) to pixel coordinates
-        const x = (vector.x * 0.5 + 0.5) * renderer.domElement.clientWidth;
-        const y = (vector.y * -0.5 + 0.5) * renderer.domElement.clientHeight;
+    const language = localStorage.getItem('language');
+    const description = language === 'vi' ? vietnamese_description : english_description;
 
-        min.x = Math.min(min.x, x);
-        min.y = Math.min(min.y, y);
-        max.x = Math.max(max.x, x);
-        max.y = Math.max(max.y, y);
-    });
+    // Clear previous content
+    FirstIMGCol.innerHTML = '';
+    TitleContainer.innerHTML = '';
+    BottomContainer.innerHTML = '';
 
-    const width = max.x - min.x;
-    const height = max.y - min.y;
+    // Create image element
+    const imgElement = document.createElement('img');
+    imgElement.src = imageURL;
+    imgElement.alt = title || 'Artwork';
+    imgElement.style.width = '100%';
+    imgElement.style.height = '100%';
+    imgElement.style.objectFit = 'contain';
+    FirstIMGCol.appendChild(imgElement);
 
-    return { width, height };
+    // Insert title
+    TitleContainer.innerHTML = `
+        <div class="Title text-xl font-semibold w-full text-center my-2">${title}</div>
+    `;
+
+    // Insert description
+    BottomContainer.innerHTML = `
+        <div class="Description text-md font-normal w-full px-5">${description}</div>
+    `;
+
+    // Show container
+    ImageShowContainer.style.display = "flex";
+    // Make sure event listener only binds once
+    CancelBtnContainer.onclick = () => {
+        ImageShowContainer.style.display = 'none';
+    };
 }
 
 
-export function calculateProjectedDimensions(geometry, camera, renderer) {
-    const positionArray = geometry.getAttribute('position').array;
-    
-    // Variables to store the projected min and max values
-    let minX = Infinity, maxX = -Infinity;
-    let minY = Infinity, maxY = -Infinity;
-  
-    // Create a vector to hold the 3D position of each vertex
-    const vertex = new THREE.Vector3();
-  
-    // Loop through each vertex and project it to 2D screen space
-    for (let i = 0; i < positionArray.length; i += 3) {
-      vertex.set(positionArray[i], positionArray[i + 1], positionArray[i + 2]);
-      
-      // Project the vertex to normalized device coordinates (NDC)
-      vertex.project(camera);
-  
-      // Convert NDC to screen coordinates
-      const halfWidth = renderer.domElement.clientWidth / 2;
-      const halfHeight = renderer.domElement.clientHeight / 2;
-  
-      const screenX = (vertex.x * halfWidth) + halfWidth;
-      const screenY = -(vertex.y * halfHeight) + halfHeight;  // Invert Y-axis
-  
-      // Update min and max values for width and height
-      minX = Math.min(minX, screenX);
-      maxX = Math.max(maxX, screenX);
-      minY = Math.min(minY, screenY);
-      maxY = Math.max(maxY, screenY);
-    }
-  
-    // Calculate the projected width and height
-    const projectedWidth = maxX - minX;
-    const projectedHeight = maxY - minY;
-  
-    return { width: projectedWidth, height: projectedHeight };
-  }
