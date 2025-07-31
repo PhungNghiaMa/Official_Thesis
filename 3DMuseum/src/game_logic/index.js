@@ -1,5 +1,3 @@
-// src/game_logic/index.js
-
 import "../../game.css";
 
 import * as THREE from 'three';
@@ -9,18 +7,35 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import FirstPersonPlayer from './control';
 import AnnotationDiv from "./annotationDiv";
 import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
-import { GetRoomAsset } from "./services";
 import { Museum } from "./constants";
-import { Capsule} from "three/examples/jsm/Addons.js";
+import { Capsule } from "three/addons/math/Capsule.js";
 import RaycasterManager from "./raycaster.js"
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
+import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 // --- Global variables for the game, now scoped within this module ---
 const clock = new THREE.Clock();
 const scene = new THREE.Scene();
+const manager = new THREE.LoadingManager(); // Loading manager to handle loading progress
 
+manager.onStart = function (url, itemsLoaded, itemsTotal) {
+    console.log(`Started loading file: ${url}`);
+    console.log(`Loaded ${itemsLoaded} of ${itemsTotal} files.`);
+}
+
+manager.onProgress = function (url, itemsLoaded, itemsTotal) {
+    const progress = itemsTotal > 0 ? (itemsLoaded / itemsTotal) * 100 : (itemsLoaded / 60000) * 100;
+    document.getElementById('progress').style.width = progress + '%';
+}
+
+manager.onLoad = function () {
+    console.log('All assets loaded successfully.');
+    document.getElementById('loading-container').style.display = 'none';
+}
 let menuOpen = false;
 let currentMuseumId = Museum.ART_GALLERY;
 
@@ -36,7 +51,6 @@ let physiscsReady = false;
 let currentScene = null
 
 let composer , outlinePass , renderPass;
-let currentlyHoveredObject = null;
 const doorState = {
     Door001: false,
     Door002: false
@@ -45,14 +59,12 @@ let interactedDoor;
 const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_2.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
 let pictureFramesArray = []
 let imageMeshesArray = []
-const raycaster = new THREE.Raycaster();
-const pointer = new THREE.Vector2();
 let doorBoundingBox = null;
 let hasEnteredNewScene = false;
 
@@ -88,6 +100,25 @@ function showAnnotations() {
     });
 }
 
+// Force-replace ImageMesh texture with KTX2Loader
+function setKTX2TextureToMesh(scene, meshName, ktx2Url) {
+    // Use the same manager and renderer as the main loader
+    const ktx2Loader = new KTX2Loader(manager);
+    ktx2Loader.setTranscoderPath('/basis/');
+    ktx2Loader.detectSupport(renderer);
+
+    ktx2Loader.load(ktx2Url, (texture) => {
+        texture.encoding = THREE.sRGBEncoding;
+        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        const mesh = scene.getObjectByName(meshName);
+        if (mesh && mesh.isMesh) {
+            mesh.material.map = texture;
+            mesh.material.needsUpdate = true;
+        } else {
+            console.warn(`Cannot find mesh for ${meshName}`);
+        }
+    });
+}
 
 function setImageToMesh(scene,meshName, imgUrl) {
     const textureLoader = new THREE.TextureLoader();
@@ -111,11 +142,11 @@ function setImageToMesh(scene,meshName, imgUrl) {
 
             let mesh = scene.getObjectByName(meshName)
             if (mesh && mesh.isMesh){
-                mesh.material = material;
-                mesh.material.needsUpdate = true;
+                mesh.material.map = loadedTexture;
                 if (mesh.geometry?.attributes.uv) {
                     mesh.geometry.attributes.uv.needsUpdate = true;
                 }
+                mesh.material.needsUpdate = true;
             }else{
                 console.warn(`Cannot find mesh for ${meshName}`)
             }
@@ -139,7 +170,12 @@ document.body.addEventListener("uploadevent", (event) => {
     }
 });
 
-const loader = new GLTFLoader().setPath('/assets/');
+// Init the loader 
+const loader = new GLTFLoader(manager).setPath('/assets/');
+loader.setCrossOrigin('anonymous');
+loader.setMeshoptDecoder(MeshoptDecoder);
+
+
 
 function clearSceneObjects(obj) {
     // ... (rest of the function is unchanged)
@@ -169,6 +205,8 @@ function clearSceneObjects(obj) {
     imageMeshesArray = [];
     pictureFramesArray = [];
     currentScene = null;
+    annotationMesh = {};
+    hasEnteredNewScene = false;
 }
 
 function checkPlayerPosition() {
@@ -186,117 +224,52 @@ function loadModel() {
     document.getElementById('loading-container').style.display = 'flex';
     document.getElementById('progress').style.width = '0%';
 
-    if (fpView) {
-        hasLoadPlayer = false;
-        fpView.dispose();
-        fpView = null;
+    // Use preloaded metadata and room assets if available
+    if(window.preloadMetadata && window.preloadRoomAssets) {
+        console.log("Using preloaded metadata and room assets from worker");
+        finalizeModelLoading(ModelPaths[currentMuseumId], window.preloadMetadata, window.preloadRoomAssets);
+        window.preloadMetadata = null; // Clear after use
+        window.preloadRoomAssets = null;
+        return;
     }
-    annotationMesh = {};
-    clearSceneObjects(scene);
 
-    const ambientLight = new THREE.AmbientLight("#FFFFFF", 4);
-    scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight("#FFFFFF", 2);
-    scene.add(directionalLight);
-    
+    if(window.preloadMetadata && window.preloadRoomAssets){
+        console.log("Using preloaded metadata and room assets from worker");
+        finalizeModelLoading(ModelPaths[currentMuseumId], window.preloadMetadata, window.preloadRoomAssets);
+        window.preloadMetadata = null; // Clear after use
+        return;
+    }
+
+}
+
+function finalizeModelLoading(modelPath, metadata , roomAssets) {
     loader.load(
-        ModelPaths[currentMuseumId],
+        modelPath,
         (gltf) => {
+             clearSceneObjects(scene);
+            // Same logic as before, but reuse `metadata` to speed up logic
             scene.add(gltf.scene);
             gltf.scene.updateMatrixWorld(true);
-            currentScene = gltf.scene
+            currentScene = gltf.scene;
+            currentScene.updateMatrixWorld(true);
             animation = gltf.animations;
-            mixer = new THREE.AnimationMixer(gltf.scene);
+            mixer = new THREE.AnimationMixer(currentScene);
+            annotationMesh = {};
 
-            let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null, count = 0;
+            const ambientLight = new THREE.AmbientLight("#FFFFFF", 4);
+            const directionalLight = new THREE.DirectionalLight("#FFFFFF", 2);
+            scene.add(ambientLight, directionalLight);
 
-            gltf.scene.traverse((child) => {
-                child.updateMatrixWorld(true);
-
-                if (child.isMesh) {
-                    console.log(child.name)
-                    const pos = new THREE.Vector3();
-                    child.getWorldPosition(pos);
-                    const size = new THREE.Box3().setFromObject(child).getSize(new THREE.Vector3());
-
-                    if (pos.y < fallbackY) {
-                        fallbackY = pos.y;
-                        fallbackX = pos.x;
-                        fallbackZ = pos.z;
-                    }
-
-                    if (/^Picture_Frame\d+$/.test(child.name)){
-                        pictureFramesArray.push(child)
-                    }
-
-                    if (child.name.toLowerCase().includes("floor")) {
-                        const box = new THREE.Box3().setFromObject(child);
-                        const size = box.getSize(new THREE.Vector3());
-                        const area = size.x * size.z;
-                        if (area > maxArea) {
-                            maxArea = area;
-                            floorMesh = { box, center: box.getCenter(new THREE.Vector3()) };
-                            floorBoxMaxY = box.max.y;
-                        }
-                    }
-
-                    if (child.parent?.name === "Door") {
-                        doorBoundingBox = new THREE.Box3().setFromObject(child);
-                    }
-                    
-                    if (child.name === "Handle") {
-                        child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1, roughness: 5 });
-                    }
-                }
-
-                if (child.isMesh && /^ImageMesh\d+$/.test(child.name)) {
-                    imageMeshesArray.push(child)
-                    const imagePlane = child;
-                    const material = new THREE.MeshBasicMaterial({
-                        color: 0xffffff,
-                        side: THREE.DoubleSide,
-                        map: null,
-                    });
-                    imagePlane.material = material;
-                    imagePlane.material.needsUpdate = true;
-
-                    if (imagePlane.geometry?.attributes.uv) {
-                        imagePlane.geometry.attributes.uv.needsUpdate = true;
-                    }
-
-                    const box = new THREE.Box3().setFromObject(imagePlane);
-                    const center = box.getCenter(new THREE.Vector3());
-
-                    const annotationDiv = new AnnotationDiv(count, imagePlane);
-                    count++;
-                    const label = new CSS2DObject(annotationDiv.getElement());
-                    label.position.copy(center);
-                    scene.add(label);
-
-                    annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
-
-                    annotationDiv.onAnnotationClick = () => {
-                        const aspectRatio = 1/1
-                        displayUploadModal(aspectRatio, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
-                    };
-                }
-            });
-
-            raycasterManager.setPictureFrames(pictureFramesArray)
-
-            Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap , pictureFramesArray , imageMeshesArray)
-
-            let playerStart = { x: 0, y: 0, z: 0 };
-            if (floorMesh) {
-                playerStart.x = floorMesh.center.x;
-                playerStart.y = (floorBoxMaxY ?? floorMesh.center.y) + 0.01;
-                playerStart.z = floorMesh.center.z;
-            } else {
-                playerStart.x = fallbackX;
-                playerStart.y = (fallbackY === Infinity ? 1 : fallbackY) + 0.1;
-                playerStart.z = fallbackZ;
-                console.warn("No floor mesh found, using lowest mesh position as fallback.");
-            }
+            // SET UP CHARACTER POSITION AND CAMERA
+            let playerStart;
+            const [fallbackX, fallbackY, fallbackZ] = metadata.fallbackPos;
+            // Use floorBoxMaxY if available, otherwise fallback
+            let startY = metadata.floorBoxMaxY !== null && metadata.floorBoxMaxY !== undefined
+                ? metadata.floorBoxMaxY + 0.01
+                : (metadata.playerStartPos?.[1] ?? fallbackY + 0.1);
+            let startX = metadata.playerStartPos?.[0] ?? fallbackX;
+            let startZ = metadata.playerStartPos?.[2] ?? fallbackZ;
+            playerStart = { x: startX, y: startY, z: startZ };
 
             const playerCollider = new Capsule(
                 new THREE.Vector3(playerStart.x, playerStart.y, playerStart.z),
@@ -304,44 +277,110 @@ function loadModel() {
                 0.35
             );
 
-
             fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
-            fpView.loadOctaTree(gltf.scene);
+            const octreeLoaded = fpView.loadOctaTree(gltf.scene);
+            if (!octreeLoaded) {
+                console.error('Failed to load octree - check floor meshes');
+                return;
+            }
+            // Traverse and setup image meshes, annotationDivs, etc. (as in original logic)
+            let count = 0;
+            currentScene.traverse((child) => {
+                if (child.isMesh) {
+                    child.updateMatrixWorld(true);  // Ensure each mesh's world matrix is up to date
+                    if (/^ImageMesh\d+$/.test(child.name)) {
+                        const material = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+                        child.material = material;
+                        child.material.needsUpdate = true;
+
+                    // Check for valid UVs or force assign custom UVs (e.g. simple square)
+                    
+                    const uvAttribute = new Float32Array([
+                        0, 0,  // top-left
+                        0, 1,  // top-right
+                        1, 1,  // bottom-right
+                        1, 0   // bottom-left
+                    ]);
+
+                        // Assume quad with 4 vertices (you may need to expand if yours use more)
+                        child.geometry.setAttribute('uv', new THREE.BufferAttribute(uvAttribute, 2));
+                        console.warn(`UVs reassigned manually for ${child.name}`);
+
+
+                        const box = new THREE.Box3().setFromObject(child);
+                        const center = new THREE.Vector3();
+                        box.getCenter(center);
+
+                        const annotationDiv = new AnnotationDiv(count++, child);
+                        const label = new CSS2DObject(annotationDiv.getElement());
+                        label.position.copy(center);
+                        scene.add(label);
+                        annotationMesh[child.name] = { label, annotationDiv, mesh: child };
+
+                        annotationDiv.onAnnotationClick = () => {
+                            const aspectRatio = 1 / 1;
+                            displayUploadModal(aspectRatio, { roomID: currentMuseumId, asset_mesh_name: child.name });
+                        };
+                    }
+                }
+            });
+
+
+            if (metadata.doorBoundingBoxData) {
+                doorBoundingBox = new THREE.Box3(
+                    new THREE.Vector3(...metadata.doorBoundingBoxData.min),
+                    new THREE.Vector3(...metadata.doorBoundingBoxData.max)
+                );
+            }
+            
+            // Use PictureFrameMesh names from metadata to get actual PictureFrameMesh objects
+            if (Array.isArray(metadata.pictureFramesData)) {
+                metadata.pictureFramesData.forEach(FrameMeshName => {
+                    const FrameMeshObj = currentScene.getObjectByName(FrameMeshName);
+                    if (FrameMeshObj && FrameMeshObj.isMesh) {
+                        pictureFramesArray.push(FrameMeshObj);
+                    }
+                });
+            }
+            // Use ImageMesh names from metadata to get actual ImageMesh objects
+            if (Array.isArray(metadata.imageMeshesData)) {
+                metadata.imageMeshesData.forEach(ImageMeshName => {
+                    const ImageMeshObj = currentScene.getObjectByName(ImageMeshName);
+                    if (ImageMeshObj && ImageMeshObj.isMesh) {
+                        imageMeshesArray.push(ImageMeshObj);
+                    }
+                });
+            }
+
+            raycasterManager.setPictureFrames(pictureFramesArray);
+            Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray);
+
             physiscsReady = true;
             hasLoadPlayer = true;
-            
+            console.log('Physics initialized with position:', playerCollider.start, playerCollider.end);
+
             document.getElementById('loading-container').style.display = 'none';
 
-            GetRoomAsset(currentMuseumId).then(items => {
-                (Array.isArray(items) ? items : []).forEach(item => {
-                    if (!item) {
-                        console.log("Cannot get item from API");
-                        return;
-                    }
+            // Use roomAssets from worker for annotation and image assignment
+            if (Array.isArray(roomAssets)) {
+                roomAssets.forEach(item => {
                     const { asset_mesh_name, asset_cid, title, viet_des, en_des } = item;
                     if (annotationMesh[asset_mesh_name]) {
                         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des);
                         setImageToMesh(currentScene, asset_mesh_name, `https://gateway.pinata.cloud/ipfs/${asset_cid}`);
                     }
                 });
-            }).catch(error => {
-                console.error("Error fetching museum list:", error);
-            });
-
-            hasEnteredNewScene = false;
+            }
         },
-        (xhr) => {
-            const progress = xhr.total > 0 ? (xhr.loaded / xhr.total) * 100 : xhr.loaded / 60000;
-            document.getElementById('progress').style.width = progress + '%';
-        },
-        (error) => {
-            console.error('An error occurred while loading the model:', error);
+        undefined,
+        (err) => {
+            console.error("Error loading GLTF:", err);
             document.getElementById('loading-container').style.display = 'none';
         }
     );
 }
 
-// ... (rest of the functions: setMuseumModel, initMenu, openMenu, closeMenu are unchanged)
+
 function setMuseumModel(modelId) {
     currentMuseumId = modelId;
     loadModel();
@@ -448,6 +487,12 @@ export function initializeGame(targetContainerId = 'model-container') {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.appendChild(renderer.domElement);
 
+    // Initialize KTX2Loader and set it for GLTFLoader (after renderer is created)
+    const ktx2Loader = new KTX2Loader(manager);
+    ktx2Loader.setTranscoderPath('/basis/');
+    ktx2Loader.detectSupport(renderer);
+    loader.setKTX2Loader(ktx2Loader);
+
     container.tabIndex = 0;
     setTimeout(() => container.focus(), 50);
 
@@ -456,10 +501,10 @@ export function initializeGame(targetContainerId = 'model-container') {
     composer.addPass(renderPass);
 
     outlinePass = new OutlinePass(new THREE.Vector2(container.clientWidth, container.clientHeight), scene , camera);
-    outlinePass.edgeStrength = 8;
-    outlinePass.edgeGlow = 1;
-    outlinePass.edgeThickness = 3.5;
-    outlinePass.pulsePeriod = 2;
+    outlinePass.edgeStrength = 5;
+    outlinePass.edgeGlow = 2;
+    outlinePass.edgeThickness = 3;
+    // outlinePass.pulsePeriod = 2;
     outlinePass.visibleEdgeColor.set("#ffffff");
     outlinePass.hiddenEdgeColor.set("#ffffff");
     composer.addPass(outlinePass);
@@ -484,9 +529,9 @@ export function initializeGame(targetContainerId = 'model-container') {
             const imageURL = imageData.mesh.material.map?.image?.src || '';
             const {annotationDiv} = imageData
             // const {annotationDiv} = imageData;
-            console.log(`User clicked frame: ${frameName} → mapped to: ${imageMeshName}`);
-            console.log("Viet description: ", annotationMesh[imageMeshName].annotationDiv.getVietDes())
-            console.log("Eng description: ", annotationMesh[imageMeshName].annotationDiv.getEngDes())
+            // console.log(`User clicked frame: ${frameName} → mapped to: ${imageMeshName}`);
+            // console.log("Viet description: ", annotationMesh[imageMeshName].annotationDiv.getVietDes())
+            // console.log("Eng description: ", annotationMesh[imageMeshName].annotationDiv.getEngDes())
             DisplayImageOnDiv(imageURL , annotationDiv.title , annotationDiv.vietnamese_description , annotationDiv.english_description)
          },
         onDoorClick: (clickedObject) => {
@@ -518,7 +563,6 @@ export function initializeGame(targetContainerId = 'model-container') {
         onHoverPictureFrame: (object, isHovering) => {}
     });
     raycasterManager.setOutlinePass(outlinePass);
-
 
     initUploadModal();
     initMenu();
