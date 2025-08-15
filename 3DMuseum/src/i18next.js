@@ -10,12 +10,18 @@ export const initI18next = async() => {
       lng: 'vi', // The default language
       fallbackLng: 'en', // Fallback language if a translation is missing
       debug: true, // Shows console logs for debugging
-      backend: {
-        loadPath: '/locales/{{lng}}.json', // Path to the translation files
-      },
+      ns: ['LandingPage'],
+      defaultNS: 'LandingPage', // Default namespace to use
+      supportedLngs: ['en', 'vi'], // Supported languages
       interpolation: {
         escapeValue: false, // React already does escaping
       },
+      backend: {
+        loadPath: '/locales/{{lng}}/{{ns}}.json', // Path to the translation files
+      },
+      // interpolation: {
+      //   escapeValue: false, // React already does escaping
+      // },
     });
 };
 

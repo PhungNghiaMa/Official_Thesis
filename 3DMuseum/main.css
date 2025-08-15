@@ -1,3 +1,338 @@
+@import "tailwindcss";
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+}
+
+.GeneralContainer{
+    background-image: url('/img/HomeBackground_2.webp');
+    background-size:cover;
+    background-repeat: no-repeat;
+}
+
+
+.VietBtn , .EnBtn{
+    width: 35px;
+    height: 35px;
+}
+
+.LanguageSwitcherContainer:hover .EnBtn{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: wrap;
+}
+
+.WrapContainer{
+    height: 87dvh;
+}
+
+.Circle{
+    width: 7px;
+    height: 7px;
+    background-color: rgb(244, 109, 19);
+    display: flex;
+    justify-self: center;
+    align-self: center;
+
+}
+
+.WrapperCircle{
+    width: 14px;
+    height: 14px;
+    /* From https://css.glass */
+    background: rgba(36, 36, 36, 0.56);
+    border-radius: 16px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+    -webkit-backdrop-filter: blur(2.1px);
+    backdrop-filter: blur(2.1px);
+    border: 1px solid rgb(52, 50, 50);
+    align-items: center;
+}
+
+.Footer{
+    cursor: pointer;
+}
+
+.WrapContainer{
+    scrollbar-width: none;
+}
+
+.MuseumNameContainer{
+    margin-left: -10px;
+}
+
+.navigation{
+    font-size: large;
+}
+
+.navigation:hover{
+    color: orange;
+}
+
+.lang{
+    font-size: small;
+}
+
+@media screen and (min-width: 2500px) and (resolution: 1.5dppx) {
+    .WrapContainer{
+        height: 91dvh;
+    }
+    .Circle{
+        width: 8px;
+        height: 8px;
+        background-color: rgb(244, 109, 19);
+        display: flex;
+        justify-self: center;
+        align-self: center;
+        margin-left: 1px;
+    }
+    .MuseumNameContainer{
+        margin-left: -60px;
+    }
+}
+
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  font-family: 'Noto Serif Display', serif;
+  user-select: none;
+}
+
+
+.LandingPageContainer , .LandingPageWrapContainer{
+    height: inherit;
+}
+.StartBtn{
+    padding-right: 8dvw;
+}
+
+
+.button {
+  --white: #ceb01c;
+  --bg: #707070a3;
+  --radius: 100px;
+  outline: none;
+  cursor: pointer;
+  border: 0;
+  position: relative;
+  border-radius: var(--radius);
+  background-color: var(--bg);
+  transition: all 0.2s ease-in-out;
+  box-shadow:
+    inset 0 0.3rem 0.9rem rgba(255, 255, 255, 0.3),
+    inset 0 -0.1rem 0.3rem rgba(254, 254, 254, 0.7),
+    inset 0 -0.4rem 0.9rem rgba(255, 255, 255, 0.5),
+    0 3rem 3rem rgba(217, 216, 216, 0.3),
+    0 1rem 1rem -0.6rem rgba(233, 222, 183, 0.8);
+}
+.button .wrap {
+  font-size: 1rem;
+  font-weight: 700;
+  color: rgb(219, 219, 219);
+  padding: 15px 50px;
+  border-radius: inherit;
+  position: relative;
+  overflow: hidden;
+}
+.button .wrap p span:nth-child(2) {
+  display: none;
+}
+.button:hover .wrap p span:nth-child(1) {
+  display: none;
+}
+.button:hover .wrap p span:nth-child(2) {
+  display: inline-block;
+}
+.button .wrap p {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  transition: all 0.2s ease-out;
+  transform: translateY(2%);
+  mask-image: linear-gradient(to bottom, rgb(252, 252, 252) 60%, transparent);
+}
+.button .wrap::before,
+.button .wrap::after {
+  content: "";
+  position: absolute;
+  transition: all 0.3s ease;
+}
+.button .wrap::before {
+  left: -15%;
+  right: -15%;
+  bottom: 25%;
+  top: -100%;
+  border-radius: 50%;
+  background-color: rgba(175, 175, 175, 0.154);
+}
+.button .wrap::after {
+  left: 6%;
+  right: 6%;
+  top: 12%;
+  bottom: 40%;
+  border-radius: 22px 22px 0 0;
+  box-shadow: inset 0 10px 8px -10px rgba(255, 255, 255, 0.8);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(0, 0, 0, 0) 50%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+.button:hover {
+  box-shadow:
+    inset 0 0.3rem 0.5rem rgba(45, 43, 43, 0.667),
+    inset 0 -0.1rem 0.3rem rgba(233, 221, 221, 0.7),
+    inset 0 -0.4rem 0.9rem rgba(255, 255, 255, 0.7),
+    0 3rem 3rem rgba(243, 240, 240, 0.3),
+    0 1rem 1rem -0.6rem rgba(231, 230, 230, 0.8);
+}
+.button:hover .wrap::before {
+  transform: translateY(-5%);
+}
+.button:hover .wrap::after {
+  opacity: 0.4;
+  transform: translateY(5%);
+}
+.button:hover .wrap p {
+  transform: translateY(-4%);
+}
+.button:active {
+  transform: translateY(4px);
+  box-shadow:
+    inset 0 0.3rem 0.5rem rgba(255, 255, 255, 0.5),
+    inset 0 -0.1rem 0.3rem rgba(0, 0, 0, 0.8),
+    inset 0 -0.4rem 0.9rem rgba(255, 255, 255, 0.4),
+    0 3rem 3rem rgba(0, 0, 0, 0.3),
+    0 1rem 1rem -0.6rem rgba(0, 0, 0, 0.8);
+}
+
+.LandingPageContainer , .museum_name , .EnBtn , .VietBtn , .Footer , .NavBarContainer , .model-container , .menu-container , .loading-container, body {
+    -webkit-user-select: none; /* Safari */
+    -moz-user-select: none; /* Firefox */
+    -ms-user-select: none; /* IE10+/Edge */
+    user-select: none; /* Standard */
+}
+.button{
+  width: max-content;
+  height: 55px;
+}
+
+
+
+@media screen and (min-width: 2500px) and (resolution: 1.5dppx) {
+    .SubMuseumName{
+        padding-right: 6.5vw;
+        padding-left: 6.5vw;
+    }
+    .Vietnam{
+        font-size: 10rem;
+    }
+    .Traditional_art{
+        font-size: 2.5rem;
+    }
+    .Graph_1_Container h1 , .Graph_2_Container h1{
+        font-size: larger;
+        padding-left: 1vw;
+        font-weight: 500;
+    }
+    .StartBtn{
+        display: flex;
+        justify-content: end;
+    }
+    .button{
+        width: max-content;
+        height: max-content;
+    }
+    .button .wrap{
+        font-size: 1.2rem;
+        font-weight: 800;
+        color: rgb(219, 219, 219);
+    }
+
+
+}
+
+
+.NavigationPageContainer{
+    background-image: linear-gradient(to right, #ff8177 0%, #ff867a 0%, #ff8c7f 21%, #f99185 52%, #eb8699 78%, #cdb6bf 100%);
+}
+.BottomFunctionContainer{
+    margin-top: 10px;
+}
+
+.filter-section{
+    display: flex;
+    width: 100%;
+    height: auto;
+    justify-content: center;
+    align-items: center;
+    font-size: medium;
+}
+
+.filter-options{
+    width: 100%;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    justify-items: center;
+    align-items: center;
+    margin-top: 10px;
+}
+.RoomSelection{
+    display: flex;
+    justify-content: flex-start;
+    column-gap: 15px;
+}
+.room-btn{
+    width: fit-content;
+    height: fit-content;
+    font-size: smaller;
+    font-weight: 500;
+    cursor: pointer;
+    background: whitesmoke;
+    border: 2px solid orange;
+}
+
+.room-btn:hover{
+    background: orange;
+    transition: all 2ms ease-in-out;
+}
+
+.room-btn ::selection{
+    background: red;
+}
+
+.ReturnBtnContainer{
+    display: flex;
+    justify-items: center;
+    justify-content: center;
+    align-items: center;
+    align-content: center;
+}
+
+.houseBtn{
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+/* .VietBtn , .EnBtn{
+    color: black;
+} */
+
+/* .VietBtn{
+    border: 1px solid black;
+} */
+
 canvas{
     display: block;
 }
@@ -297,15 +632,17 @@ canvas{
 
 /* Model Container (where the Three.js scene will render) */
 #model-container {
-    width: 100dvw;
-    height: 100dvh;
-    position: absolute;
-    top: 0;
-    left: 0;
-    overflow: hidden;
-    z-index: 1; /* Ensure it's behind modals/menus */
-    font-family: Arial, Helvetica, sans-serif;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100dvw;
+  height: 100dvh;
+  overflow: hidden;
+  z-index: 1;
+  font-family: Arial, Helvetica, sans-serif;
+  user-select: none;
 }
+
 
 .expanded-annotation {
     position: absolute;
