@@ -4,13 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite App</title>
-    <link rel="preload" href="./style.css" as="style" />
-    <link rel="stylesheet" href="./style.css" />
-    <link rel="preload" href="./landingpage.css" as="style" />
-    <link rel="stylesheet" href="./landingpage.css" />
-    <link rel="stylesheet" href="./gallery.css" />
-    <link rel="stylesheet" href="./game.css" />
-    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" as="style" />
+    <link rel="stylesheet" href="./main.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin = "anonymous" referrerpolicy="no-referrer">
@@ -22,14 +16,14 @@
       <div class="Page_1_Container w-full h-full overflow-hidden py-5">
         <div class="NavigationContainer w-full h-auto flex flex-row py-3 text-gray-300">
           <div class="MuseumNameContainer w-2/12 h-auto flex justify-center items-center">
-            <h1 class="museum_name text-2xl font-semibold" data-i18n="Homepage.museum_name"></h1>
+            <h1 class="museum_name text-2xl font-semibold" data-i18n="LandingPage.museum_name"></h1>
           </div>
 
           <div class="NavBarContainer w-10/12 h-auto flex flex-row items-center justify-end-safe px-5">
             <nav class="NavBar w-auto h-auto flex items-center justify-around text-md ">
-              <a data-i18n="MenuBar.about" id="about" class="navigation about px-2" href="/about">About</a>
-              <a data-i18n="MenuBar.gallery" id="gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
-              <a data-i18n="MenuBar.contact" id="contact" class="navigation contact px-2" href="/contact">Contact</a>
+              <a data-i18n="LandingPage.about" id="about" class="navigation about px-2" href="/about">About</a>
+              <a data-i18n="LandingPage.gallery" id="gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
+              <a data-i18n="LandingPage.contact" id="contact" class="navigation contact px-2" href="/contact">Contact</a>
             </nav>
             <div class="LanguageSwitcherContainer w-auto h-auto flex flex-row items-center transition-all ease-in-out 10s text-xs font-semibold">
               <div class="VietBtn lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
@@ -155,115 +149,101 @@
     <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
 
     <script type="module">
-      console.log(window.innerWidth, window.devicePixelRatio);
-      import { initI18next, updateContent, changeLanguage } from './src/i18next.js';
-      import landingPageHTML from './template/landingpage_template.js';
-      import { initializeGame } from './src/game_logic/index.js';
-      import { initGalleryPage } from './src/gallery_logic.js';
-      import { Museum } from './src/game_logic/constants.js';
-      import WebWorker from './src/game_logic/web_worker.js?worker';
-      localStorage.setItem('language', 'vi');
-      let galleryContainer = null;
-      initI18next().then(() => {
-        // After i18next is ready, load landing page HTML and update translations
-        document.getElementById('landingpage').innerHTML = landingPageHTML;
-        updateContent();
+  import {initI18next, updateContent, changeLanguage} from './src/i18next.js';
+  import landingPageHTML from './template/landingpage_template.js';
+  import {initializeGame} from './src/game_logic/index.js';
+  import {initGalleryPage} from './src/gallery_logic.js';
 
-        // CALL THE WEB_WORKER SO IT CAN LOAD IN THE BACKGROUND AND GIVE ALREADY DATA WHEN THE GAME STARTS
-        window.preloadMetadata = null; // Initialize global preloadMetadata to null and then then pass to the index.js
-        window.preloadRoomAssets = null;
+  // This will hold the preloaded data
+  // let preloadedBuffer = null;
+  let isGameInitialized = false;
+  // let galleryContainer = null;
+  
+  localStorage.setItem('language', 'vi');
 
-        const preloadWorker = new WebWorker();
-        preloadWorker.onerror = (error) => {
-          console.error('Error in web worker:', error);
-        };
-        preloadWorker.postMessage({
-          type: 'loadModel',
-          modelPath: `/assets/optimizedModel/optimizeModel_2.glb`, // Adjust the path to your model
-          museumId: Museum.ART_GALLERY,
-          roomId: Museum.ART_GALLERY
-        });
+  // Start preloading the model immediately
+  // const preloadWorker = new Worker('./src/game_logic/web_worker.js', { type: 'module' });
+  // preloadWorker.postMessage({
+  //   type: 'loadModel',
+  //   modelPath: `${window.location.origin}/assets/art_gallery/VIRTUAL_ART_GALLERY_3.gltf`
+  // });
 
-        preloadWorker.onmessage = (event) => {
-          if (event.data.type === 'modelProcessed') {
-            console.log('Model loaded successfully in the worker:', event.data.data.model);
-            window.preloadMetadata = event.data.data;
-            window.preloadRoomAssets = event.data.roomAssets;
-          } else if (event.data.type === 'error') {
-            console.error('Error loading model in worker:', event.data.data.message);
-            return;
-          }
-        };
-        // --- MOVED AND CORRECTED CODE ---
-        // Now that the landing page is in the DOM, we can safely find the button
-        const startButton = document.getElementById('start_button');
-        const generalContainer = document.getElementById('landingpageContainer');
-        const modelContainer = document.getElementById('model-container');
-        const menuContainer = document.getElementById('menu-container');
+  // // Listen for the preloaded data and store it
+  // preloadWorker.onmessage = ({ data }) => {
+  //   if (data.type === 'modelReady' && data.data.buffer) {
+  //     preloadedBuffer = data.data.buffer;
+  //     console.log('✅ Model buffer has been preloaded and is ready.');
+  //   } else if (data.type === 'error') {
+  //     console.error('Worker error:', data.error);
+  //   }
+  // };
 
-        // Handle 3D game start
-        if (startButton) {
-          startButton.addEventListener('click', () => {
-            if(generalContainer) generalContainer.style.display = 'none';
-            if(modelContainer) modelContainer.style.display = 'block';
-            if(menuContainer) menuContainer.style.display = 'flex';
-            requestAnimationFrame(() => {
-              initializeGame('model-container');
-            });
+  // Initialize i18next for language support
+  initI18next().then(() => {
+    document.getElementById('landingpage').innerHTML = landingPageHTML;
+    updateContent();
+
+    // Now that the landing page is in the DOM, we can safely find the elements
+    const startButton = document.getElementById('start_button');
+    const generalContainer = document.getElementById('landingpageContainer');
+    const modelContainer = document.getElementById('model-container');
+    const menuContainer = document.getElementById('menu-container');
+    const galleryLink = document.getElementById('gallery');
+
+    // Handle 3D game start
+    if (startButton) {
+      startButton.addEventListener('click', () => {
+        // Only initialize the game ONCE on the first click
+        if (!isGameInitialized) {
+          console.log('Start button clicked. Initializing game...');
+          requestAnimationFrame(() => {
+            initializeGame('model-container');
           });
-        } else {
-          console.error('Start button still not found. Check template IDs.');
+          isGameInitialized = true;
         }
+        
+        // Show the game and hide the landing page
+        if(generalContainer) generalContainer.style.display = 'none';
+        if(modelContainer) modelContainer.style.display = 'block';
+        if(menuContainer) menuContainer.style.display = 'flex';
+      });
+    } else {
+      console.error('Start button not found. Check template IDs.');
+    }
 
-        // Handle Gallery navigation
-        const galleryLink = document.getElementById('gallery');
-        if (galleryLink) {
-          galleryLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            // Hide landing page, show gallery
-            if (!galleryContainer) {
-              galleryContainer = document.createElement('div');
-              galleryContainer.id = 'gallery-main-container';
-              galleryContainer.style.width = '100vw';
-              galleryContainer.style.height = '100vh';
-              galleryContainer.style.background = '#fff';
-              galleryContainer.style.position = 'absolute';
-              galleryContainer.style.top = '0';
-              galleryContainer.style.left = '0';
-              galleryContainer.style.zIndex = '1000';
-              document.body.appendChild(galleryContainer);
-            }
-            if(generalContainer) generalContainer.style.display = 'none';
-            if(modelContainer) modelContainer.style.display = 'none';
-            if(menuContainer) menuContainer.style.display = 'none';
-            galleryContainer.style.display = 'block';
-            initGalleryPage(galleryContainer);
+    // Handle Gallery navigation
+    if (galleryLink) {
+      galleryLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (!galleryContainer) {
+          galleryContainer = document.createElement('div');
+          galleryContainer.id = 'gallery-main-container';
+          Object.assign(galleryContainer.style, {
+            width: '100vw', height: '100vh', background: '#fff',
+            position: 'absolute', top: '0', left: '0', zIndex: '1000'
           });
+          document.body.appendChild(galleryContainer);
         }
+        if(generalContainer) generalContainer.style.display = 'none';
+        if(modelContainer) modelContainer.style.display = 'none';
+        if(menuContainer) menuContainer.style.display = 'none';
+        galleryContainer.style.display = 'block';
+        initGalleryPage(galleryContainer);
       });
+    }
+  });
 
-      window.changeLanguage = changeLanguage;
+  window.changeLanguage = changeLanguage;
 
-      // Change button visibility based on language
-      const vietBtn = document.querySelector('.VietBtn');
-      const enBtn = document.querySelector('.EnBtn');
-      let currentLanguage = 'vi';
-      enBtn.addEventListener('click', () => {
-        if(currentLanguage === 'en'){
-          vietBtn.innerHTML = 'VI';
-          enBtn.innerHTML = 'EN';
-          currentLanguage = 'vi';
-          localStorage.setItem('language', 'vi');
-          changeLanguage('vi');
-        }else if (currentLanguage === 'vi'){
-          vietBtn.innerHTML = 'EN';
-          enBtn.innerHTML = 'VI';
-          currentLanguage = 'en';
-          localStorage.setItem('language', 'en');
-          changeLanguage('en');
-        }
-      });
-
-  </script>
+  // Simplified language switcher logic
+  const enBtn = document.querySelector('.EnBtn');
+  enBtn.addEventListener('click', () => {
+    const currentLang = localStorage.getItem('language') || 'vi';
+    const newLang = currentLang === 'vi' ? 'en' : 'vi';
+    localStorage.setItem('language', newLang);
+    changeLanguage(newLang);
+    // You can add visual feedback for the button change here if needed
+  });
+</script>
   </body>
 </html>

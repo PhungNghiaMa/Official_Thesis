@@ -1,226 +1,193 @@
 import * as THREE from 'three';
-import { Capsule } from "three/examples/jsm/math/Capsule.js";
-import { Octree } from "three/examples/jsm/math/Octree.js";
+import { Capsule } from 'three/examples/jsm/math/Capsule.js';
+import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
+
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
 const GRAVITY = 30;
 
 export default class FirstPersonPlayer {
+  constructor(camera, scene, container = document, playerCollider = null) {
+    this.camera = camera;
+    this.scene = scene;
+    this.container = container || document;
 
-    constructor(camera, scene, container = document, playerCollider = null) {
+    this.keys = {};
 
-        this.camera = camera;
-        this.scene = scene;
-        this.container = container || document;
-        this.playerCollider = playerCollider === null ? new Capsule(new THREE.Vector3(0, 0.35, 0), new THREE.Vector3(0, 1, 0), 0.35) : playerCollider;
-        this.worldOctree = new Octree();
+    this.playerCollider = playerCollider
+      ? playerCollider
+      : new Capsule(
+          new THREE.Vector3(0, 0.35, 0),
+          new THREE.Vector3(0, 1.0, 0),
+          0.35
+        );
 
-        this.playerVelocity = new THREE.Vector3();
-        this.playerDirection = new THREE.Vector3();
+    this.playerVelocity = new THREE.Vector3();
+    this.playerDirection = new THREE.Vector3();
+    this.onFloor = false;
 
-        this.playerOnFloor = false;
-        this.mousePress = false;
+    // Helper variables for collision detection
+    this.tempBox = new THREE.Box3();
+    this.tempMat = new THREE.Matrix4();
+    this.tempSegment = new THREE.Line3();
+    this.tempVector = new THREE.Vector3();
 
-        this.keyStates = {};
-        this.lastCameraPitch = 0; // for clamping pitch
-        this.activeObjects = [];
-        this.FinishLoadOctree = false;
+    this.collisionMeshes = [];
+    this.bvhReady = false;
 
-        let isMouseDown = false;
-        let previousMousePosition = { x: 0, y: 0 };
+    this.pitch = 0;
+    this.yaw = 0;
 
-        this.container.addEventListener('keydown', (event) => {
-            this.keyStates[event.code] = true;
-        });
+    this.isMouseDown = false;
+    this.previousMousePosition = { x: 0, y: 0 };
 
-        this.container.addEventListener('keyup', (event) => {
-            this.keyStates[event.code] = false;
-        });
+    this._initInputHandlers();
+  }
 
-        this.container.addEventListener('mousedown', (event) => {
-            isMouseDown = true;
-            previousMousePosition.x = event.clientX;
-            previousMousePosition.y = event.clientY;
-        });
+  buildBVH(scene) {
+    this.collisionMeshes = [];
+    scene.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        child.updateMatrixWorld(true);
+        child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
+        this.collisionMeshes.push(child);
+      }
+    });
+    this.bvhReady = true;
+    console.log('[FirstPersonPlayer] BVH built for', this.collisionMeshes.length, 'meshes');
+  }
 
-        this.container.addEventListener('mouseup', () => {
-            isMouseDown = false;
-        });
+  update(deltaTime) {
+    if (!this.bvhReady) return;
 
-        this.container.addEventListener('mousemove', (event) => {
-            if (!isMouseDown) return;
-
-            const deltaX = event.clientX - previousMousePosition.x;
-            const deltaY = event.clientY - previousMousePosition.y;
-
-            const rotationSpeed = 0.005;
-            this.camera.rotation.y -= deltaX * rotationSpeed;
-            this.camera.rotation.x -= deltaY * rotationSpeed;
-
-            const maxPitch = Math.PI / 2 - 0.01;
-            const minPitch = -Math.PI / 2 + 0.01;
-            this.camera.rotation.x = Math.max(minPitch, Math.min(maxPitch, this.camera.rotation.x));
-
-            previousMousePosition.x = event.clientX;
-            previousMousePosition.y = event.clientY;
-        });
-
-        this.playerCollisions = this.playerCollisions.bind(this);
-        this.update = this.update.bind(this);
-        this.updatePlayer = this.updatePlayer.bind(this);
-        this.loadOctaTree = this.loadOctaTree.bind(this);
+    // === VELOCITY & DAMPING SYSTEM ===
+    let damping = Math.exp(-4 * deltaTime) - 1;
+    if (!this.onFloor) {
+      this.playerVelocity.y -= GRAVITY * deltaTime;
+      damping *= 0.1;
+    } else {
+      this.playerVelocity.y = 0;
     }
 
-    loadOctaTree(scene) {
-        if (!scene) {
-            console.warn("No scene passed to loadOctaTree!");
-            return;
-        }
-        let found = 0;
-        scene.traverse((child) => {
-            if (child.isMesh && child.geometry) {
-                child.updateMatrixWorld(true);
-                const box = new THREE.Box3().setFromObject(child);
-                const size = new THREE.Vector3();
-                box.getSize(size);
+    this.playerVelocity.addScaledVector(this.playerVelocity, damping);
 
-                if (child.name === "Floor") {
-                    console.warn(`Inflating flat mesh "${child.name}" for Octree.`);
-                    const center = new THREE.Vector3();
-                    box.getCenter(center);
+    // Apply keyboard input to velocity
+    const speedDelta = deltaTime * (this.onFloor ? 25 : 8);
 
-                    const physicalRepresentation = new THREE.Mesh(
-                        new THREE.BoxGeometry(size.x, 0.01, size.z)
-                    );
-                    physicalRepresentation.position.copy(center);
-                    physicalRepresentation.quaternion.copy(child.quaternion);
-                    physicalRepresentation.updateMatrixWorld(true);
-                    this.worldOctree.fromGraphNode(physicalRepresentation);
-                } else if (child.name !== "Cube024" && child.name !== "Cube024_1") {
-                    this.worldOctree.fromGraphNode(child);
-                }
-                found++;
+    if (this.keys['KeyW']) {
+      this.playerVelocity.add(this.getForwardVector().multiplyScalar(speedDelta));
+    }
+    if (this.keys['KeyS']) {
+      this.playerVelocity.add(this.getForwardVector().multiplyScalar(-speedDelta));
+    }
+    if (this.keys['KeyA']) {
+      this.playerVelocity.add(this.getSideVector().multiplyScalar(-speedDelta));
+    }
+    if (this.keys['KeyD']) {
+      this.playerVelocity.add(this.getSideVector().multiplyScalar(speedDelta));
+    }
+
+    // Move player capsule
+    const deltaPosition = this.playerVelocity.clone().multiplyScalar(deltaTime);
+    this.playerCollider.translate(deltaPosition);
+
+    // === COLLISION DETECTION (BVH) ===
+    this.onFloor = false;
+    for (const mesh of this.collisionMeshes) {
+      const bvh = mesh.geometry.boundsTree;
+      this.tempBox.makeEmpty();
+      this.tempMat.copy(mesh.matrixWorld).invert();
+      this.tempSegment.copy(this.playerCollider);
+
+      this.tempSegment.start.applyMatrix4(this.tempMat);
+      this.tempSegment.end.applyMatrix4(this.tempMat);
+      this.tempBox.expandByPoint(this.tempSegment.start);
+      this.tempBox.expandByPoint(this.tempSegment.end);
+      this.tempBox.min.addScalar(-this.playerCollider.radius);
+      this.tempBox.max.addScalar(this.playerCollider.radius);
+
+      bvh.shapecast({
+        intersectsBounds: box => box.intersectsBox(this.tempBox),
+        intersectsTriangle: tri => {
+          const triPoint = this.tempVector;
+          const capsulePoint = this.tempVector.clone();
+
+          const distance = tri.closestPointToSegment(this.tempSegment, triPoint, capsulePoint);
+          if (distance < this.playerCollider.radius) {
+            const depth = this.playerCollider.radius - distance;
+            const direction = capsulePoint.sub(triPoint).normalize();
+
+            this.tempSegment.start.addScaledVector(direction, depth);
+            this.tempSegment.end.addScaledVector(direction, depth);
+
+            if (direction.dot(new THREE.Vector3(0, 1, 0)) > 0.5) {
+              this.onFloor = true;
             }
-        });
-
-        if (found === 0) {
-            console.warn("No collidable meshes found in scene for Octree!");
-        } else {
-            console.log(`Octree built with ${found} meshes.`);
+          }
         }
+      });
 
-        this.FinishLoadOctree = true;
-        return this.FinishLoadOctree;
+      this.playerCollider.start.copy(this.tempSegment.start).applyMatrix4(mesh.matrixWorld);
+      this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
     }
 
-    playerCollisions() {
-        const result = this.worldOctree.capsuleIntersect(this.playerCollider);
-        this.playerOnFloor = false;
-        if (result) {
-            this.playerOnFloor = result.normal.y > 0;
-            if (!this.playerOnFloor) {
-                this.playerVelocity.addScaledVector(result.normal, - result.normal.dot(this.playerVelocity));
-            }
-            if (result.depth >= 1e-10) {
-                this.playerCollider.translate(result.normal.multiplyScalar(result.depth));
-            }
-        }
-    }
+    // Set camera to top of capsule
+    this.camera.position.copy(this.playerCollider.end);
+  }
 
-    updatePlayer(deltaTime) {
-        let damping = Math.exp(- 4 * deltaTime) - 1;
-        if (!this.playerOnFloor) {
-            this.playerVelocity.y -= GRAVITY * deltaTime;
-            damping *= 0.1;
-        } else {
-            this.playerVelocity.y = 0;
-        }
+  getForwardVector() {
+    this.camera.getWorldDirection(this.playerDirection);
+    this.playerDirection.y = 0;
+    this.playerDirection.normalize();
+    return this.playerDirection.clone();
+  }
 
-        this.playerVelocity.addScaledVector(this.playerVelocity, damping);
-        const deltaPosition = this.playerVelocity.clone().multiplyScalar(deltaTime);
-        this.playerCollider.translate(deltaPosition);
-        this.playerCollisions();
+  getSideVector() {
+    this.camera.getWorldDirection(this.playerDirection);
+    this.playerDirection.y = 0;
+    this.playerDirection.normalize();
+    this.playerDirection.cross(this.camera.up);
+    this.playerDirection.normalize();
+    return this.playerDirection.clone();
+  }
 
-        const cameraOffset = new THREE.Vector3(0, 1, 0);
-        this.camera.position.copy(this.playerCollider.end).add(cameraOffset);
-    }
+  _initInputHandlers() {
+    this.container.addEventListener('keydown', (event) => {
+      this.keys[event.code] = true;
+    });
+    this.container.addEventListener('keyup', (event) => {
+      this.keys[event.code] = false;
+    });
 
-    update(deltaTime) {
-        this.updatePlayer(deltaTime);
-        this.updateControls(deltaTime);
-        this.teleportPlayerIfOob();
-    }
+    this.container.addEventListener('mousedown', (e) => {
+      this.isMouseDown = true;
+      this.previousMousePosition.x = e.clientX;
+      this.previousMousePosition.y = e.clientY;
+    });
 
-    getForwardVector() {
-        this.camera.getWorldDirection(this.playerDirection);
-        this.playerDirection.y = 0;
-        this.playerDirection.normalize();
-        return this.playerDirection;
-    }
+    this.container.addEventListener('mouseup', () => {
+      this.isMouseDown = false;
+    });
 
-    getSideVector() {
-        this.camera.getWorldDirection(this.playerDirection);
-        this.playerDirection.y = 0;
-        this.playerDirection.normalize();
-        this.playerDirection.cross(this.camera.up);
-        this.playerDirection.normalize();
-        return this.playerDirection;
-    }
+    this.container.addEventListener('mousemove', (event) => {
+      if (!this.isMouseDown) return;
 
-    updateControls(deltaTime) {
-        const speedDelta = deltaTime * (this.playerOnFloor ? 25 : 8);
+      const deltaX = event.clientX - this.previousMousePosition.x;
+      const deltaY = event.clientY - this.previousMousePosition.y;
 
-        if (this.keyStates['KeyW']) {
-            this.playerVelocity.add(this.getForwardVector().multiplyScalar(speedDelta));
-        }
-        if (this.keyStates['KeyS']) {
-            this.playerVelocity.add(this.getForwardVector().multiplyScalar(- speedDelta));
-        }
-        if (this.keyStates['KeyA']) {
-            this.playerVelocity.add(this.getSideVector().multiplyScalar(- speedDelta));
-        }
-        if (this.keyStates['KeyD']) {
-            this.playerVelocity.add(this.getSideVector().multiplyScalar(speedDelta));
-        }
-    }
+      this.yaw -= deltaX * 0.002;
+      this.pitch -= deltaY * 0.002;
+      this.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.pitch));
 
-    teleportPlayerIfOob() {
-        if (this.camera.position.y <= -25) {
-            this.playerCollider.start.set(0, 0.35, 0);
-            this.playerCollider.end.set(0, 1, 0);
-            this.playerCollider.radius = 0.35;
-            this.camera.position.copy(this.playerCollider.end);
-            this.camera.rotation.set(0, 0, 0);
-        }
-    }
+      this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
 
-    getPlayerPosition() {
-        return this.playerCollider.end.clone();
-    }
+      this.previousMousePosition.x = event.clientX;
+      this.previousMousePosition.y = event.clientY;
+    });
+  }
 
-    removeObjectFromOctaTree(doorObj) {
-        if (doorObj && doorObj.isMesh) {
-            this.activeObjects = this.activeObjects.filter((object) => object !== doorObj);
-            this.worldOctree.clear();
-            this.activeObjects.forEach((object) => {
-                if (object.isMesh && object.geometry) {
-                    this.worldOctree.fromGraphNode(object);
-                }
-            });
-            console.log("Door removed from Octree");
-        } else {
-            console.warn("Invalid door object passed to removeOctaTree!");
-        }
-    }
-
-    dispose() {
-        this.worldOctree = null;
-        this.activeObjects = [];
-        this.playerCollider = null;
-        this.playerVelocity = null;
-        this.playerDirection = null;
-        console.log("FirstPersonPlayer resources disposed.");
-    }
-
-    getOctree() {
-        return this.worldOctree;
-    }
+  dispose() {
+    this.collisionMeshes = [];
+    this.bvhReady = false;
+  }
 }
