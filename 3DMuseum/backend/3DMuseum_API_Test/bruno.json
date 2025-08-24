@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "3DMuseum_API_Test",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

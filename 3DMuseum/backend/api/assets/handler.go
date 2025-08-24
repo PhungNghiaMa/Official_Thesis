@@ -95,3 +95,8 @@ func (Handler *Handler) GetAsset(context *gin.Context) {
 
 	context.JSON(http.StatusOK, assetList)
 }
+
+// THIS IS USED TO TEST WHETHER ROUTE WORK OR NOT ( BASE CASE OF API TEST )
+func (Handler *Handler) Hello(context *gin.Context){
+	context.JSON(http.StatusOK, gin.H{"message": "Hello"})
+}

@@ -1,7 +1,6 @@
 package assets
 
 import (
-	"fmt"
 	"main/business"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +15,7 @@ func RegisterAssetRoutes(router *gin.Engine , database *gorm.DB, PinataService *
 
 		assetRoutes := router.Group("/")
 		{
-			assetRoutes.GET("/hello", func(ctx *gin.Context) {fmt.Println("Hello")})	
+			assetRoutes.GET("/hello", assetHandler.Hello)	
 			assetRoutes.POST("/upload", assetHandler.UploadAsset)
 			assetRoutes.GET("/list/:roomID", assetHandler.GetAsset)
 		}
