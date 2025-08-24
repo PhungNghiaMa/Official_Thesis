@@ -22,21 +22,21 @@ type Category struct {
 type Asset struct {
 	AID                   uint      `gorm:"column:asset_id;primaryKey;autoIncrement" json:"aid"`
 	AssetCID              string    `gorm:"column:asset_cid;type:varchar(255);unique;not null" json:"asset_cid"`
-	AssetMeshName 		  string    `gorm:"type:varchar(255)" json:"asset_mesh_name"` 
+	AssetMeshName 		  string    `gorm:"type:varchar(255)" json:"asset_mesh_name,index:idx_assets_room_mesh_version,priority:2"` 
 	AssetName             string    `gorm:"type:varchar(255);not null" json:"asset_name"`
 	Title                 string    `gorm:"type:varchar(255)" json:"title"`
 	VietnameseDescription string    `gorm:"type:text" json:"vietnamese_description"`
 	EnglishDescription    string    `gorm:"type:text" json:"english_description"`
 
 	// Foreign Key to Room (One-to-Many)
-	RoomID uint `gorm:"not null;index" json:"room_id"`
+	RoomID uint `gorm:"not null;index" json:"room_id,index:idx_assets_room_mesh_version,priority:1"`
 	Room   Room `gorm:"foreignKey:RoomID"`
 
 	// Foreign Key to Category (One-to-Many)
 	CategoryID uint     `gorm:"not null;index" json:"category_id"`
 	Category   Category `gorm:"foreignKey:CategoryID"`
 	Filesize int64 
-	Version int `gorm:"default:1" json:"version"` 
+	Version int `gorm:"default:1" json:"version,index:idx_assets_room_mesh_version,priority:3,sort:desc"` 
 	CreatedAt             time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt             time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }

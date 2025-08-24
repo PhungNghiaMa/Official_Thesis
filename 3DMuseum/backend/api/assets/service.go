@@ -17,15 +17,15 @@ type Service interface {
 	GetAsset(Context context.Context, RoomID int) ([]model.ResponseMetadataInfor, error)
 }
 
-type ImageService struct {
-	ImageRepo Repository
+type AssetService struct {
+	AssetRepo Repository
 }
 
-func NewService(ImageRepo Repository) *ImageService {
-	return &ImageService{ImageRepo: ImageRepo}
+func NewService(AssetRepo Repository) *AssetService {
+	return &AssetService{AssetRepo: AssetRepo}
 }
 
-func (ImageService *ImageService) UploadAsset(context context.Context, DetailUploadInfor model.DetailUploadInfor, PinataService *business.PinataService) error {
+func (AssetService *AssetService) UploadAsset(context context.Context, DetailUploadInfor model.DetailUploadInfor, PinataService *business.PinataService) error {
 	var fileBuffer []byte
 	var newFileName string
 	// -STEP 1: Save the original uploaded file to a temporary location
@@ -58,20 +58,24 @@ func (ImageService *ImageService) UploadAsset(context context.Context, DetailUpl
 		fmt.Println("IPFS_HASH: ", PinataUploadResponse.IpfsHash)
 	}
 
-	ErrorAssetExist = fmt.Errorf("asset already exists at the Mesh %v in the Room %v", DetailUploadInfor.MeshName, DetailUploadInfor.RoomID)
-	exists, err := ImageService.ImageRepo.CheckSimilarAsset(context, PinataUploadResponse.IpfsHash)
+	ErrorAssetExist = fmt.Errorf("asset already exists at the Mesh %v in the Room %v and fail to update image information", DetailUploadInfor.MeshName, DetailUploadInfor.RoomID)
+	exists, err := AssetService.AssetRepo.CheckSimilarAsset(context, PinataUploadResponse.IpfsHash)
 	if err != nil {
 		return err
 	}
 	if exists {
+		updateErr := AssetService.AssetRepo.UpdateAssetInfor(context, PinataUploadResponse.IpfsHash, DetailUploadInfor)
+		if updateErr != nil {
+			return updateErr
+		}
 		return ErrorAssetExist
 	}
 
 	// If there is no error and the image is not exist in any room then try to insert into the database
-	return ImageService.ImageRepo.UploadAsset(context, PinataUploadResponse, DetailUploadInfor)
+	return AssetService.AssetRepo.UploadAsset(context, PinataUploadResponse, DetailUploadInfor)
 }
 
-func (ImageService *ImageService) GetAsset(context context.Context, RoomID int) ([]model.ResponseMetadataInfor, error) {
-	assetList, err := ImageService.ImageRepo.GetAsset(context, RoomID)
+func (AssetService *AssetService) GetAsset(context context.Context, RoomID int) ([]model.ResponseMetadataInfor, error) {
+	assetList, err := AssetService.AssetRepo.GetAsset(context, RoomID)
 	return assetList, err
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 
+// Enable the accelerated raycasting for all meshes
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const GRAVITY = 30;
@@ -26,7 +27,6 @@ export default class FirstPersonPlayer {
     this.playerDirection = new THREE.Vector3();
     this.onFloor = false;
 
-    // Helper variables for collision detection
     this.tempBox = new THREE.Box3();
     this.tempMat = new THREE.Matrix4();
     this.tempSegment = new THREE.Line3();
@@ -49,6 +49,7 @@ export default class FirstPersonPlayer {
     scene.traverse((child) => {
       if (child.isMesh && child.geometry) {
         child.updateMatrixWorld(true);
+        // This is the correct way to build the BVH
         child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
         this.collisionMeshes.push(child);
       }
@@ -57,10 +58,17 @@ export default class FirstPersonPlayer {
     console.log('[FirstPersonPlayer] BVH built for', this.collisionMeshes.length, 'meshes');
   }
 
+  onKeyDown(event) {
+    this.keys[event.code] = true;
+  }
+
+  onKeyUp(event) {
+    this.keys[event.code] = false;
+  }
+
   update(deltaTime) {
     if (!this.bvhReady) return;
 
-    // === VELOCITY & DAMPING SYSTEM ===
     let damping = Math.exp(-4 * deltaTime) - 1;
     if (!this.onFloor) {
       this.playerVelocity.y -= GRAVITY * deltaTime;
@@ -71,7 +79,6 @@ export default class FirstPersonPlayer {
 
     this.playerVelocity.addScaledVector(this.playerVelocity, damping);
 
-    // Apply keyboard input to velocity
     const speedDelta = deltaTime * (this.onFloor ? 25 : 8);
 
     if (this.keys['KeyW']) {
@@ -87,11 +94,9 @@ export default class FirstPersonPlayer {
       this.playerVelocity.add(this.getSideVector().multiplyScalar(speedDelta));
     }
 
-    // Move player capsule
     const deltaPosition = this.playerVelocity.clone().multiplyScalar(deltaTime);
     this.playerCollider.translate(deltaPosition);
 
-    // === COLLISION DETECTION (BVH) ===
     this.onFloor = false;
     for (const mesh of this.collisionMeshes) {
       const bvh = mesh.geometry.boundsTree;
@@ -131,7 +136,6 @@ export default class FirstPersonPlayer {
       this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
     }
 
-    // Set camera to top of capsule
     this.camera.position.copy(this.playerCollider.end);
   }
 
@@ -152,12 +156,8 @@ export default class FirstPersonPlayer {
   }
 
   _initInputHandlers() {
-    this.container.addEventListener('keydown', (event) => {
-      this.keys[event.code] = true;
-    });
-    this.container.addEventListener('keyup', (event) => {
-      this.keys[event.code] = false;
-    });
+    this.container.addEventListener('keydown', (event) => this.onKeyDown(event));
+    this.container.addEventListener('keyup', (event) => this.onKeyUp(event));
 
     this.container.addEventListener('mousedown', (e) => {
       this.isMouseDown = true;

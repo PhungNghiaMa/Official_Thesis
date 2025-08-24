@@ -1,21 +1,29 @@
 // src/game_logic/index.js
 
-import "../../game.css";
+import "../../main.css";
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS3DRenderer } from 'three/addons/renderers/CSS3DRenderer.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import FirstPersonPlayer from './control';
+import ThirdPersonPlayer from "./ThirdPersonPlayer.js";
 import AnnotationDiv from "./annotationDiv";
 import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
 import { GetRoomAsset } from "./services";
 import { Museum } from "./constants";
-import { Capsule} from "three/examples/jsm/Addons.js";
+import { Capsule, DRACOLoader} from "three/examples/jsm/Addons.js";
 import RaycasterManager from "./raycaster.js"
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { KTX2Loader } from "three/examples/jsm/Addons.js";
+import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
+import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+
+
+THREE.Cache.enabled = true; // Enable caching for better performance
 
 // --- Global variables for the game, now scoped within this module ---
 const clock = new THREE.Clock();
@@ -24,8 +32,10 @@ const scene = new THREE.Scene();
 let menuOpen = false;
 let currentMuseumId = Museum.ART_GALLERY;
 
-const STEPS_PER_FRAME = 5;
-let fpView;
+const STEPS_PER_FRAME = 5; // Number of physics steps per frame
+let fpView, tpView; // Instance of FirstPersonPlayer and ThirdPersonPlayer
+let playerCollider;
+let activePlayer = 'tp';
 let annotationMesh = {};
 
 let isDoorOpen = false;
@@ -33,10 +43,44 @@ let animation = null;
 let mixer = null;
 let hasLoadPlayer = false;
 let physiscsReady = false;
-let currentScene = null
+let currentScene = null;
 
+let characterModelReady = false;
+
+// Third person character model instance
+let characterModel = null;
+// Light instance
+let ambientLight , hemiLight , spot1 , spot2 , spotLight;
+
+// instance for post-processing
 let composer , outlinePass , renderPass;
 let currentlyHoveredObject = null;
+
+// THREE loading managers
+const LoadingManager = new THREE.LoadingManager();
+
+LoadingManager.onStart = (url, itemsLoaded, itemsTotal) => {
+    console.log(`Started loading: ${url}. Loaded ${itemsLoaded} of ${itemsTotal} files.`);
+    document.getElementById('loading-container').style.display = 'flex';
+    document.getElementById('progress').style.width = '0%';
+};
+
+LoadingManager.onLoad = () => {
+    console.log('All resources loaded.');
+    document.getElementById('loading-container').style.display = 'none';
+};
+
+LoadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
+    const progress = (itemsLoaded / itemsTotal) * 100
+    console.log(`Loading file: ${url}. Loaded ${itemsLoaded} of ${itemsTotal} files. (${progress.toFixed(2)}%)`);
+    document.getElementById('progress').style.width = progress + '%';
+}
+
+LoadingManager.onError = (url) => {
+    console.error(`There was an error loading: ${url}`);
+};
+
+
 const doorState = {
     Door001: false,
     Door002: false
@@ -45,7 +89,7 @@ let interactedDoor;
 const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "art_gallery/VIRTUAL_ART_GALLERY_3.gltf",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_8.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -68,12 +112,14 @@ function onWindowResize() {
 
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
-    camera.position.set(0,0,0);
+    // camera.position.set(0,0,0);
 
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setClearColor(new THREE.Color("#f0f0f0"), 1); // Color and full opacity
     cssRenderer.setSize(container.clientWidth, container.clientHeight);
     css3dRenderer.setSize(container.clientWidth, container.clientHeight);
+    if (composer) composer.setSize(container.clientWidth, container.clientHeight);
+    if (outlinePass) outlinePass.setSize(container.clientWidth, container.clientHeight);
 }
 
 function hideAnnotations() {
@@ -95,19 +141,21 @@ function setImageToMesh(scene,meshName, imgUrl) {
         (loadedTexture) => {
             loadedTexture.flipY = false;
             loadedTexture.colorSpace = THREE.SRGBColorSpace;
-            loadedTexture.minFilter = THREE.LinearFilter;
-            loadedTexture.magFilter = THREE.LinearFilter;
+            loadedTexture.minFilter = THREE.LinearMipMapLinearFilter; // Use mipmaps for better quality
+            loadedTexture.magFilter = THREE.LinearMipmapLinearFilter;
             loadedTexture.generateMipmaps = true;
             loadedTexture.wrapS = THREE.ClampToEdgeWrapping;
             loadedTexture.wrapT = THREE.ClampToEdgeWrapping;
             loadedTexture.needsUpdate = true;
-            loadedTexture.encoding = THREE.sRGBEncoding;
             loadedTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-            const material = new THREE.MeshBasicMaterial({
+            const material = new THREE.MeshStandardMaterial({
                 map: loadedTexture,
                 side: THREE.DoubleSide,
+                roughness: 0.5,  // adjust to taste
+                metalness: 0.0,  // usually 0 for paintings/paper
             });
+
 
             let mesh = scene.getObjectByName(meshName)
             if (mesh && mesh.isMesh){
@@ -139,10 +187,33 @@ document.body.addEventListener("uploadevent", (event) => {
     }
 });
 
-const loader = new GLTFLoader().setPath('/assets/');
+renderer = new THREE.WebGLRenderer({ antialias: true});
+
+// DRACO LOADER + KTX2 LOADER 
+// Initialize DracoLoader for geometry compression
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('/draco/');
+dracoLoader.setDecoderConfig({ type: 'wasm' });
+dracoLoader.preload();
+
+// Initialize KTX2Loader for compressed textures
+const ktx2Loader = new KTX2Loader();
+ktx2Loader.setTranscoderPath('/basis/');
+ktx2Loader.detectSupport(renderer);
+
+// Main model loader 
+const loader = new GLTFLoader(LoadingManager).setPath('/assets/');
+loader.setDRACOLoader(dracoLoader);
+loader.setKTX2Loader(ktx2Loader);
+
+// Character model loader 
+const characterLoader = new GLTFLoader().setPath('/assets/');
+characterLoader.setDRACOLoader(dracoLoader);
+characterLoader.setKTX2Loader(ktx2Loader);
+
+
 
 function clearSceneObjects(obj) {
-    // ... (rest of the function is unchanged)
     if (mixer) {
         mixer.stopAllAction();
         mixer = null;
@@ -171,6 +242,8 @@ function clearSceneObjects(obj) {
     currentScene = null;
 }
 
+
+
 function checkPlayerPosition() {
     if (doorBoundingBox && !hasEnteredNewScene && hasLoadPlayer) {
         const playerPosition = fpView.getPlayerPosition();
@@ -182,7 +255,82 @@ function checkPlayerPosition() {
     }
 }
 
-function loadModel() {
+// Material Tuning Function
+function tuneMaterial(material) {
+    if (!material) return; 
+
+    if (!(material instanceof THREE.MeshStandardMaterial) && !(material instanceof THREE.MeshPhysicalMaterial)) {
+        let upgradedMaterial = new THREE.MeshStandardMaterial({
+            map: material.map || null,
+            color: (material.color && material.color.clone()) || new THREE.Color(0xffffff),
+            roughness: 1.0, // Adjust roughness for better appearance
+            metalness: 0.0, // Set metalness to 0
+            // keep transparency settings if needed
+            transparent: !!material.transparent,
+            opacity: material.opacity !== undefined ? material.opacity : 1.0,
+        })
+        material = upgradedMaterial;
+    }
+
+    // Clamp physically-based ranges ( avoid mistakes like roughness > 1 or metalness < 0 )
+    if (material.roughness !== undefined) {
+        material.roughness = 1.0;
+    }
+    if (material.metalness !== undefined) {
+        material.metalness = 0.0;
+    }
+
+    // Make reflection from scene.environment visible ( tweak for better reflections )
+    // has no effect on MeshBasicMaterial or MeshLambertMaterial
+    if ('envMapIntensity' in material) {
+        material.envMapIntensity = 0.5; // Adjust to taste, 0.5 is a good starting point
+    }
+
+    material.side = THREE.DoubleSide; // Ensure all materials are front-facing
+
+    if (material.map) {
+        material.map.colorSpace = THREE.SRGBColorSpace;
+        material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        material.map.minFilter = THREE.LinearMipMapLinearFilter;
+        material.map.magFilter = THREE.LinearMipMapLinearFilter;
+        material.map.needsUpdate = true;
+    }
+
+    const mapNames = ['map', 'emissiveMap', 'aoMap', 'metalnessMap', 'roughnessMap', 'normalMap', 'bumpMap'];
+    for (const name of mapNames){
+        const texture = material[name];
+        if (!texture) continue;
+
+        // Color space: ONLY color/emissive are sRGB; the rest are linear
+        if (name === 'emissiveMap') {
+            texture.colorSpace = THREE.SRGBColorSpace;
+        }
+        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        texture.minFilter = THREE.NearestMipMapNearestFilter; // Use mipmaps for better quality
+        texture.magFilter = THREE.NearestMipMapLinearFilter;
+        texture.needsUpdate = true; // Ensure the texture is updated
+    }
+
+    if(material.normalMap && !material.normalScale){
+        material.normalScale = new THREE.Vector2(1, 1); // Ensure normal maps are applied correctly
+    }
+
+    material.needsUpdate = true; // Ensure the material is updated
+    return material;
+}
+
+// ENSURE UV2 EXISTS FOR AO/LIGHTMAPS IF AO MAPS ARE PRESENT
+function ensureUV2ForAO(geometry) {
+  if (!geometry) return;
+  if (!geometry.attributes.uv2 && geometry.attributes.uv) {
+    geometry.setAttribute('uv2', new THREE.BufferAttribute(geometry.attributes.uv.array, 2));
+    geometry.attributes.uv2.needsUpdate = true;
+  }
+}
+
+
+// src/game_logic/index.js
+async function loadModel() {
     document.getElementById('loading-container').style.display = 'flex';
     document.getElementById('progress').style.width = '0%';
 
@@ -194,154 +342,226 @@ function loadModel() {
     annotationMesh = {};
     clearSceneObjects(scene);
 
-    const ambientLight = new THREE.AmbientLight("#FFFFFF", 4);
+    // softer, not washing out shadows
+    ambientLight = new THREE.AmbientLight(0xf0f0f0, 0.6);
     scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight("#FFFFFF", 2);
-    scene.add(directionalLight);
-    
-    loader.load(
-        ModelPaths[currentMuseumId],
-        (gltf) => {
-            scene.add(gltf.scene);
-            gltf.scene.updateMatrixWorld(true);
-            currentScene = gltf.scene
-            animation = gltf.animations;
-            mixer = new THREE.AnimationMixer(gltf.scene);
 
-            let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null, count = 0;
+    // hemisphere for ambient sky/ground tint
+    hemiLight = new THREE.HemisphereLight(0xf0f0f0, 0xf4e7a4, 0.6);
+    hemiLight.color.setHSL(0.138, 0.78, 0.92);    
+    hemiLight.position.set(0, 20, 0);
+    scene.add(hemiLight);
 
-            gltf.scene.traverse((child) => {
-                child.updateMatrixWorld(true);
 
-                if (child.isMesh) {
-                    console.log(child.name)
-                    const pos = new THREE.Vector3();
-                    child.getWorldPosition(pos);
-                    const size = new THREE.Box3().setFromObject(child).getSize(new THREE.Vector3());
+    // // main gallery lights
+    // spot1 = new THREE.SpotLight(0xffffff, 20);
+    // spot1.position.set(6, 8, 6);
+    // spot1.angle = Math.PI / 8;
+    // spot1.penumbra = 0.4;
+    // spot1.decay = 2;
+    // spot1.distance = 30;
+    // spot1.castShadow = true;
+    // spot1.shadow.bias = -0.0001;
+    // spot1.shadow.camera.near = 0.1;
+    // spot1.shadow.camera.far  = 40;
+    // spot1.shadow.mapSize.set(2048, 2048);
+    // scene.add(spot1);
 
-                    if (pos.y < fallbackY) {
-                        fallbackY = pos.y;
-                        fallbackX = pos.x;
-                        fallbackZ = pos.z;
-                    }
+    // spot2 = new THREE.SpotLight(0xffffff, 15);
+    // spot2.position.set(-6, 8, -6);
+    // spot2.angle = Math.PI / 8;
+    // spot2.penumbra = 0.4;
+    // spot2.decay = 2;
+    // spot2.distance = 30;
+    // spot2.castShadow = true;
+    // spot2.shadow.camera.near = 0.1;
+    // spot2.shadow.camera.far  = 40;
+    // spot2.shadow.mapSize.set(2048, 2048);
+    // spot2.shadow.bias = -0.0001;
+    // scene.add(spot2);
 
-                    if (/^Picture_Frame\d+$/.test(child.name)){
-                        pictureFramesArray.push(child)
-                    }
 
-                    if (child.name.toLowerCase().includes("floor")) {
-                        const box = new THREE.Box3().setFromObject(child);
-                        const size = box.getSize(new THREE.Vector3());
-                        const area = size.x * size.z;
-                        if (area > maxArea) {
-                            maxArea = area;
-                            floorMesh = { box, center: box.getCenter(new THREE.Vector3()) };
-                            floorBoxMaxY = box.max.y;
-                        }
-                    }
+// environment map
+    const pmremGen = new THREE.PMREMGenerator(renderer);
+    pmremGen.compileEquirectangularShader();
+    new EXRLoader().load('/assets/HDRI_1.exr', (exrTex) => {
+        const envMap = pmremGen.fromEquirectangular(exrTex).texture;
+        scene.environment = envMap;
+        scene.background = envMap; // optional
+        exrTex.dispose();
+        pmremGen.dispose();
+    });
 
-                    if (child.parent?.name === "Door") {
-                        doorBoundingBox = new THREE.Box3().setFromObject(child);
-                    }
+    // const pmremGen = new THREE.PMREMGenerator(renderer);
+    // pmremGen.compileEquirectangularShader();
+
+    // new RGBELoader().load('/assets/HDRI_3.hdr', (hdrTex) => {
+    // const envMap = pmremGen.fromEquirectangular(hdrTex).texture;
+    // scene.environment = envMap;
+    // scene.background = envMap; // optional
+    // hdrTex.dispose();
+    // pmremGen.dispose();
+    // });
+
+    scene.background = new THREE.Color("#f0f0f0"); // Set a neutral background color
+
+    try {
+        // --- PARALLEL LOADING ---
+        // 1. Create a promise for the model load. loader.loadAsync is a built-in
+        // promise-based version of loader.load that we can await.
+        const loadModelPromise = loader.loadAsync(ModelPaths[currentMuseumId]);
+
+        // 2. Create a promise for the API call.
+        const getAssetsPromise = GetRoomAsset(currentMuseumId);
+
+        // 3. Load third view character
+        // const loadModelCharacterPromise = characterLoader.loadAsync('optimizedModel/ANIMATED.glb');
+        // // Try to load the characterModel in background, but don't block scene loading on it.
+        // loadModelCharacterPromise.then((gltf) => {
+        //     characterModel = gltf.scene;
+        //     characterModelReady = true;
+        // }).catch((error) => {
+        //     console.error('Error loading character model:', error);
+        // });
+
+        // 3. Wait for BOTH promises to complete simultaneously.
+        // const [gltf, items] = await Promise.all([loadModelPromise, getAssetsPromise]);
+        const [gltf, items] = await Promise.all([loadModelPromise]);
+
+
+        // --- SCENE SETUP (executes after all assets are downloaded) ---
+        scene.add(gltf.scene);
+        gltf.scene.updateMatrixWorld(true);
+        currentScene = gltf.scene;
+        animation = gltf.animations;
+        mixer = new THREE.AnimationMixer(gltf.scene);
+
+        let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null, count = 0;
+
+        gltf.scene.traverse((child) => {
+            if(!child.isMesh) return;
+
+            child.receiveShadow = true;
+            child.updateMatrixWorld(true);
+
+            if (Array.isArray(child.material)) {
+                child.material = child.material.map(tuneMaterial);
+            } else {
+                child.material = tuneMaterial(child.material); 
+            }
+
+            ensureUV2ForAO(child.geometry);
+
+            if (child.isMesh) {
+                const pos = new THREE.Vector3();
+                child.getWorldPosition(pos);
+                child.castShadow = true;
+                child.receiveShadow = true;
+
+
+
+                if (pos.y < fallbackY) {
+                    fallbackY = pos.y;
+                    fallbackX = pos.x;
+                    fallbackZ = pos.z;
+                }
+
+                if (/^Picture_Frame\d+$/.test(child.name)) {
+                    pictureFramesArray.push(child);
+                }
+
+                if (child.name.toLowerCase().includes("floor")) {
+                    child.material.side = THREE.DoubleSide; // Ensure floor is double-sided
+                    child.material.roughness = 0.8; // Adjust roughness for better appearance
+                    child.material.metalness = 0.0; // Set metalness to 0
                     
-                    if (child.name === "Handle") {
-                        child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1, roughness: 5 });
+                    console.log("FLOOR POSITION IS: ",child.position.x, child.position.y, child.position.z)
+                    const box = new THREE.Box3().setFromObject(child);
+                    const size = box.getSize(new THREE.Vector3());
+                    const area = size.x * size.z;
+                    if (area > maxArea) {
+                        maxArea = area;
+                        floorMesh = { box, center: box.getCenter(new THREE.Vector3()) };
+                        floorBoxMaxY = box.max.y;
                     }
                 }
 
-                if (child.isMesh && /^ImageMesh\d+$/.test(child.name)) {
-                    imageMeshesArray.push(child)
+                if (child.parent?.name === "Door") {
+                    doorBoundingBox = new THREE.Box3().setFromObject(child);
+                }
+                
+                if (child.name === "Handle") {
+                    child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
+                }
+
+                if (/^ImageMesh\d+$/.test(child.name)) {
+                    imageMeshesArray.push(child);
                     const imagePlane = child;
-                    const material = new THREE.MeshBasicMaterial({
-                        color: 0xffffff,
-                        side: THREE.DoubleSide,
-                        map: null,
-                    });
-                    imagePlane.material = material;
-                    imagePlane.material.needsUpdate = true;
-
-                    if (imagePlane.geometry?.attributes.uv) {
-                        imagePlane.geometry.attributes.uv.needsUpdate = true;
-                    }
-
+                    if (imagePlane.geometry?.attributes.uv) imagePlane.geometry.attributes.uv.needsUpdate = true;
+                    
                     const box = new THREE.Box3().setFromObject(imagePlane);
                     const center = box.getCenter(new THREE.Vector3());
-
-                    const annotationDiv = new AnnotationDiv(count, imagePlane);
-                    count++;
+                    const annotationDiv = new AnnotationDiv(count++, imagePlane);
                     const label = new CSS2DObject(annotationDiv.getElement());
                     label.position.copy(center);
                     scene.add(label);
-
                     annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
-
-                    annotationDiv.onAnnotationClick = () => {
-                        const aspectRatio = 1/1
-                        displayUploadModal(aspectRatio, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
-                    };
+                    annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
                 }
-            });
-
-            raycasterManager.setPictureFrames(pictureFramesArray)
-
-            Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap , pictureFramesArray , imageMeshesArray)
-
-            let playerStart = { x: 0, y: 0, z: 0 };
-            if (floorMesh) {
-                playerStart.x = floorMesh.center.x;
-                playerStart.y = (floorBoxMaxY ?? floorMesh.center.y) + 0.01;
-                playerStart.z = floorMesh.center.z;
-            } else {
-                playerStart.x = fallbackX;
-                playerStart.y = (fallbackY === Infinity ? 1 : fallbackY) + 0.1;
-                playerStart.z = fallbackZ;
-                console.warn("No floor mesh found, using lowest mesh position as fallback.");
             }
+        });
 
-            const playerCollider = new Capsule(
-                new THREE.Vector3(playerStart.x, playerStart.y, playerStart.z),
-                new THREE.Vector3(playerStart.x, playerStart.y + 1.8 - 0.35, playerStart.z),
-                0.35
-            );
-
-
-            fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
-            fpView.loadOctaTree(gltf.scene);
-            physiscsReady = true;
-            hasLoadPlayer = true;
-            
-            document.getElementById('loading-container').style.display = 'none';
-
-            GetRoomAsset(currentMuseumId).then(items => {
-                (Array.isArray(items) ? items : []).forEach(item => {
-                    if (!item) {
-                        console.log("Cannot get item from API");
-                        return;
-                    }
-                    const { asset_mesh_name, asset_cid, title, viet_des, en_des } = item;
-                    if (annotationMesh[asset_mesh_name]) {
-                        annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des);
-                        setImageToMesh(currentScene, asset_mesh_name, `https://gateway.pinata.cloud/ipfs/${asset_cid}`);
-                    }
-                });
-            }).catch(error => {
-                console.error("Error fetching museum list:", error);
-            });
-
-            hasEnteredNewScene = false;
-        },
-        (xhr) => {
-            const progress = xhr.total > 0 ? (xhr.loaded / xhr.total) * 100 : xhr.loaded / 60000;
-            document.getElementById('progress').style.width = progress + '%';
-        },
-        (error) => {
-            console.error('An error occurred while loading the model:', error);
-            document.getElementById('loading-container').style.display = 'none';
+        raycasterManager.setPictureFrames(pictureFramesArray);
+        Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray);
+        
+        // --- PLAYER SETUP ---
+        let playerStart = { x: 0, y: 0, z: 0 };
+        if (floorMesh) {
+            playerStart = { x: floorMesh.center.x, y: (floorBoxMaxY ?? floorMesh.center.y) + 0.01, z: floorMesh.center.z };
+        } else {
+            playerStart = { x: fallbackX, y: (fallbackY === Infinity ? 1 : fallbackY) + 0.1, z: fallbackZ };
+            console.warn("No floor mesh found, using lowest mesh position as fallback.");
         }
-    );
+        playerCollider = new Capsule(
+            new THREE.Vector3(playerStart.x, playerStart.y, playerStart.z),
+            new THREE.Vector3(playerStart.x, playerStart.y + 1.8 - 0.35, playerStart.z),
+            0.35
+        );
+
+        // INIT FIRST VIEW PLAYER
+        activateFirstPerson();
+        fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
+        fpView.buildBVH(gltf.scene);
+
+        // INIT THIRD VIEW PLAYER
+
+        // tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider);
+        // tpView._cameraSnapped = false;
+        // activateThirdPerson();
+        // tpView.buildBVH(gltf.scene);        
+
+        physiscsReady = true;
+        hasLoadPlayer = true;
+        
+        // --- POPULATE SCENE WITH DATA ---
+        (Array.isArray(items) ? items : []).forEach(item => {
+            if (!item) return;
+            const { asset_mesh_name, asset_cid, title, viet_des, en_des } = item;
+            if (annotationMesh[asset_mesh_name]) {
+                annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des);
+                setImageToMesh(currentScene, asset_mesh_name, `https://gateway.pinata.cloud/ipfs/${asset_cid}`);
+            }
+        });
+
+        hasEnteredNewScene = false;
+        document.getElementById('loading-container').style.display = 'none';
+
+    } catch (error) {
+        console.error('An error occurred while loading the model or assets:', error);
+        document.getElementById('loading-container').style.display = 'none';
+    }
 }
 
-// ... (rest of the functions: setMuseumModel, initMenu, openMenu, closeMenu are unchanged)
 function setMuseumModel(modelId) {
     currentMuseumId = modelId;
     loadModel();
@@ -395,25 +615,165 @@ if (menuContainer) menuContainer.style.display = "none";
 }
 
 function animate() {
-    animationFrameId = requestAnimationFrame(animate);
-    const deltaTime = Math.min(0.05, clock.getDelta()) / STEPS_PER_FRAME;
+  animationFrameId = requestAnimationFrame(animate);
+  const deltaTime = Math.min(0.05, clock.getDelta()) / STEPS_PER_FRAME;
 
-    if (physiscsReady && fpView) {
-        for (let i = 0; i < STEPS_PER_FRAME; i++) {
-            fpView.update(deltaTime);
-        }
+  // --- Third Person Player update ---
+//   if (physiscsReady && activePlayer === 'tp' && tpView) {
+//     for (let i = 0; i < STEPS_PER_FRAME; i++) {
+//       tpView.update(deltaTime);
+//     }
+
+//     // --- CAMERA FOLLOW with collision ---
+//     if (
+//       tpView.playerCollider &&
+//       tpView.model &&
+//       tpView.bvhMeshes?.length > 0 // ✅ only when BVH is ready
+//     ) {
+//       const CAMERA_DISTANCE = 2.0;    // distance behind avatar
+//       const CAMERA_HEIGHT   = 1.4;    // see over shoulders
+//       const HEAD_OFFSET     = 1.0;    // where we look from on capsule
+//       const MIN_CAM_DIST    = 1.0;    // min distance
+//       const CAMERA_RADIUS   = 0.3;    // treat camera as a sphere
+
+//       // origin = look-at point at head
+//       const origin = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, HEAD_OFFSET, 0));
+
+//       // desired = behind avatar
+//       const forward = new THREE.Vector3(0, 0, 1)
+//         .applyQuaternion(tpView.model.quaternion)
+//         .normalize();
+
+//       const desired = origin.clone()
+//         .add(forward.clone().multiplyScalar(-CAMERA_DISTANCE))
+//         .add(new THREE.Vector3(0, CAMERA_HEIGHT - HEAD_OFFSET, 0));
+
+//       let clamped = desired.clone();
+
+//       // --- Sphere-based resolution (3 passes) ---
+//       const sphere = new THREE.Sphere(clamped.clone(), CAMERA_RADIUS);
+//       for (let iter = 0; iter < 3; iter++) {
+//         for (const mesh of tpView.bvhMeshes) {
+//           if (!mesh.geometry.boundsTree) continue;
+//           mesh.geometry.boundsTree.shapecast({
+//             intersectsBounds: (box) => box.intersectsSphere(sphere),
+//             intersectsTriangle: (tri) => {
+//               const triPoint = new THREE.Vector3();
+//               tri.closestPointToPoint(sphere.center, triPoint);
+//               const dist = sphere.center.distanceTo(triPoint);
+//               const depth = CAMERA_RADIUS - dist;
+//               if (depth > 0) {
+//                 const push = sphere.center.clone().sub(triPoint);
+//                 if (push.lengthSq() > 1e-12) {
+//                     push.normalize().multiplyScalar(depth + 1e-4);
+//                     sphere.center.add(push);
+//                 } else {
+//                     // Fallback if sphere center is on the triangle
+//                     const normal = new THREE.Vector3();
+//                     tri.getNormal(normal);
+//                     sphere.center.add(normal.multiplyScalar(depth + 1e-4));
+//                 }
+//               }
+//             }
+//           });
+//         }
+//       }
+//       clamped.copy(sphere.center);
+
+//       // --- Line-of-sight enforcement ---
+//       const dirLOS = clamped.clone().sub(origin);
+//       const distLOS = dirLOS.length();
+//       if (distLOS > 1e-6) {
+//         const raycaster = new THREE.Raycaster(origin, dirLOS.clone().normalize(), 0, distLOS);
+//         const hits = raycaster.intersectObjects(tpView.bvhMeshes, true);
+//         if (hits.length > 0) {
+//           const safe = Math.max(MIN_CAM_DIST, hits[0].distance - 0.05);
+//           clamped = origin.clone().add(dirLOS.clone().normalize().multiplyScalar(safe));
+//         }
+//       }
+
+//       // --- Side fallback if too close ---
+//       if (clamped.distanceTo(origin) < MIN_CAM_DIST + 0.1) {
+//         const side = new THREE.Vector3(1, 0, 0).applyQuaternion(tpView.model.quaternion).normalize();
+//         const sideDesired = origin.clone()
+//           .add(side.multiplyScalar(CAMERA_DISTANCE * 0.8))
+//           .add(new THREE.Vector3(0, CAMERA_HEIGHT - HEAD_OFFSET, 0));
+
+//         const sideSphere = new THREE.Sphere(sideDesired.clone(), CAMERA_RADIUS);
+//         for (let iter = 0; iter < 3; iter++) {
+//           for (const mesh of tpView.bvhMeshes) {
+//             if (!mesh.geometry.boundsTree) continue;
+//             mesh.geometry.boundsTree.shapecast({
+//               intersectsBounds: (box) => box.intersectsSphere(sideSphere),
+//               intersectsTriangle: (tri) => {
+//                 const triPoint = new THREE.Vector3();
+//                 tri.closestPointToPoint(sideSphere.center, triPoint);
+//                 const dist = sideSphere.center.distanceTo(triPoint);
+//                 const depth = CAMERA_RADIUS - dist;
+//                 if (depth > 0) {
+//                     const push = sideSphere.center.clone().sub(triPoint);
+
+//                     if (push.lengthSq() > 1e-12) {
+//                         // If the vector is not zero, normalize and push
+//                         push.normalize().multiplyScalar(depth + 1e-4);
+//                         sideSphere.center.add(push);
+//                     } else {
+//                         // Otherwise, push along the triangle's normal
+//                         const normal = new THREE.Vector3();
+//                         tri.getNormal(normal);
+//                         sideSphere.center.add(normal.multiplyScalar(depth + 1e-4));
+//                     }
+//                 }
+//               }
+//             });
+//           }
+//         }
+//         clamped.copy(sideSphere.center);
+//       }
+
+//       // --- Smooth follow ---
+//       const lerpFactor = 0.8;
+//       if (!tpView._cameraSnapped) {
+//         camera.position.copy(clamped);
+//         tpView._cameraSnapped = true;
+//       } else {
+//         camera.position.lerp(clamped, lerpFactor);
+//       }
+//       camera.lookAt(origin);
+
+//     } else {
+//       // 🔎 fallback debug camera until tpView.model is ready
+//       camera.position.set(0, 5, 10);
+//       camera.lookAt(0, 1, 0);
+//     }
+//   }
+
+  // --- First Person Player update ---
+  if (physiscsReady && activePlayer === 'fp' && fpView) {
+    for (let i = 0; i < STEPS_PER_FRAME; i++) {
+      fpView.update(deltaTime);
     }
+  }
 
-    mixer?.update(deltaTime * 4);
-    checkPlayerPosition();
+  mixer?.update(deltaTime * 4);
+  checkPlayerPosition();
 
-    // RENDER THE SCENCE USING THE COMPOSER
-    // composer.render();
+  if (composer) composer.render();
+  if (cssRenderer) cssRenderer.render(scene, camera);
+  if (css3dRenderer) css3dRenderer.render(scene, camera);
+}
 
-    // if (renderer) renderer.render(scene, camera);
-    if (composer) composer.render();
-    if (cssRenderer) cssRenderer.render(scene, camera);
-    if (css3dRenderer) css3dRenderer.render(scene, camera);
+
+// ──────────── switching function ────────────
+function activateThirdPerson() {
+  if (!tpView.model) {
+    tpView.loadModel('./assets/optimizedModel/ANIMATED.glb', dracoLoader, ktx2Loader, renderer);
+  }
+  activePlayer = 'tp';
+}
+
+function activateFirstPerson() {
+  activePlayer = 'fp';
 }
 
 export function initializeGame(targetContainerId = 'model-container') {
@@ -440,19 +800,31 @@ export function initializeGame(targetContainerId = 'model-container') {
     css3dRenderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(css3dRenderer.domElement);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true});
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.VSMShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.5;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.VSMShadowMap; // Use soft shadows
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setClearColor(new THREE.Color("#f0f0f0"), 1); // Set background color and opacity
+    renderer.physicallyCorrectLights = true; // Enable physically correct lighting
+    renderer.autoClear = false; // Allow multiple render passes
+
+
+    // Append the renderer to the container
     container.appendChild(renderer.domElement);
+    
+
 
     container.tabIndex = 0;
     setTimeout(() => container.focus(), 50);
 
     composer = new EffectComposer(renderer);
+
     const renderPass = new RenderPass(scene , camera);
+    renderPass.clear = true; // ensure it clears before rendering
+    renderPass.clearAlpha = 1; // set clear alpha to fully opaque
     composer.addPass(renderPass);
 
     outlinePass = new OutlinePass(new THREE.Vector2(container.clientWidth, container.clientHeight), scene , camera);
@@ -461,11 +833,39 @@ export function initializeGame(targetContainerId = 'model-container') {
     outlinePass.edgeThickness = 3.5;
     outlinePass.pulsePeriod = 2;
     outlinePass.visibleEdgeColor.set("#ffffff");
-    outlinePass.hiddenEdgeColor.set("#ffffff");
+    outlinePass.hiddenEdgeColor.set("#000000");
+    outlinePass.hiddenEdgeColor.multiplyScalar(0); // effectively transparent
+    outlinePass.renderToScreen = true;      // if it's the last pass
+    outlinePass.clear = false;              // don’t clear the whole buffer
+    outlinePass.clearAlpha = 0;             // transparent, not black
     composer.addPass(outlinePass);
+
+    composer.addPass(new OutputPass());
 
   
     window.addEventListener('resize', onWindowResize);
+
+    window.addEventListener('keydown', (event) => {
+        if (event.code === 'KeyV'){
+            // active toogle to switch between first and third view
+            activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
+        }
+
+        if (activePlayer === 'fp' && fpView) {
+            fpView.onKeyDown(event);
+        } else if (activePlayer === 'tp' && tpView) {
+            tpView.onKeyDown(event);
+        }
+    });
+
+    window.addEventListener('keyup', (event) => {
+        if (activePlayer === 'fp' && fpView) {
+            fpView.onKeyUp(event);
+        } else if (activePlayer === 'tp' && tpView) {
+            tpView.onKeyUp(event);
+        }
+    });
+
     container.addEventListener("keydown", (e) => e.key === "Shift" && hideAnnotations());
     container.addEventListener("keyup", (e) => e.key === "Shift" && showAnnotations());
 
