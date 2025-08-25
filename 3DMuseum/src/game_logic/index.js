@@ -643,88 +643,57 @@ function animate() {
     }
 
     // --- CAMERA FOLLOW (AAA: independent yaw/pitch) ---
+    // Inside the animate() function
+// --- CAMERA FOLLOW ---
+    // --- CAMERA FOLLOW ---
+    // --- CAMERA FOLLOW ---
     if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
-      // head-level target (top of capsule + tiny offset)
-      const lookAtPoint = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, 0.1, 0));
+        const lookAtPoint = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, 0.5, 0));
 
-      // build camera quaternion from yaw/pitch (independent of character)
-      const yawQuat   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), camYaw);
-      const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), camPitch);
-      const camQuat   = new THREE.Quaternion().multiplyQuaternions(yawQuat, pitchQuat);
+        // build camera quaternion from yaw/pitch (independent of character)
+        // ✅ follow player orientation instead of global camYaw
+        const playerQuat = tpView.model.quaternion.clone();
 
-      // ideal position: behind head, same height
-      const idealOffset = new THREE.Vector3(0, 0.0, -2.5).applyQuaternion(camQuat);
-      const idealPos = lookAtPoint.clone().add(idealOffset);
-      let finalPos = idealPos.clone();
+        // add pitch if you want mouse pitch control
+        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), camPitch);
+        playerQuat.multiply(pitchQuat);
 
-      // line-of-sight shorten (head -> camera)
-      {
-        const dir = idealPos.clone().sub(lookAtPoint);
-        const dist = dir.length();
-        if (dist > 1e-6) {
-          dir.normalize();
-          const rc = new THREE.Raycaster(lookAtPoint, dir, 0, dist);
-          const hits = rc.intersectObjects(tpView.bvhMeshes, true);
-          if (hits.length > 0) {
-            finalPos = hits[0].point.clone().add(dir.clone().multiplyScalar(-0.12));
-          }
-        }
-      }
+        // ideal camera offset (behind player)
+        const idealOffset = new THREE.Vector3(0, 0.0, -2.5).applyQuaternion(playerQuat);
 
-      // camera sphere collision (multi-pass like the capsule)
-      {
-        const CAMERA_RADIUS = 0.3;
-        const cameraSphere = new THREE.Sphere(finalPos.clone(), CAMERA_RADIUS);
+        const idealPos = lookAtPoint.clone().add(idealOffset);
 
-        for (let iter = 0; iter < 3; iter++) {
-          for (const mesh of tpView.bvhMeshes) {
-            if (!mesh.geometry?.boundsTree) continue;
-
-            mesh.geometry.boundsTree.shapecast({
-              intersectsBounds: (box) => box.intersectsSphere(cameraSphere),
-              intersectsTriangle: (tri) => {
-                const triPoint = new THREE.Vector3();
-                tri.closestPointToPoint(cameraSphere.center, triPoint);
-                const d = cameraSphere.center.distanceTo(triPoint);
-
-                if (d < CAMERA_RADIUS) {
-                  const depth = CAMERA_RADIUS - d;
-                  const push = cameraSphere.center.clone().sub(triPoint);
-                  if (push.lengthSq() > 1e-12) {
-                    push.normalize().multiplyScalar(depth + 1e-4);
-                    cameraSphere.center.add(push);
-                  } else {
-                    const n = new THREE.Vector3();
-                    tri.getNormal(n);
-                    cameraSphere.center.add(n.multiplyScalar(depth + 1e-4));
-                  }
-                }
-              }
-            });
-          }
+        let finalPos = idealPos.clone();
+        
+        // Create a ray from the 'lookAtPoint' towards the 'idealPos'
+        const raycaster = new THREE.Raycaster(lookAtPoint, idealOffset.clone().normalize());
+        raycaster.far = idealOffset.length();
+        
+        // Check for intersections with the environment meshes
+        const intersects = raycaster.intersectObjects(tpView.bvhMeshes, true);
+        
+        if (intersects.length > 0) {
+            // If an intersection is found, place the camera just before the hit point
+            // You can add a small offset to prevent clipping
+            finalPos.copy(intersects[0].point);
+            finalPos.add(raycaster.ray.direction.clone().multiplyScalar(-0.3)); // Pull back slightly
         }
 
-        finalPos.copy(cameraSphere.center);
-      }
-
-      // minimum distance so we never sit inside the head
-      {
-        const minDist = 0.6;
-        const toCam = finalPos.clone().sub(lookAtPoint);
-        if (toCam.length() < minDist) {
-          finalPos = lookAtPoint.clone().add(toCam.normalize().multiplyScalar(minDist));
+        // smooth follow
+        // smooth follow
+        const lerp = 0.05;
+        if (!tpView._cameraSnapped) {
+            camera.position.copy(finalPos);
+            tpView._cameraSnapped = true;
+        } else {
+            camera.position.lerp(finalPos, lerp);
         }
-      }
 
-      // smooth follow
-      const lerp = 0.12;
-      if (!tpView._cameraSnapped) {
-        camera.position.copy(finalPos);
-        tpView._cameraSnapped = true;
-      } else {
-        camera.position.lerp(finalPos, lerp);
-      }
-      camera.lookAt(lookAtPoint);
+        // ✅ FIX: Smoothly interpolate the camera's rotation
+        const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+            new THREE.Matrix4().lookAt(camera.position, lookAtPoint, camera.up)
+        );
+        camera.quaternion.slerp(targetQuaternion, lerp);
     }
   }
 
@@ -756,7 +725,7 @@ function animate() {
 // ──────────── switching function ────────────
 function activateThirdPerson() {
   if (!tpView.model) {
-    tpView.loadModel('./assets/optimizedModel/ANIMATED.glb', dracoLoader, ktx2Loader, renderer);
+    tpView.loadModel('./assets/optimizedModel/ANIMATED_1.glb', dracoLoader, ktx2Loader, renderer);
   }
   activePlayer = 'tp';
 }
