@@ -529,16 +529,18 @@ async function loadModel() {
         );
 
         // INIT FIRST VIEW PLAYER
-        activateFirstPerson();
-        fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
-        fpView.buildBVH(gltf.scene);
+        // activateFirstPerson();
+        // fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
+        // fpView.buildBVH(gltf.scene);
 
         // INIT THIRD VIEW PLAYER
 
-        // tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider);
-        // tpView._cameraSnapped = false;
-        // activateThirdPerson();
-        // tpView.buildBVH(gltf.scene);        
+        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider);
+        tpView._cameraSnapped = false;
+        tpView.buildBVH(gltf.scene);
+        activateThirdPerson();
+        
+
 
         physiscsReady = true;
         hasLoadPlayer = true;
@@ -614,154 +616,141 @@ function closeMenu(){
 if (menuContainer) menuContainer.style.display = "none";
 }
 
+// put these once near your input setup in index.js
+let camYaw = 0;
+let camPitch = 0;
+
+// pointer lock mouse look (example — adapt to your app)
+window.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement) {
+    camYaw   -= e.movementX * 0.002;  // sensitivity X
+    camPitch -= e.movementY * 0.002;  // sensitivity Y
+    camPitch = Math.max(-1.2, Math.min(0.8, camPitch)); // clamp pitch
+  }
+});
+
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
-  const deltaTime = Math.min(0.05, clock.getDelta()) / STEPS_PER_FRAME;
+
+  const frameDelta = Math.min(0.05, clock.getDelta());
+  const stepDelta  = frameDelta / STEPS_PER_FRAME;
 
   // --- Third Person Player update ---
-//   if (physiscsReady && activePlayer === 'tp' && tpView) {
-//     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-//       tpView.update(deltaTime);
-//     }
+  if (physiscsReady && activePlayer === 'tp' && tpView) {
+    for (let i = 0; i < STEPS_PER_FRAME; i++) {
+      // ✅ pass camYaw into the player (don’t read globals inside the class)
+      tpView.update(stepDelta, camYaw);
+    }
 
-//     // --- CAMERA FOLLOW with collision ---
-//     if (
-//       tpView.playerCollider &&
-//       tpView.model &&
-//       tpView.bvhMeshes?.length > 0 // ✅ only when BVH is ready
-//     ) {
-//       const CAMERA_DISTANCE = 2.0;    // distance behind avatar
-//       const CAMERA_HEIGHT   = 1.4;    // see over shoulders
-//       const HEAD_OFFSET     = 1.0;    // where we look from on capsule
-//       const MIN_CAM_DIST    = 1.0;    // min distance
-//       const CAMERA_RADIUS   = 0.3;    // treat camera as a sphere
+    // --- CAMERA FOLLOW (AAA: independent yaw/pitch) ---
+    if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
+      // head-level target (top of capsule + tiny offset)
+      const lookAtPoint = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, 0.1, 0));
 
-//       // origin = look-at point at head
-//       const origin = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, HEAD_OFFSET, 0));
+      // build camera quaternion from yaw/pitch (independent of character)
+      const yawQuat   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), camYaw);
+      const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), camPitch);
+      const camQuat   = new THREE.Quaternion().multiplyQuaternions(yawQuat, pitchQuat);
 
-//       // desired = behind avatar
-//       const forward = new THREE.Vector3(0, 0, 1)
-//         .applyQuaternion(tpView.model.quaternion)
-//         .normalize();
+      // ideal position: behind head, same height
+      const idealOffset = new THREE.Vector3(0, 0.0, -2.5).applyQuaternion(camQuat);
+      const idealPos = lookAtPoint.clone().add(idealOffset);
+      let finalPos = idealPos.clone();
 
-//       const desired = origin.clone()
-//         .add(forward.clone().multiplyScalar(-CAMERA_DISTANCE))
-//         .add(new THREE.Vector3(0, CAMERA_HEIGHT - HEAD_OFFSET, 0));
+      // line-of-sight shorten (head -> camera)
+      {
+        const dir = idealPos.clone().sub(lookAtPoint);
+        const dist = dir.length();
+        if (dist > 1e-6) {
+          dir.normalize();
+          const rc = new THREE.Raycaster(lookAtPoint, dir, 0, dist);
+          const hits = rc.intersectObjects(tpView.bvhMeshes, true);
+          if (hits.length > 0) {
+            finalPos = hits[0].point.clone().add(dir.clone().multiplyScalar(-0.12));
+          }
+        }
+      }
 
-//       let clamped = desired.clone();
+      // camera sphere collision (multi-pass like the capsule)
+      {
+        const CAMERA_RADIUS = 0.3;
+        const cameraSphere = new THREE.Sphere(finalPos.clone(), CAMERA_RADIUS);
 
-//       // --- Sphere-based resolution (3 passes) ---
-//       const sphere = new THREE.Sphere(clamped.clone(), CAMERA_RADIUS);
-//       for (let iter = 0; iter < 3; iter++) {
-//         for (const mesh of tpView.bvhMeshes) {
-//           if (!mesh.geometry.boundsTree) continue;
-//           mesh.geometry.boundsTree.shapecast({
-//             intersectsBounds: (box) => box.intersectsSphere(sphere),
-//             intersectsTriangle: (tri) => {
-//               const triPoint = new THREE.Vector3();
-//               tri.closestPointToPoint(sphere.center, triPoint);
-//               const dist = sphere.center.distanceTo(triPoint);
-//               const depth = CAMERA_RADIUS - dist;
-//               if (depth > 0) {
-//                 const push = sphere.center.clone().sub(triPoint);
-//                 if (push.lengthSq() > 1e-12) {
-//                     push.normalize().multiplyScalar(depth + 1e-4);
-//                     sphere.center.add(push);
-//                 } else {
-//                     // Fallback if sphere center is on the triangle
-//                     const normal = new THREE.Vector3();
-//                     tri.getNormal(normal);
-//                     sphere.center.add(normal.multiplyScalar(depth + 1e-4));
-//                 }
-//               }
-//             }
-//           });
-//         }
-//       }
-//       clamped.copy(sphere.center);
+        for (let iter = 0; iter < 3; iter++) {
+          for (const mesh of tpView.bvhMeshes) {
+            if (!mesh.geometry?.boundsTree) continue;
 
-//       // --- Line-of-sight enforcement ---
-//       const dirLOS = clamped.clone().sub(origin);
-//       const distLOS = dirLOS.length();
-//       if (distLOS > 1e-6) {
-//         const raycaster = new THREE.Raycaster(origin, dirLOS.clone().normalize(), 0, distLOS);
-//         const hits = raycaster.intersectObjects(tpView.bvhMeshes, true);
-//         if (hits.length > 0) {
-//           const safe = Math.max(MIN_CAM_DIST, hits[0].distance - 0.05);
-//           clamped = origin.clone().add(dirLOS.clone().normalize().multiplyScalar(safe));
-//         }
-//       }
+            mesh.geometry.boundsTree.shapecast({
+              intersectsBounds: (box) => box.intersectsSphere(cameraSphere),
+              intersectsTriangle: (tri) => {
+                const triPoint = new THREE.Vector3();
+                tri.closestPointToPoint(cameraSphere.center, triPoint);
+                const d = cameraSphere.center.distanceTo(triPoint);
 
-//       // --- Side fallback if too close ---
-//       if (clamped.distanceTo(origin) < MIN_CAM_DIST + 0.1) {
-//         const side = new THREE.Vector3(1, 0, 0).applyQuaternion(tpView.model.quaternion).normalize();
-//         const sideDesired = origin.clone()
-//           .add(side.multiplyScalar(CAMERA_DISTANCE * 0.8))
-//           .add(new THREE.Vector3(0, CAMERA_HEIGHT - HEAD_OFFSET, 0));
+                if (d < CAMERA_RADIUS) {
+                  const depth = CAMERA_RADIUS - d;
+                  const push = cameraSphere.center.clone().sub(triPoint);
+                  if (push.lengthSq() > 1e-12) {
+                    push.normalize().multiplyScalar(depth + 1e-4);
+                    cameraSphere.center.add(push);
+                  } else {
+                    const n = new THREE.Vector3();
+                    tri.getNormal(n);
+                    cameraSphere.center.add(n.multiplyScalar(depth + 1e-4));
+                  }
+                }
+              }
+            });
+          }
+        }
 
-//         const sideSphere = new THREE.Sphere(sideDesired.clone(), CAMERA_RADIUS);
-//         for (let iter = 0; iter < 3; iter++) {
-//           for (const mesh of tpView.bvhMeshes) {
-//             if (!mesh.geometry.boundsTree) continue;
-//             mesh.geometry.boundsTree.shapecast({
-//               intersectsBounds: (box) => box.intersectsSphere(sideSphere),
-//               intersectsTriangle: (tri) => {
-//                 const triPoint = new THREE.Vector3();
-//                 tri.closestPointToPoint(sideSphere.center, triPoint);
-//                 const dist = sideSphere.center.distanceTo(triPoint);
-//                 const depth = CAMERA_RADIUS - dist;
-//                 if (depth > 0) {
-//                     const push = sideSphere.center.clone().sub(triPoint);
+        finalPos.copy(cameraSphere.center);
+      }
 
-//                     if (push.lengthSq() > 1e-12) {
-//                         // If the vector is not zero, normalize and push
-//                         push.normalize().multiplyScalar(depth + 1e-4);
-//                         sideSphere.center.add(push);
-//                     } else {
-//                         // Otherwise, push along the triangle's normal
-//                         const normal = new THREE.Vector3();
-//                         tri.getNormal(normal);
-//                         sideSphere.center.add(normal.multiplyScalar(depth + 1e-4));
-//                     }
-//                 }
-//               }
-//             });
-//           }
-//         }
-//         clamped.copy(sideSphere.center);
-//       }
+      // minimum distance so we never sit inside the head
+      {
+        const minDist = 0.6;
+        const toCam = finalPos.clone().sub(lookAtPoint);
+        if (toCam.length() < minDist) {
+          finalPos = lookAtPoint.clone().add(toCam.normalize().multiplyScalar(minDist));
+        }
+      }
 
-//       // --- Smooth follow ---
-//       const lerpFactor = 0.8;
-//       if (!tpView._cameraSnapped) {
-//         camera.position.copy(clamped);
-//         tpView._cameraSnapped = true;
-//       } else {
-//         camera.position.lerp(clamped, lerpFactor);
-//       }
-//       camera.lookAt(origin);
-
-//     } else {
-//       // 🔎 fallback debug camera until tpView.model is ready
-//       camera.position.set(0, 5, 10);
-//       camera.lookAt(0, 1, 0);
-//     }
-//   }
+      // smooth follow
+      const lerp = 0.12;
+      if (!tpView._cameraSnapped) {
+        camera.position.copy(finalPos);
+        tpView._cameraSnapped = true;
+      } else {
+        camera.position.lerp(finalPos, lerp);
+      }
+      camera.lookAt(lookAtPoint);
+    }
+  }
 
   // --- First Person Player update ---
   if (physiscsReady && activePlayer === 'fp' && fpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      fpView.update(deltaTime);
+      fpView.update(stepDelta);
     }
   }
 
-  mixer?.update(deltaTime * 4);
+  // --- Update animation mixers once per frame ---
+  if (tpView?.mixer) tpView.mixer.update(frameDelta);
+  if (mixer) mixer.update(frameDelta);
+
   checkPlayerPosition();
 
   if (composer) composer.render();
   if (cssRenderer) cssRenderer.render(scene, camera);
   if (css3dRenderer) css3dRenderer.render(scene, camera);
 }
+
+
+
+
+
+
 
 
 // ──────────── switching function ────────────
