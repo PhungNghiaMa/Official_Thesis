@@ -21,6 +21,8 @@ import { KTX2Loader } from "three/examples/jsm/Addons.js";
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { Sphere } from "three";
+
 
 
 THREE.Cache.enabled = true; // Enable caching for better performance
@@ -52,6 +54,8 @@ let characterModel = null;
 let characterGLTF = null;
 let tpViewExisted = null;
 let tpViewLoadLate = false;
+let cameraCollider = new Sphere(new THREE.Vector3(), 0.35)
+
 // Light instance
 let ambientLight , hemiLight , spot1 , spot2 , spotLight , sun;
 
@@ -190,7 +194,7 @@ document.body.addEventListener("uploadevent", (event) => {
     }
 });
 
-renderer = new THREE.WebGLRenderer({ antialias: true});
+renderer = new THREE.WebGLRenderer({ antialias: true, alpha:true});
 
 // DRACO LOADER + KTX2 LOADER 
 // Initialize DracoLoader for geometry compression
@@ -260,67 +264,65 @@ function checkPlayerPosition() {
 
 // Material Tuning Function
 function tuneMaterial(material) {
-    if (!material) return; 
+    if (!material) return null; 
 
+    // --- Force upgrade non-PBR materials (MeshBasic, Lambert, etc.) ---
     if (!(material instanceof THREE.MeshStandardMaterial) && !(material instanceof THREE.MeshPhysicalMaterial)) {
-        let upgradedMaterial = new THREE.MeshStandardMaterial({
+        material = new THREE.MeshStandardMaterial({
             map: material.map || null,
             color: (material.color && material.color.clone()) || new THREE.Color(0xffffff),
-            roughness: 1.0, // Adjust roughness for better appearance
-            metalness: 0.0, // Set metalness to 0
-            // keep transparency settings if needed
+            roughness: 1.0,
+            metalness: 0.0,
             transparent: !!material.transparent,
             opacity: material.opacity !== undefined ? material.opacity : 1.0,
-        })
-        material = upgradedMaterial;
+        });
     }
 
-    // Clamp physically-based ranges ( avoid mistakes like roughness > 1 or metalness < 0 )
+    // --- Ensure shadows are enabled ---
+    material.shadowSide = THREE.FrontSide;   // Fix shadow rendering
+    material.needsUpdate = true;
+
+    // Clamp safe values
     if (material.roughness !== undefined) {
-        material.roughness = 1.0;
+        material.roughness = Math.min(Math.max(material.roughness, 0.0), 1.0);
     }
     if (material.metalness !== undefined) {
-        material.metalness = 0.0;
+        material.metalness = Math.min(Math.max(material.metalness, 0.0), 1.0);
     }
 
-    // Make reflection from scene.environment visible ( tweak for better reflections )
-    // has no effect on MeshBasicMaterial or MeshLambertMaterial
+    // Scene environment reflection
     if ('envMapIntensity' in material) {
-        material.envMapIntensity = 0.5; // Adjust to taste, 0.5 is a good starting point
+        material.envMapIntensity = 0.5;
     }
 
-    material.side = THREE.DoubleSide; // Ensure all materials are front-facing
+    // ✅ Important: use FrontSide (so walls don’t render inside)
+    material.side = THREE.DoubleSide;
 
-    if (material.map) {
-        material.map.colorSpace = THREE.SRGBColorSpace;
-        material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        material.map.minFilter = THREE.LinearMipMapLinearFilter;
-        material.map.magFilter = THREE.LinearMipMapLinearFilter;
-        material.map.needsUpdate = true;
-    }
-
+    // Update all maps
     const mapNames = ['map', 'emissiveMap', 'aoMap', 'metalnessMap', 'roughnessMap', 'normalMap', 'bumpMap'];
-    for (const name of mapNames){
+    for (const name of mapNames) {
         const texture = material[name];
         if (!texture) continue;
 
-        // Color space: ONLY color/emissive are sRGB; the rest are linear
-        if (name === 'emissiveMap') {
+        if (name === 'map' || name === 'emissiveMap') {
             texture.colorSpace = THREE.SRGBColorSpace;
+        } else {
+            texture.colorSpace = THREE.LinearSRGBColorSpace;
         }
+
         texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        texture.minFilter = THREE.NearestMipMapNearestFilter; // Use mipmaps for better quality
-        texture.magFilter = THREE.NearestMipMapLinearFilter;
-        texture.needsUpdate = true; // Ensure the texture is updated
+        texture.minFilter = THREE.LinearMipMapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.needsUpdate = true;
     }
 
-    if(material.normalMap && !material.normalScale){
-        material.normalScale = new THREE.Vector2(1, 1); // Ensure normal maps are applied correctly
+    if (material.normalMap && !material.normalScale) {
+        material.normalScale = new THREE.Vector2(1, 1);
     }
 
-    material.needsUpdate = true; // Ensure the material is updated
     return material;
 }
+
 
 // ENSURE UV2 EXISTS FOR AO/LIGHTMAPS IF AO MAPS ARE PRESENT
 function ensureUV2ForAO(geometry) {
@@ -356,9 +358,8 @@ async function loadModel() {
     scene.add(hemiLight);
 
     // Shadow-casting sun
-    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+    sun = new THREE.DirectionalLight(0xffffff, 2.0);
     sun.position.set(6, 10, 6);
-    sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 0.1;
     sun.shadow.camera.far  = 40;
@@ -367,6 +368,7 @@ async function loadModel() {
     sun.shadow.camera.top    =  15;
     sun.shadow.camera.bottom = -15;
     sun.shadow.bias = -0.0002;
+    sun.castShadow = true;
     scene.add(sun);
     scene.add(sun.target);
 
@@ -424,6 +426,7 @@ async function loadModel() {
 
     scene.background = new THREE.Color("#f0f0f0"); // Set a neutral background color
 
+
     try {
         // --- PARALLEL LOADING ---
         // 1. Create a promise for the model load. loader.loadAsync is a built-in
@@ -469,6 +472,19 @@ async function loadModel() {
 
         let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null, count = 0;
 
+        if(characterModel){
+            characterModel.traverse((child) => {
+                if(!child.isMesh) return;
+                if (child.isMesh){
+                    child.castShadow = true;
+                    child.material = tuneMaterial(child.material)
+                }else{
+                    child.castShadow = false;
+                    child.receiveShadow = false;
+                }
+            });
+        }
+
         gltf.scene.traverse((child) => {
             if(!child.isMesh) return;
 
@@ -486,11 +502,7 @@ async function loadModel() {
             if (child.isMesh) {
                 const pos = new THREE.Vector3();
                 child.getWorldPosition(pos);
-                child.castShadow = true;
                 child.receiveShadow = true;
-
-
-
                 if (pos.y < fallbackY) {
                     fallbackY = pos.y;
                     fallbackX = pos.x;
@@ -502,6 +514,7 @@ async function loadModel() {
                 }
 
                 if (child.name.toLowerCase().includes("floor")) {
+                    child.receiveShadow = true;
                     child.material.side = THREE.DoubleSide; // Ensure floor is double-sided
                     child.material.roughness = 0.8; // Adjust roughness for better appearance
                     child.material.metalness = 0.0; // Set metalness to 0
@@ -575,7 +588,7 @@ async function loadModel() {
         fpView.buildBVH(gltf.scene);
 
         // INIT THIRD VIEW PLAYER
-        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, characterModel, mixer);
+        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, characterModel , mixer);
         tpViewExisted = true;
         tpViewLoadLate = true;
         tpView._cameraSnapped = false;
@@ -676,76 +689,71 @@ function animate() {
   const frameDelta = Math.min(0.05, clock.getDelta());
   const stepDelta  = frameDelta / STEPS_PER_FRAME;
 
-  // --- Third Person Player update ---
   if (physiscsReady && activePlayer === 'tp' && tpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      // ✅ pass camYaw into the player (don’t read globals inside the class)
       tpView.update(stepDelta, camYaw);
     }
 
-    // --- CAMERA FOLLOW (AAA: independent yaw/pitch) ---
-    // Inside the animate() function
-// --- CAMERA FOLLOW ---
-    // --- CAMERA FOLLOW ---
-    // --- CAMERA FOLLOW ---
     if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
-        const lookAtPoint = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, 0.5, 0));
+      const lookAtPoint = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, 0.5, 0));
 
-        // build camera quaternion from yaw/pitch (independent of character)
-        // ✅ follow player orientation instead of global camYaw
-        const playerQuat = tpView.model.quaternion.clone();
+      const playerQuat = tpView.model.quaternion.clone();
+      const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), camPitch);
+      playerQuat.multiply(pitchQuat);
 
-        // add pitch if you want mouse pitch control
-        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), camPitch);
-        playerQuat.multiply(pitchQuat);
+      const idealOffset = new THREE.Vector3(0, 0.0, -2.5).applyQuaternion(playerQuat);
+      const idealPos = lookAtPoint.clone().add(idealOffset);
+      let finalPos = idealPos.clone();
 
-        // ideal camera offset (behind player)
-        const idealOffset = new THREE.Vector3(0, 0.0, -2.5).applyQuaternion(playerQuat);
+      // --- CAMERA COLLISION AS SPHERE ---
+      const fovRadians = THREE.MathUtils.degToRad(camera.fov);
+      const near = camera.near;
+      // approximate half-height of near plane
+      const halfHeight = Math.tan(fovRadians * 0.5) * near;
+      const halfWidth  = halfHeight * camera.aspect;
+      // pick the diagonal as "radius" for safety
+      const camRadius = Math.sqrt(halfWidth * halfWidth + halfHeight * halfHeight);
 
-        const idealPos = lookAtPoint.clone().add(idealOffset);
+      // store/adjust your global cameraCollider
+      cameraCollider.center.copy(finalPos);
+      cameraCollider.radius = camRadius;
 
-        let finalPos = idealPos.clone();
-        
-        // Create a ray from the 'lookAtPoint' towards the 'idealPos'
-        const raycaster = new THREE.Raycaster(lookAtPoint, idealOffset.clone().normalize());
-        raycaster.far = idealOffset.length();
-        
-        // Check for intersections with the environment meshes
-        const intersects = raycaster.intersectObjects(tpView.bvhMeshes, true);
-        
-        if (intersects.length > 0) {
-            // If an intersection is found, place the camera just before the hit point
-            // You can add a small offset to prevent clipping
-            finalPos.copy(intersects[0].point);
-            finalPos.add(raycaster.ray.direction.clone().multiplyScalar(-0.3)); // Pull back slightly
-        }
+      // Raycast with sphere check
+      const raycaster = new THREE.Raycaster(lookAtPoint, idealOffset.clone().normalize());
+      raycaster.near = 1e-14;
+      raycaster.far = idealOffset.length();
+      const intersects = raycaster.intersectObjects(tpView.bvhMeshes, true);
 
-        // smooth follow
-        // smooth follow
-        const lerp = 0.05;
-        if (!tpView._cameraSnapped) {
-            camera.position.copy(finalPos);
-            tpView._cameraSnapped = true;
-        } else {
-            camera.position.lerp(finalPos, lerp);
-        }
+      if (intersects.length > 0) {
+        const hitPoint = intersects[0].point;
+        // push camera back by camRadius so its sphere doesn't clip
+        finalPos.copy(hitPoint).sub(raycaster.ray.direction.clone().multiplyScalar(camRadius + 0.05));
+        cameraCollider.center.copy(finalPos);
+      }
 
-        // ✅ FIX: Smoothly interpolate the camera's rotation
-        const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
-            new THREE.Matrix4().lookAt(camera.position, lookAtPoint, camera.up)
-        );
-        camera.quaternion.slerp(targetQuaternion, lerp);
+      // smooth follow
+      const lerp = 0.12;
+      if (!tpView._cameraSnapped) {
+        camera.position.copy(finalPos);
+        tpView._cameraSnapped = true;
+      } else {
+        camera.position.lerp(finalPos, lerp);
+      }
+
+      // smooth look
+      const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+        new THREE.Matrix4().lookAt(camera.position, lookAtPoint, camera.up)
+      );
+      camera.quaternion.slerp(targetQuaternion, lerp);
     }
   }
 
-  // --- First Person Player update ---
   if (physiscsReady && activePlayer === 'fp' && fpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
       fpView.update(stepDelta);
     }
   }
 
-  // --- Update animation mixers once per frame ---
   if (tpView?.mixer) tpView.mixer.update(frameDelta);
   if (mixer) mixer.update(frameDelta);
 
@@ -756,12 +764,13 @@ function animate() {
   if (css3dRenderer) css3dRenderer.render(scene, camera);
 }
 
+
 // ──────────── switching function ────────────
 function activateThirdPerson() {
   activePlayer = 'tp';
   if (tpViewLoadLate){
     if(!tpViewExisted && character){
-        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, character.model, mixer);
+        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, character.model , mixer);
         tpView._cameraSnapped = false;
         tpView.buildBVH(currentScene);
         tpView.handleAnimation(character.model, character.gltf);
@@ -824,7 +833,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.5;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.VSMShadowMap; // Use soft shadows
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Use soft shadows
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.setClearColor(new THREE.Color("#f0f0f0"), 1); // Set background color and opacity
     renderer.physicallyCorrectLights = true; // Enable physically correct lighting

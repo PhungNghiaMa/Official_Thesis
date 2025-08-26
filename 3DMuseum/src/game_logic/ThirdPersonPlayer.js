@@ -3,13 +3,14 @@ import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { AnimationMixer } from 'three';
+import { Sphere } from 'three';
 
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const GRAVITY = 30;
 
 export default class ThirdPersonPlayer {
-  constructor(camera, scene, container, playerCollider , mixer, characterModel) {
+  constructor(camera, scene, container, playerCollider, characterModel, mixer) {
     this.camera = camera;
     this.scene = scene;
     this.container = container;
@@ -17,13 +18,10 @@ export default class ThirdPersonPlayer {
     this.playerVelocity = new THREE.Vector3();
     this.playerOnFloor = false;
     this.gravity = GRAVITY;
-    this.turnRateDegree = 70;
+    this.turnRateDegree = 90;
     this.turnRate = THREE.MathUtils.degToRad(this.turnRateDegree);
+    this.cameraCollider = new Sphere(new THREE.Vector3(0,1,0), 0.35);
 
-    this.cameraCollider = {
-      center: new THREE.Vector3(),
-      radius: 1.0
-    }
 
     // Start position inside building (adjust as needed)
     const start = new THREE.Vector3(0, 2, 0);
@@ -38,7 +36,7 @@ export default class ThirdPersonPlayer {
     this.bvhReady = false;
 
     this.model = characterModel ?? null;
-    this.mixer = mixer ?? null;
+    this.mixer = null;
     this.idleAction = null;
     this.walkAction = null;
     this.leftTurnAction = null;
@@ -238,7 +236,10 @@ export default class ThirdPersonPlayer {
     }
 
     // --- input forces ---
-    const speedDelta = delta * (this.playerOnFloor ? 12 : 8);
+        const baseSpeed = this.playerOnFloor ? 15 : 8;
+    // ✅ FIX: Increase speed when the run button is pressed
+    const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
+    const speedDelta = delta * finalSpeed;
 
     // ✅ FIX: Use the camera's direction for movement input
     const tempCamVector = new THREE.Vector3();
@@ -325,10 +326,11 @@ export default class ThirdPersonPlayer {
       // --- MOVEMENT ---
       if (this.input.run && this.runningAction) {
         // RUNNING
+        this.runningAction.timeScale = 1.5;
         this.playAction(this.runningAction);
         if (this.currentAction) {
           // Faster playback if moving faster
-          this.currentAction.timeScale = 1.0;
+          this.currentAction.timeScale = 1.5;
         }
 
       } else if (this.walkAction) {
