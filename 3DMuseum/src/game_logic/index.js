@@ -45,12 +45,15 @@ let hasLoadPlayer = false;
 let physiscsReady = false;
 let currentScene = null;
 
-let characterModelReady = false;
-
 // Third person character model instance
+let characterModelReady = false;
+let character = null;
 let characterModel = null;
+let characterGLTF = null;
+let tpViewExisted = null;
+let tpViewLoadLate = false;
 // Light instance
-let ambientLight , hemiLight , spot1 , spot2 , spotLight;
+let ambientLight , hemiLight , spot1 , spot2 , spotLight , sun;
 
 // instance for post-processing
 let composer , outlinePass , renderPass;
@@ -343,7 +346,7 @@ async function loadModel() {
     clearSceneObjects(scene);
 
     // softer, not washing out shadows
-    ambientLight = new THREE.AmbientLight(0xf0f0f0, 0.6);
+    ambientLight = new THREE.AmbientLight(0xf0f0f0, 0.2);
     scene.add(ambientLight);
 
     // hemisphere for ambient sky/ground tint
@@ -351,6 +354,22 @@ async function loadModel() {
     hemiLight.color.setHSL(0.138, 0.78, 0.92);    
     hemiLight.position.set(0, 20, 0);
     scene.add(hemiLight);
+
+    // Shadow-casting sun
+    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+    sun.position.set(6, 10, 6);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 0.1;
+    sun.shadow.camera.far  = 40;
+    sun.shadow.camera.left   = -15;
+    sun.shadow.camera.right  =  15;
+    sun.shadow.camera.top    =  15;
+    sun.shadow.camera.bottom = -15;
+    sun.shadow.bias = -0.0002;
+    scene.add(sun);
+    scene.add(sun.target);
+
 
 
     // // main gallery lights
@@ -415,14 +434,26 @@ async function loadModel() {
         const getAssetsPromise = GetRoomAsset(currentMuseumId);
 
         // 3. Load third view character
-        // const loadModelCharacterPromise = characterLoader.loadAsync('optimizedModel/ANIMATED.glb');
-        // // Try to load the characterModel in background, but don't block scene loading on it.
-        // loadModelCharacterPromise.then((gltf) => {
-        //     characterModel = gltf.scene;
-        //     characterModelReady = true;
-        // }).catch((error) => {
-        //     console.error('Error loading character model:', error);
-        // });
+        const loadModelCharacterPromise = characterLoader.loadAsync('optimizedModel/ANIMATED_1.glb');
+        // Try to load the characterModel in background, but don't block scene loading on it.
+        loadModelCharacterPromise.then((gltf) => {
+            characterGLTF = gltf;
+            characterModel = gltf.scene;
+            characterModelReady = true;
+            if(tpView){
+                tpViewExisted = true;
+                tpViewLoadLate = false;
+                tpView.handleAnimation(characterModel, characterGLTF);
+                console.info("Finish handle character model using handleAnimation() function in ThirdPersonPlayer.js")
+            }else{
+                tpViewExisted = false;
+                tpViewLoadLate = true;
+                // Store to call in the activateThirdPerson()
+                character = {model: characterModel, gltf: characterGLTF}
+            }
+        }).catch((error) => {
+            console.error('Error loading character model:', error);
+        });
 
         // 3. Wait for BOTH promises to complete simultaneously.
         // const [gltf, items] = await Promise.all([loadModelPromise, getAssetsPromise]);
@@ -522,24 +553,34 @@ async function loadModel() {
             playerStart = { x: fallbackX, y: (fallbackY === Infinity ? 1 : fallbackY) + 0.1, z: fallbackZ };
             console.warn("No floor mesh found, using lowest mesh position as fallback.");
         }
+
+        // --- PLAYER SETUP (capsule aligned so feet are on the floor) ---
+        const RADIUS = 0.35;
+        const TOTAL_HEIGHT = 1.8;           // desired overall capsule height
+        const SEGMENT = TOTAL_HEIGHT - 2*RADIUS; // the inner line segment length
+
+        const startY = playerStart.y + RADIUS + 0.02; // bottom sphere center
+        const endY   = startY + SEGMENT;              // top sphere center
+
         playerCollider = new Capsule(
-            new THREE.Vector3(playerStart.x, playerStart.y, playerStart.z),
-            new THREE.Vector3(playerStart.x, playerStart.y + 1.8 - 0.35, playerStart.z),
-            0.35
+        new THREE.Vector3(playerStart.x, startY, playerStart.z),
+        new THREE.Vector3(playerStart.x, endY,   playerStart.z),
+        RADIUS
         );
 
+
         // INIT FIRST VIEW PLAYER
-        // activateFirstPerson();
-        // fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
-        // fpView.buildBVH(gltf.scene);
+        activateFirstPerson();
+        fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
+        fpView.buildBVH(gltf.scene);
 
         // INIT THIRD VIEW PLAYER
-
-        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider);
+        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, characterModel, mixer);
+        tpViewExisted = true;
+        tpViewLoadLate = true;
         tpView._cameraSnapped = false;
-        tpView.buildBVH(gltf.scene);
-        activateThirdPerson();
-        
+        tpView.buildBVH(gltf.scene);        
+
 
 
         physiscsReady = true;
@@ -715,23 +756,43 @@ function animate() {
   if (css3dRenderer) css3dRenderer.render(scene, camera);
 }
 
-
-
-
-
-
-
-
 // ──────────── switching function ────────────
 function activateThirdPerson() {
-  if (!tpView.model) {
-    tpView.loadModel('./assets/optimizedModel/ANIMATED_1.glb', dracoLoader, ktx2Loader, renderer);
-  }
   activePlayer = 'tp';
+  if (tpViewLoadLate){
+    if(!tpViewExisted && character){
+        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, character.model, mixer);
+        tpView._cameraSnapped = false;
+        tpView.buildBVH(currentScene);
+        tpView.handleAnimation(character.model, character.gltf);
+        scene.add(tpView.model)
+        tpViewExisted = true;
+        tpViewLoadLate = false;
+    }else if (tpViewExisted && character){
+        if (!tpView.model){
+            tpView.attachModel(character.model);
+        }
+        tpView.handleAnimation(character.model, character.gltf);
+        scene.add(tpView.model);
+        tpViewExisted = true;
+        tpViewLoadLate = false;
+    }else{
+        console.info("Not finish load Character Model yet ! Reactivating, please wait ...")
+        setTimeout(activateThirdPerson, 1000);
+        tpViewExisted = false;
+        tpViewLoadLate = false;
+    }
+  }else if (!tpViewLoadLate && tpViewExisted){
+    scene.add(tpView.model);
+  }
 }
 
+
 function activateFirstPerson() {
-  activePlayer = 'fp';
+    if(activePlayer === 'tp' && tpView){
+        scene.remove(tpView.model);
+    }
+    activePlayer = 'fp';
 }
 
 export function initializeGame(targetContainerId = 'model-container') {
