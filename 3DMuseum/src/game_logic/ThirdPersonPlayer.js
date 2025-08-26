@@ -9,7 +9,7 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 const GRAVITY = 30;
 
 export default class ThirdPersonPlayer {
-  constructor(camera, scene, container, playerCollider) {
+  constructor(camera, scene, container, playerCollider , mixer, characterModel) {
     this.camera = camera;
     this.scene = scene;
     this.container = container;
@@ -37,8 +37,8 @@ export default class ThirdPersonPlayer {
     this.bvhMeshes = [];
     this.bvhReady = false;
 
-    this.model = null;
-    this.mixer = null;
+    this.model = characterModel ?? null;
+    this.mixer = mixer ?? null;
     this.idleAction = null;
     this.walkAction = null;
     this.leftTurnAction = null;
@@ -68,6 +68,7 @@ export default class ThirdPersonPlayer {
     this.bvhReady = true;
   }
 
+  // Backup function in the case that index.js fail to load character model
   loadModel(url, DracoLoader, KTX2Loader, renderer) {
     const loader = new GLTFLoader();
     loader.setDRACOLoader(DracoLoader);
@@ -86,7 +87,7 @@ export default class ThirdPersonPlayer {
           child.material.map.needsUpdate = true;
         }
       });
-      this.scene.add(this.model);
+      // this.scene.add(this.model);
 
       const bbox = new THREE.Box3().setFromObject(this.model);
       this.footOffset = -bbox.min.y;
@@ -128,6 +129,51 @@ export default class ThirdPersonPlayer {
     });
   }
 
+
+  // Function to handle animation
+  // Function to handle animation when model was preloaded in index.js
+  handleAnimation(model, characterGLTF) {
+    if (!model || !characterGLTF) return;
+
+    this.model = model;
+
+    // ensure the character can cast/receive shadow
+    this.model.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    // compute how much we must lift the model so feet = y:0 in model space
+    const bbox = new THREE.Box3().setFromObject(this.model);
+    this.footOffset = -bbox.min.y;
+
+    // mixer & clips
+    if (!this.mixer) this.mixer = new AnimationMixer(this.model);
+
+    if (characterGLTF.animations && characterGLTF.animations.length > 0) {
+      characterGLTF.animations.forEach((clip) => {
+        // prevent root translation from yanking us around
+        clip.tracks = clip.tracks.filter(track => !track.name.endsWith('.position'));
+
+        switch (clip.name) {
+          case 'Idle':         this.idleAction = this.mixer.clipAction(clip); break;
+          case 'WalkForward':  this.walkAction = this.mixer.clipAction(clip); break;
+          case 'Running':      this.runningAction = this.mixer.clipAction(clip); break;
+          case 'LeftTurn':     this.leftTurnAction = this.mixer.clipAction(clip); break;
+          case 'RightTurn':    this.rightTurnAction = this.mixer.clipAction(clip); break;
+          default: break;
+        }
+      });
+
+      if (this.idleAction) {
+        this.idleAction.play();
+        this.currentAction = this.idleAction;
+      }
+    }
+  }
+
   getForwardVector() {
     if (this.model) {
       const f = new THREE.Vector3(0, 0, 1).applyQuaternion(this.model.quaternion);
@@ -159,7 +205,8 @@ export default class ThirdPersonPlayer {
       case 'KeyS': this.input.backward = true; break;
       case 'KeyA': this.input.left = true; break;
       case 'KeyD': this.input.right = true; break;
-      case 'ShiftLeft' || 'ShiftRight': this.input.run = true; break;
+      case 'ShiftLeft' : this.input.run = true; break;
+      case 'ShiftRight': this.input.run = true; break;
     }
   }
 
@@ -169,8 +216,13 @@ export default class ThirdPersonPlayer {
       case 'KeyS': this.input.backward = false; break;
       case 'KeyA': this.input.left = false; break;
       case 'KeyD': this.input.right = false; break;
-      case 'ShiftLeft' || 'ShiftRight': this.input.run = false; break;
+      case 'ShiftLeft' : this.input.run = false; break; 
+      case 'ShiftRight': this.input.run = false; break;
     }
+  }
+
+  attachModel(model){
+    this.model = model;
   }
 
   update(delta) {
@@ -255,7 +307,8 @@ export default class ThirdPersonPlayer {
     // --- update model transform ---
     this.model.position.set(
       this.playerCollider.end.x,
-      this.playerCollider.start.y + this.footOffset,
+      // this.playerCollider.start.y + this.footOffset,
+      this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
       this.playerCollider.end.z
     );
 
