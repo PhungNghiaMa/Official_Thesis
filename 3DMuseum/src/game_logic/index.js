@@ -22,6 +22,10 @@ import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Sphere } from "three";
+import { acceleratedRaycast } from "three-mesh-bvh";
+
+if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
 
 
 
@@ -34,7 +38,7 @@ const scene = new THREE.Scene();
 let menuOpen = false;
 let currentMuseumId = Museum.ART_GALLERY;
 
-const STEPS_PER_FRAME = 5; // Number of physics steps per frame
+const STEPS_PER_FRAME = 3; // Number of physics steps per frame
 let fpView, tpView; // Instance of FirstPersonPlayer and ThirdPersonPlayer
 let playerCollider;
 let activePlayer = 'tp';
@@ -57,11 +61,15 @@ let tpViewLoadLate = false;
 let cameraCollider = new Sphere(new THREE.Vector3(), 0.35)
 
 // Light instance
-let ambientLight , hemiLight , spot1 , spot2 , spotLight , sun;
+let ambientLight , hemiLight , spot1 , spot2 , sun;
 
 // instance for post-processing
 let composer , outlinePass , renderPass;
 let currentlyHoveredObject = null;
+
+// put these once near your input setup in index.js
+let camYaw = 0;
+let camPitch = 0;
 
 // THREE loading managers
 const LoadingManager = new THREE.LoadingManager();
@@ -584,11 +592,11 @@ async function loadModel() {
 
         // INIT FIRST VIEW PLAYER
         activateFirstPerson();
-        fpView = new FirstPersonPlayer(camera, scene, container, playerCollider);
+        fpView = new FirstPersonPlayer(camera, scene, playerCollider);
         fpView.buildBVH(gltf.scene);
 
         // INIT THIRD VIEW PLAYER
-        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, characterModel , mixer);
+        tpView = new ThirdPersonPlayer(camera, scene, playerCollider, characterModel , mixer);
         tpViewExisted = true;
         tpViewLoadLate = true;
         tpView._cameraSnapped = false;
@@ -670,15 +678,13 @@ function closeMenu(){
 if (menuContainer) menuContainer.style.display = "none";
 }
 
-// put these once near your input setup in index.js
-let camYaw = 0;
-let camPitch = 0;
+
 
 // pointer lock mouse look (example — adapt to your app)
 window.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement) {
-    camYaw   -= e.movementX * 0.002;  // sensitivity X
-    camPitch -= e.movementY * 0.002;  // sensitivity Y
+    camYaw   -= e.movementX * 0.005;  // sensitivity X
+    camPitch -= e.movementY * 0.005;  // sensitivity Y
     camPitch = Math.max(-1.2, Math.min(0.8, camPitch)); // clamp pitch
   }
 });
@@ -692,12 +698,14 @@ function animate() {
   if (physiscsReady && activePlayer === 'tp' && tpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
       tpView.update(stepDelta, camYaw);
+      if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.4);
+
     }
 
     if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
-      const lookAtPoint = tpView.playerCollider.end.clone().add(new THREE.Vector3(0, 0.5, 0));
+      const lookAtPoint = (tpView._smoothedPlayerPosition ?? tpView.playerCollider.end).clone().add(new THREE.Vector3(0, 0.5, 0));
+      const playerQuat = (tpView.tempQuaternion ?? tpView.model.quaternion).clone();
 
-      const playerQuat = tpView.model.quaternion.clone();
       const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), camPitch);
       playerQuat.multiply(pitchQuat);
 
@@ -732,7 +740,7 @@ function animate() {
       }
 
       // smooth follow
-      const lerp = 0.12;
+      const lerp = 0.06;
       if (!tpView._cameraSnapped) {
         camera.position.copy(finalPos);
         tpView._cameraSnapped = true;
@@ -744,24 +752,24 @@ function animate() {
       const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
         new THREE.Matrix4().lookAt(camera.position, lookAtPoint, camera.up)
       );
-      camera.quaternion.slerp(targetQuaternion, lerp);
+      camera.quaternion.slerp(targetQuaternion, 0.04);
     }
   }
 
   if (physiscsReady && activePlayer === 'fp' && fpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      fpView.update(stepDelta);
+      fpView.update(stepDelta, camYaw, camPitch);
     }
   }
 
-  if (tpView?.mixer) tpView.mixer.update(frameDelta);
-  if (mixer) mixer.update(frameDelta);
+//   if (tpView?.mixer) tpView.mixer.update(frameDelta);
+  if (mixer) mixer.update(frameDelta * 0.45);
 
   checkPlayerPosition();
 
-  if (composer) composer.render();
-  if (cssRenderer) cssRenderer.render(scene, camera);
-  if (css3dRenderer) css3dRenderer.render(scene, camera);
+    composer.render();
+//   if (cssRenderer) cssRenderer.render(scene, camera);
+//   if (css3dRenderer) css3dRenderer.render(scene, camera);
 }
 
 
@@ -798,11 +806,17 @@ function activateThirdPerson() {
 
 
 function activateFirstPerson() {
-    if(activePlayer === 'tp' && tpView){
-        scene.remove(tpView.model);
-    }
-    activePlayer = 'fp';
+  if (tpView && tpView.model) {
+    // extract TP yaw (Y-axis) and set global camYaw and fpView.yaw
+    const e = new THREE.Euler().setFromQuaternion(tpView.model.quaternion, 'YXZ');
+    camYaw = e.y;
+    camPitch = 0; // or keep previous camPitch if desired
+    if (fpView) fpView.yaw = camYaw;
+  }
+  activePlayer = 'fp';
+  if (tpView?.model) scene.remove(tpView.model);
 }
+
 
 export function initializeGame(targetContainerId = 'model-container') {
     container = document.getElementById(targetContainerId);
