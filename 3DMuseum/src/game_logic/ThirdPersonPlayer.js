@@ -5,20 +5,22 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { AnimationMixer } from 'three';
 import { Sphere } from 'three';
 
+if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const GRAVITY = 30;
 
 export default class ThirdPersonPlayer {
-  constructor(camera, scene, container, playerCollider, characterModel, mixer) {
+  constructor(camera, scene, playerCollider, characterModel) {
     this.camera = camera;
     this.scene = scene;
-    this.container = container;
 
     this.playerVelocity = new THREE.Vector3();
     this.playerOnFloor = false;
     this.gravity = GRAVITY;
-    this.turnRateDegree = 90;
+    this.turnRateDegree = 60;
     this.turnRate = THREE.MathUtils.degToRad(this.turnRateDegree);
     this.cameraCollider = new Sphere(new THREE.Vector3(0,1,0), 0.35);
 
@@ -94,11 +96,6 @@ export default class ThirdPersonPlayer {
       if (gltf.animations && gltf.animations.length > 0) {
         gltf.animations.forEach((clip) =>{
           console.log(clip.name)
-          clip.tracks = clip.tracks.filter(track => {
-            // Keep rotations/scales, drop positions on the root
-            // Usually root is "mixamorigHips" or similar
-            return !track.name.endsWith('.position');
-          });
           switch (clip.name){
             case "Idle":
               this.idleAction = this.mixer.clipAction(clip);
@@ -189,13 +186,25 @@ export default class ThirdPersonPlayer {
     return new THREE.Vector3().copy(f).cross(new THREE.Vector3(0, 1, 0)).normalize();
   }
 
-  playAction(action) {
-    if (action && this.currentAction !== action) {
-      if (this.currentAction) this.currentAction.crossFadeTo(action, 0.2, false);
-      action.reset().play();
-      this.currentAction = action;
-    }
+playAction(action) {
+  action.enabled = true;
+  action.paused = false;
+  // If the action is already playing, do nothing to avoid redundant calls.
+  if (this.currentAction === action) {
+    return;
   }
+
+  // If there's a different action currently playing, crossfade to the new one.
+  if (this.currentAction) {
+    this.currentAction.crossFadeTo(action, 0.5, false); // Added a crossfade duration for smoother transitions
+  }
+
+  // Play the new action.
+  action.reset().play();
+
+  // Update the current action.
+  this.currentAction = action;
+}
 
   onKeyDown(event) {
     switch (event.code) {
@@ -236,7 +245,7 @@ export default class ThirdPersonPlayer {
     }
 
     // --- input forces ---
-        const baseSpeed = this.playerOnFloor ? 15 : 8;
+        const baseSpeed = this.playerOnFloor ? 21 : 18;
     // ✅ FIX: Increase speed when the run button is pressed
     const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
     const speedDelta = delta * finalSpeed;
@@ -313,6 +322,9 @@ export default class ThirdPersonPlayer {
       this.playerCollider.end.z
     );
 
+    this._smoothedPlayerPosition.lerp(this.playerCollider.end, 0.18); // tune 0.12-0.25
+    this.tempQuaternion.slerp(this.model.quaternion, 0.12);            // tune 0.08-0.16
+
     // play/pause walk (mixer is advanced once per frame in animate())
     // --- Animation state handling ---
     const speed = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z).length();
@@ -338,7 +350,7 @@ export default class ThirdPersonPlayer {
         this.playAction(this.walkAction);
         if (this.currentAction) {
           // Walk animation syncs to speed
-          this.currentAction.timeScale = 1.2
+          this.currentAction.timeScale = 1.0
         }
       }
 
@@ -346,7 +358,7 @@ export default class ThirdPersonPlayer {
       if (speed < 0.2) {
         if (this.input.left && this.leftTurnAction) {
           this.playAction(this.leftTurnAction);
-          if (this.currentAction) this.currentAction.timeScale = 1.0;
+          if (this.currentAction) this.currentAction.timeScale = 1.3;
         } else if (this.input.right && this.rightTurnAction) {
           this.playAction(this.rightTurnAction);
           if (this.currentAction) this.currentAction.timeScale = 1.0;
