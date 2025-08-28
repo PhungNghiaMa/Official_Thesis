@@ -1,29 +1,45 @@
-// control.js
-// FirstPersonPlayer: TP-like turning, BVH building, mouse yaw/pitch support.
-
 import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 
-// use accelerated raycast if three-mesh-bvh present
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const GRAVITY = 30;
 
+// Movement tuning
+const FP_BASE_SPEED = 9;        // walk speed
+const FP_AIR_BASE_SPEED = 3.5;  // air control speed
+const FP_RUN_MULTIPLIER = 2.0;  // run multiplier
+const FP_BACKWARD_MULT = 0.6;   // backward slower
+
+// Damping
+const FP_DAMPING_GROUND = 8;
+const FP_DAMPING_AIR = 0.4;
+
+// Steering
+const STEER_SPEED = 6.0;
+
+// Physics timestep
+const PHYSICS_DT = 1 / 60;
+const MAX_ACCUM = 0.25;
+
+// Camera smoothing
+const LERP_POS = 0.03;   // like TP
+const SLERP_ROT = 0.02;
+
 export default class FirstPersonPlayer {
-  /**
-   * constructor(camera, scene, playerCollider)
-   * - camera: THREE.Camera
-   * - scene: THREE.Scene (optional; used for traversal if you call buildBVH(scene))
-   * - playerCollider: THREE.Capsule-like object { start: Vector3, end: Vector3, radius: number }
-   */
   constructor(camera, scene, playerCollider) {
     this.camera = camera;
     this.scene = scene;
-    this.turnRateDegree = 90;
-    this.turnRate = THREE.MathUtils.degToRad(this.turnRateDegree); // rad/sec
 
-    // Defensive default capsule (if none provided)
+    // orientation
+    this.baseYaw = 0;
+    this.yawOffset = 0;
+    this.targetYawOffset = 0;
+    this.pitch = 0;
+    this.turnRate = THREE.MathUtils.degToRad(60);
+
+    // collider
     const start = new THREE.Vector3(0, 1.0, 0);
     this.playerCollider = playerCollider ?? new Capsule(
       start.clone(),
@@ -31,250 +47,189 @@ export default class FirstPersonPlayer {
       0.35
     );
 
-    // quick defensive checks
-    if (!this.playerCollider ||
-        !this.playerCollider.start ||
-        !this.playerCollider.end ||
-        typeof this.playerCollider.radius !== 'number') {
-      console.error('FirstPersonPlayer: invalid playerCollider. Expected Capsule-like object. Received:', this.playerCollider);
-      // avoid throwing so the app can still run; but later calls will fail noisily if collider is bad
-    }
-
-    // physics / movement
     this.playerVelocity = new THREE.Vector3();
     this.playerOnFloor = false;
-    this.gravity = GRAVITY;
 
-    // input state (controlled via onKeyDown/onKeyUp externally or internal listeners)
     this.input = { forward: false, backward: false, left: false, right: false, run: false };
 
-    // orientation
-    this.yaw = 0;   // radians
-    this.pitch = 0; // radians (for camera only)
-
-    // BVH meshes and ready flag
     this.bvhMeshes = [];
     this.bvhReady = false;
 
-    // reusable temps
+    this._accumulator = 0;
+    this._cameraSnapped = false;
+
+    // temps
+    this._forward = new THREE.Vector3();
     this._tempBox = new THREE.Box3();
     this._tempMat = new THREE.Matrix4();
     this._tempSegment = new THREE.Line3();
     this._triPoint = new THREE.Vector3();
     this._capPoint = new THREE.Vector3();
-    this._forward = new THREE.Vector3();
-    this._qYaw = new THREE.Quaternion();
-    this._qPitch = new THREE.Quaternion();
-
-    // NOTE: some projects call onKeyDown/onKeyUp from index.js global handlers.
-    // If you want control.js to self-handle keyboard, uncomment initInput().
-    // this.initInput();
+    this._quatPitch = new THREE.Quaternion();
+    this._horizVel = new THREE.Vector3();
+    this._orientQuat = new THREE.Quaternion();
   }
 
-  // optional: attach built-in listeners (commented out by default)
-  initInput() {
-    this._down = (e) => this.onKeyDown(e);
-    this._up = (e) => this.onKeyUp(e);
-    document.addEventListener('keydown', this._down);
-    document.addEventListener('keyup', this._up);
-  }
-
-  disposeInput() {
-    if (this._down) document.removeEventListener('keydown', this._down);
-    if (this._up) document.removeEventListener('keyup', this._up);
-  }
-
-  // --- BVH builder: pass scene, root object, or array of meshes ---
   buildBVH(target) {
     const meshes = [];
-
-    const collect = (obj) => {
-      if (!obj) return;
-      if (Array.isArray(obj)) {
-        obj.forEach(collect);
-        return;
-      }
-      if (obj.isMesh) {
-        if (obj.geometry && obj.geometry.attributes && obj.geometry.attributes.position) {
-          meshes.push(obj);
+    target.traverse(c => {
+      if (c.isMesh && c.geometry) {
+        if (!c.geometry.boundsTree) {
+          c.updateMatrixWorld(true);
+          c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
         }
-        return;
+        meshes.push(c);
       }
-      if (obj.isObject3D) {
-        obj.traverse((c) => {
-          if (c.isMesh && c.geometry && c.geometry.attributes && c.geometry.attributes.position) {
-            meshes.push(c);
-          }
-        });
-      }
-    };
-
-    collect(target);
-
-    for (const mesh of meshes) {
-      const geom = mesh.geometry;
-      if (!geom) continue;
-
-      // ensure indexed geometry (MeshBVH requires an index)
-      if (!geom.index) {
-        const pos = geom.attributes.position;
-        if (!pos || (pos.count % 3) !== 0) {
-          // skip if not triangle list
-          console.warn('FirstPersonPlayer.buildBVH: geometry not triangle-list; skipping', mesh);
-          continue;
-        }
-        const triCount = pos.count / 3;
-        const IndexArray = pos.count > 65535 ? Uint32Array : Uint16Array;
-        const idx = new IndexArray(triCount * 3);
-        for (let i = 0; i < triCount * 3; i++) idx[i] = i;
-        geom.setIndex(new THREE.BufferAttribute(idx, 1));
-      }
-
-      if (!geom.boundsTree) {
-        try {
-          geom.boundsTree = new MeshBVH(geom, { lazyGeneration: false });
-        } catch (err) {
-          console.error('FirstPersonPlayer.buildBVH: MeshBVH build failed for mesh', mesh, err);
-        }
-      }
-    }
-
+    });
     this.bvhMeshes = meshes;
     this.bvhReady = true;
-    return meshes;
   }
 
-  setBVHMeshes(meshes) {
-    this.bvhMeshes = Array.isArray(meshes) ? meshes : [meshes];
-    this.bvhReady = true;
+  onKeyDown(e) {
+    if (e.code === 'KeyW') this.input.forward = true;
+    if (e.code === 'KeyS') this.input.backward = true;
+    if (e.code === 'KeyA') this.input.left = true;
+    if (e.code === 'KeyD') this.input.right = true;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.input.run = true;
   }
 
-  // optional helper used in index.js (you reference player position)
-  getPlayerPosition() {
-    return this.playerCollider?.end?.clone?.() ?? new THREE.Vector3();
+  onKeyUp(e) {
+    if (e.code === 'KeyW') this.input.forward = false;
+    if (e.code === 'KeyS') this.input.backward = false;
+    if (e.code === 'KeyA') this.input.left = false;
+    if (e.code === 'KeyD') this.input.right = false;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.input.run = false;
   }
 
-  // basic keyboard handlers (index.js already calls these — fine)
-  onKeyDown(event) {
-    switch (event.code) {
-      case 'KeyW': this.input.forward = true; break;
-      case 'KeyS': this.input.backward = true; break;
-      case 'KeyA': this.input.left = true; break;
-      case 'KeyD': this.input.right = true; break;
-      case 'ShiftLeft':
-      case 'ShiftRight': this.input.run = true; break;
-    }
-  }
+  setYaw(y) { this.baseYaw = y; this.yawOffset = 0; this.targetYawOffset = 0; }
+  setPitch(p){ this.pitch = THREE.MathUtils.clamp(p, -1.2, 0.8); }
 
-  onKeyUp(event) {
-    switch (event.code) {
-      case 'KeyW': this.input.forward = false; break;
-      case 'KeyS': this.input.backward = false; break;
-      case 'KeyA': this.input.left = false; break;
-      case 'KeyD': this.input.right = false; break;
-      case 'ShiftLeft':
-      case 'ShiftRight': this.input.run = false; break;
-    }
-  }
-
-  /**
-   * update(delta, yawFromMouse = null, pitchFromMouse = null)
-   * - delta: seconds (stepDelta from index.js)
-   * - yawFromMouse, pitchFromMouse: optional radians from your pointer-lock handler (e.g., camYaw/camPitch)
-   *
-   * Behavior: mouse override takes precedence (if not null), keys still nudge rotation
-   * Movement is forward/back relative to "yaw". Speeds match ThirdPersonPlayer (base 15 running 2.5).
-   */
-  update(delta, yawFromMouse = null, pitchFromMouse = null) {
+  update(frameDelta, yawFromMouse = null, pitchFromMouse = null) {
     if (!this.bvhReady) return;
 
-    // apply optional mouse yaw/pitch first (so mouse fully controls view)
-    if (yawFromMouse !== null) this.yaw = yawFromMouse;
-    if (pitchFromMouse !== null) this.pitch = THREE.MathUtils.clamp(pitchFromMouse, -1.2, 0.8);
+    frameDelta = Math.min(frameDelta, MAX_ACCUM);
 
-    // keys still nudge yaw (so A/D + mouse both work)
-    if (this.input.left) this.yaw += this.turnRate * delta;
-    if (this.input.right) this.yaw -= this.turnRate * delta;
+    if (yawFromMouse !== null) this.baseYaw = yawFromMouse;
+    if (pitchFromMouse !== null) this.setPitch(pitchFromMouse);
 
-    // gravity + damping
-    if (!this.playerOnFloor) {
-      this.playerVelocity.y -= this.gravity * delta;
-      this.playerVelocity.multiplyScalar(Math.exp(-0.4 * delta));
-    } else {
-      // keep vertical non-negative when on floor
-      this.playerVelocity.y = Math.max(0, this.playerVelocity.y);
-      this.playerVelocity.multiplyScalar(Math.exp(-8 * delta));
+    this._accumulator += frameDelta;
+    while (this._accumulator >= PHYSICS_DT) {
+      this._physicsStep(PHYSICS_DT);
+      this._accumulator -= PHYSICS_DT;
     }
 
-    // movement: match ThirdPersonPlayer's baseline
-    const baseSpeed = this.playerOnFloor ? 15 : 8;
-    const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed;
-    const speedDelta = delta * finalSpeed;
+    // --- Camera smoothing with arc-like motion ---
+    const head = this.playerCollider.end;
 
-    // forward direction from yaw (Z-forward convention)
-    this._forward.set(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw).setY(0).normalize();
+    // Offset camera slightly behind head, creates arc swing
+    const camOffset = new THREE.Vector3(0, 0.1, -0.2).applyQuaternion(this._orientQuat);
+    const finalPos = head.clone().add(camOffset);
 
-    if (this.input.forward) this.playerVelocity.addScaledVector(this._forward, speedDelta);
-    if (this.input.backward) this.playerVelocity.addScaledVector(this._forward, -speedDelta * 0.6);
+    if (!this._cameraSnapped) {
+      this.camera.position.copy(finalPos);
+      this._cameraSnapped = true;
+    } else {
+      this.camera.position.lerp(finalPos, LERP_POS);
+    }
 
-    // integrate position (velocity is in units consistent with how TP uses them)
-    const deltaPos = this.playerVelocity.clone().multiplyScalar(delta);
-    // move capsule by updating start/end
-    this.playerCollider.start.add(deltaPos);
-    this.playerCollider.end.add(deltaPos);
+    // smooth look direction
+    const lookAtPoint = head.clone().add(new THREE.Vector3(0, 0.1, 1).applyQuaternion(this._orientQuat));
+    const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(this.camera.position, lookAtPoint, this.camera.up)
+    );
+    this.camera.quaternion.slerp(targetQuaternion, SLERP_ROT);
+  }
 
-    // --- collisions (local-space shapecast like ThirdPersonPlayer) ---
+  _physicsStep(dt) {
+    // yaw offset turning
+    let turnDelta = 0;
+    if (this.input.left)  turnDelta += this.turnRate * dt;
+    if (this.input.right) turnDelta -= this.turnRate * dt;
+    this.targetYawOffset += turnDelta;
+
+    // smooth yaw offset
+    const yawAlpha = 1 - Math.exp(-10 * dt);
+    this.yawOffset = THREE.MathUtils.lerp(this.yawOffset, this.targetYawOffset, yawAlpha);
+
+    const yaw = this.baseYaw + this.yawOffset;
+    this._orientQuat.setFromAxisAngle(new THREE.Vector3(0,1,0), yaw);
+
+    // gravity & damping
+    if (!this.playerOnFloor) {
+      this.playerVelocity.y -= GRAVITY * dt;
+      this.playerVelocity.multiplyScalar(Math.exp(-FP_DAMPING_AIR * dt));
+    } else {
+      this.playerVelocity.y = Math.min(0, this.playerVelocity.y);
+      this.playerVelocity.multiplyScalar(Math.exp(-FP_DAMPING_GROUND * dt));
+    }
+
+    // input forces
+    const baseSpeed = this.playerOnFloor ? FP_BASE_SPEED : FP_AIR_BASE_SPEED;
+    const finalSpeed = this.input.run ? baseSpeed * FP_RUN_MULTIPLIER : baseSpeed;
+    const speedDelta = finalSpeed * dt;
+
+    // ✅ fixed forward direction (W forward, S backward)
+    this._forward.set(0, 0, 1).applyQuaternion(this._orientQuat).setY(0).normalize();
+
+    if (this.input.forward)  this.playerVelocity.addScaledVector(this._forward, speedDelta);
+    if (this.input.backward) this.playerVelocity.addScaledVector(this._forward, -speedDelta * FP_BACKWARD_MULT);
+
+    // steering
+    this._horizVel.set(this.playerVelocity.x, 0, this.playerVelocity.z);
+    const speedHoriz = this._horizVel.length();
+    if (speedHoriz > 1e-5) {
+      const currentDir = this._horizVel.clone().divideScalar(speedHoriz);
+      const steerAlpha = 1 - Math.exp(-STEER_SPEED * dt);
+      currentDir.lerp(this._forward, steerAlpha).normalize();
+      this._horizVel.copy(currentDir).multiplyScalar(speedHoriz);
+      this.playerVelocity.x = this._horizVel.x;
+      this.playerVelocity.z = this._horizVel.z;
+    }
+
+    // integrate
+    const deltaPos = this.playerVelocity.clone().multiplyScalar(dt);
+    this.playerCollider.translate(deltaPos);
+
+    // collisions
     this.playerOnFloor = false;
-
-    const tempBox = this._tempBox;
-    const tempMat = this._tempMat;
-    const tempSegment = this._tempSegment;
-    const triPoint = this._triPoint;
-    const capPoint = this._capPoint;
-
     for (const mesh of this.bvhMeshes) {
       const bvh = mesh.geometry.boundsTree;
       if (!bvh) continue;
 
-      // transform capsule to mesh local space
-      tempMat.copy(mesh.matrixWorld).invert();
-      tempSegment.copy(this.playerCollider);
-      tempSegment.start.applyMatrix4(tempMat);
-      tempSegment.end.applyMatrix4(tempMat);
+      this._tempMat.copy(mesh.matrixWorld).invert();
+      this._tempSegment.start.copy(this.playerCollider.start).applyMatrix4(this._tempMat);
+      this._tempSegment.end.copy(this.playerCollider.end).applyMatrix4(this._tempMat);
 
-      tempBox.makeEmpty();
-      tempBox.expandByPoint(tempSegment.start);
-      tempBox.expandByPoint(tempSegment.end);
-      tempBox.min.addScalar(-this.playerCollider.radius);
-      tempBox.max.addScalar(+this.playerCollider.radius);
+      this._tempBox.makeEmpty();
+      this._tempBox.expandByPoint(this._tempSegment.start);
+      this._tempBox.expandByPoint(this._tempSegment.end);
+      this._tempBox.min.addScalar(-this.playerCollider.radius);
+      this._tempBox.max.addScalar(this.playerCollider.radius);
 
       bvh.shapecast({
-        intersectsBounds: (box) => box.intersectsBox(tempBox),
-        intersectsTriangle: (tri) => {
-          const dist = tri.closestPointToSegment(tempSegment, triPoint, capPoint);
+        intersectsBounds: box => box.intersectsBox(this._tempBox),
+        intersectsTriangle: tri => {
+          const dist = tri.closestPointToSegment(this._tempSegment, this._triPoint, this._capPoint);
           if (dist < this.playerCollider.radius) {
             const depth = this.playerCollider.radius - dist;
-            const pushDir = capPoint.sub(triPoint).normalize();
-            tempSegment.start.addScaledVector(pushDir, depth);
-            tempSegment.end.addScaledVector(pushDir, depth);
+            const pushDir = this._capPoint.sub(this._triPoint).normalize();
+            this._tempSegment.start.addScaledVector(pushDir, depth);
+            this._tempSegment.end.addScaledVector(pushDir, depth);
             if (pushDir.y > 0.1) this.playerOnFloor = true;
           }
         }
       });
 
-      // write resolved capsule back to world space
-      this.playerCollider.start.copy(tempSegment.start).applyMatrix4(mesh.matrixWorld);
-      this.playerCollider.end.copy(tempSegment.end).applyMatrix4(mesh.matrixWorld);
+      this.playerCollider.start.copy(this._tempSegment.start).applyMatrix4(mesh.matrixWorld);
+      this.playerCollider.end.copy(this._tempSegment.end).applyMatrix4(mesh.matrixWorld);
     }
+  }
 
-    // update camera to capsule head
-    if (this.playerCollider && this.playerCollider.end) {
-      this.camera.position.copy(this.playerCollider.end);
-    }
+  getPlayerPosition() {
+    return this.playerCollider?.end?.clone() ?? new THREE.Vector3();
+  }
 
-    // camera orientation from yaw and pitch
-    this._qYaw.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-    this._qPitch.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.pitch);
-    this.camera.quaternion.copy(this._qYaw).multiply(this._qPitch);
+  dispose() {
+    this.bvhMeshes = null;
   }
 }

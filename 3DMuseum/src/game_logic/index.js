@@ -697,7 +697,7 @@ function animate() {
 
   if (physiscsReady && activePlayer === 'tp' && tpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      tpView.update(stepDelta, camYaw);
+      tpView.update(1/60, camYaw);
       if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.4);
 
     }
@@ -740,7 +740,7 @@ function animate() {
       }
 
       // smooth follow
-      const lerp = 0.06;
+      const lerp = 0.05;
       if (!tpView._cameraSnapped) {
         camera.position.copy(finalPos);
         tpView._cameraSnapped = true;
@@ -758,7 +758,7 @@ function animate() {
 
   if (physiscsReady && activePlayer === 'fp' && fpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      fpView.update(stepDelta, camYaw, camPitch);
+      fpView.update(1/60, camYaw, camPitch);
     }
   }
 
@@ -856,9 +856,6 @@ export function initializeGame(targetContainerId = 'model-container') {
 
     // Append the renderer to the container
     container.appendChild(renderer.domElement);
-    
-
-
     container.tabIndex = 0;
     setTimeout(() => container.focus(), 50);
 
