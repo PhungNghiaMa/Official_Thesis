@@ -245,7 +245,7 @@ playAction(action) {
     }
 
     // --- input forces ---
-        const baseSpeed = this.playerOnFloor ? 21 : 18;
+        const baseSpeed = this.playerOnFloor ? 8 : 18;
     // ✅ FIX: Increase speed when the run button is pressed
     const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
     const speedDelta = delta * finalSpeed;
