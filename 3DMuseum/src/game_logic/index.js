@@ -60,6 +60,10 @@ let tpViewExisted = null;
 let tpViewLoadLate = false;
 let cameraCollider = new Sphere(new THREE.Vector3(), 0.35)
 
+// Progress loading instance 
+let currentProgress = 0;
+let targetProgress = 0;
+
 // Light instance
 let ambientLight , hemiLight , spot1 , spot2 , sun;
 
@@ -71,25 +75,33 @@ let currentlyHoveredObject = null;
 let camYaw = 0;
 let camPitch = 0;
 
+// Container instance 
+let loadingManager = document.getElementById('loading-container');
+let loaderContainer = document.getElementById('loader-container');
+let backgroundPositionX;
 // THREE loading managers
 const LoadingManager = new THREE.LoadingManager();
 
 LoadingManager.onStart = (url, itemsLoaded, itemsTotal) => {
     console.log(`Started loading: ${url}. Loaded ${itemsLoaded} of ${itemsTotal} files.`);
-    document.getElementById('loading-container').style.display = 'flex';
-    document.getElementById('progress').style.width = '0%';
+    loadingManager.style.display = 'flex';
+    loadingManager.style.opacity = '1';
+    loadingManager.style.backgroundColor = 'black';
+
+    const loader = document.getElementById('loader-container');
+    if (loader) loader.style.setProperty('--fill', '100%'); // start empty
 };
 
 LoadingManager.onLoad = () => {
     console.log('All resources loaded.');
-    document.getElementById('loading-container').style.display = 'none';
+        setTimeout(() => {
+        loadingManager.style.opacity = '0';
+        // After fading out, set display to none to remove it from layout flow.
+        setTimeout(() => {
+            loadingManager.style.display = 'none';
+        }, 500);
+    }, 2000); // 500ms delay to allow the animation to complete
 };
-
-LoadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
-    const progress = (itemsLoaded / itemsTotal) * 100
-    console.log(`Loading file: ${url}. Loaded ${itemsLoaded} of ${itemsTotal} files. (${progress.toFixed(2)}%)`);
-    document.getElementById('progress').style.width = progress + '%';
-}
 
 LoadingManager.onError = (url) => {
     console.error(`There was an error loading: ${url}`);
@@ -257,8 +269,6 @@ function clearSceneObjects(obj) {
     currentScene = null;
 }
 
-
-
 function checkPlayerPosition() {
     if (doorBoundingBox && !hasEnteredNewScene && hasLoadPlayer) {
         const playerPosition = fpView.getPlayerPosition();
@@ -342,10 +352,55 @@ function ensureUV2ForAO(geometry) {
 }
 
 
+// Smooth animation loop
+function animateProgress() {
+  if (currentProgress < targetProgress) {
+    // Maximum speed per frame (e.g. ~0.5% per frame at 60fps = ~30%/s)
+    const maxStep = 0.5;
+
+    // Difference between target and current
+    const diff = targetProgress - currentProgress;
+
+    // Step is either easing or capped speed
+    const step = Math.min(diff * 0.05, maxStep);
+
+    currentProgress += step;
+
+    const loaderElement = document.getElementById('loader-container');
+    const percentageElement = document.getElementById('loader-percentage');
+
+    const fill = 100 - currentProgress;
+
+    if (loaderElement) {
+      loaderElement.style.setProperty('--fill', `${fill}%`);
+    }
+    if (percentageElement) {
+      percentageElement.textContent = `${Math.round(currentProgress)}%`;
+    }
+
+    requestAnimationFrame(animateProgress);
+  } else {
+    // Snap exactly when reached
+    currentProgress = targetProgress;
+    const loaderElement = document.getElementById('loader-container');
+    const percentageElement = document.getElementById('loader-percentage');
+    const fill = 100 - targetProgress;
+
+    if (loaderElement) {
+      loaderElement.style.setProperty('--fill', `${fill}%`);
+    }
+    if (percentageElement) {
+      percentageElement.textContent = `${Math.round(targetProgress)}%`;
+    }
+  }
+}
+
+
+
+
+
 // src/game_logic/index.js
 async function loadModel() {
-    document.getElementById('loading-container').style.display = 'flex';
-    document.getElementById('progress').style.width = '0%';
 
     if (fpView) {
         hasLoadPlayer = false;
@@ -439,7 +494,31 @@ async function loadModel() {
         // --- PARALLEL LOADING ---
         // 1. Create a promise for the model load. loader.loadAsync is a built-in
         // promise-based version of loader.load that we can await.
-        const loadModelPromise = loader.loadAsync(ModelPaths[currentMuseumId]);
+        const loadModelPromise = new Promise((resolve, reject) => {
+        // Use the GLTFLoader instance from your game logic.
+            loader.load(
+                ModelPaths[currentMuseumId],
+                (gltf) => {
+                    // Set target to 100 and start animation
+                    targetProgress = 100;
+                    animateProgress();
+                    resolve(gltf);
+                },
+                (xhr) => {
+                    // This callback fires multiple times as the file loads.
+                    if (xhr.lengthComputable && xhr.total > 0) {
+                        // Cap the visual progress at 90% while the file is transferring.
+                        targetProgress = (xhr.loaded / xhr.total) * 100;
+                        // Adjust the horizontal background position for a wave effect
+                        backgroundPositionX = Math.sin(xhr.loaded * 0.05) * 5; 
+                        // Kick off or continue the animation loop.
+                        animateProgress();
+                    }
+                },
+                (err) => reject(err)
+            );
+        });
+
 
         // 2. Create a promise for the API call.
         const getAssetsPromise = GetRoomAsset(currentMuseumId);
