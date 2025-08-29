@@ -394,7 +394,7 @@ canvas{
 .loader::before {
   background: rgb(209, 209, 209);
   border-radius: 35%;
-  animation: wave 4s linear infinite reverse;
+  animation: wave 4s ease-in-out infinite reverse ;
 }
 
 @keyframes wave {

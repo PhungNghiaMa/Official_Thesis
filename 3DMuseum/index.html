@@ -4,8 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite App</title>
-    <link rel="stylesheet" href="./main.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" />
+<!-- Load the heavy sheet asynchronously (preload + onload swap) -->
+    <link rel="preload" href="./main.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="./main.css"></noscript>  
+    <!-- Bootstrap Icons: async as well -->
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css"
+      as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css"></noscript>  
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin = "anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
@@ -146,101 +151,84 @@
     <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
 
     <script type="module">
-  import {initI18next, updateContent, changeLanguage} from './src/i18next.js';
-  import landingPageHTML from './template/landingpage_template.js';
-  import {initializeGame} from './src/game_logic/index.js';
-  import {initGalleryPage} from './src/gallery_logic.js';
+      // Render landing page quickly with template
+      import landingPageHTML from './template/landingpage_template.js';
 
-  // This will hold the preloaded data
-  // let preloadedBuffer = null;
-  let isGameInitialized = false;
-  // let galleryContainer = null;
-  
-  localStorage.setItem('language', 'vi');
+      document.getElementById('landingpage').innerHTML = landingPageHTML;
 
-  // Start preloading the model immediately
-  // const preloadWorker = new Worker('./src/game_logic/web_worker.js', { type: 'module' });
-  // preloadWorker.postMessage({
-  //   type: 'loadModel',
-  //   modelPath: `${window.location.origin}/assets/art_gallery/VIRTUAL_ART_GALLERY_3.gltf`
-  // });
+      // Lazy i18n loader
+      const lazyI18n = () =>
+        import('./src/i18next.js').then(({ initI18next, updateContent, changeLanguage }) => {
+          window.changeLanguage = changeLanguage;
+          return initI18next().then(updateContent);
+        });
 
-  // // Listen for the preloaded data and store it
-  // preloadWorker.onmessage = ({ data }) => {
-  //   if (data.type === 'modelReady' && data.data.buffer) {
-  //     preloadedBuffer = data.data.buffer;
-  //     console.log('✅ Model buffer has been preloaded and is ready.');
-  //   } else if (data.type === 'error') {
-  //     console.error('Worker error:', data.error);
-  //   }
-  // };
+      // Run i18n initialization when idle (or asap via setTimeout)
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(() => lazyI18n());
+      } else {
+        setTimeout(() => lazyI18n(), 0);
+      }
 
-  // Initialize i18next for language support
-  initI18next().then(() => {
-    document.getElementById('landingpage').innerHTML = landingPageHTML;
-    updateContent();
+      let isGameInitialized = false;
+      let galleryContainer = null;
 
-    // Now that the landing page is in the DOM, we can safely find the elements
-    const startButton = document.getElementById('start_button');
-    const generalContainer = document.getElementById('landingpageContainer');
-    const modelContainer = document.getElementById('model-container');
-    const menuContainer = document.getElementById('menu-container');
-    const galleryLink = document.getElementById('gallery');
+      // DOM refs
+      const generalContainer = document.getElementById('landingpageContainer');
+      const modelContainer   = document.getElementById('model-container');
+      const menuContainer    = document.getElementById('menu-container');
+      const galleryLink      = document.getElementById('gallery');
 
-    // Handle 3D game start
-    if (startButton) {
-      startButton.addEventListener('click', () => {
-        // Only initialize the game ONCE on the first click
-        if (!isGameInitialized) {
-          console.log('Start button clicked. Initializing game...');
-          requestAnimationFrame(() => {
-            initializeGame('model-container');
-          });
-          isGameInitialized = true;
-        }
-        
-        // Show the game and hide the landing page
-        if(generalContainer) generalContainer.style.display = 'none';
-        if(modelContainer) modelContainer.style.display = 'block';
-        if(menuContainer) menuContainer.style.display = 'flex';
-      });
-    } else {
-      console.error('Start button not found. Check template IDs.');
-    }
+      // Handle Start button → lazy load game
+      const waitForStartButton = () => {
+        const btn = document.getElementById('start_button');
+        if (!btn) return requestAnimationFrame(waitForStartButton);
 
-    // Handle Gallery navigation
-    if (galleryLink) {
-      galleryLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (!galleryContainer) {
-          galleryContainer = document.createElement('div');
-          galleryContainer.id = 'gallery-main-container';
-          Object.assign(galleryContainer.style, {
-            width: '100vw', height: '100vh', background: '#fff',
-            position: 'absolute', top: '0', left: '0', zIndex: '1000'
-          });
-          document.body.appendChild(galleryContainer);
-        }
-        if(generalContainer) generalContainer.style.display = 'none';
-        if(modelContainer) modelContainer.style.display = 'none';
-        if(menuContainer) menuContainer.style.display = 'none';
-        galleryContainer.style.display = 'block';
-        initGalleryPage(galleryContainer);
-      });
-    }
-  });
+        btn.addEventListener('click', async () => {
+          if (!isGameInitialized) {
+            const { initializeGame } = await import('./src/game_logic/index.js');
+            requestAnimationFrame(() => initializeGame('model-container'));
+            isGameInitialized = true;
+          }
+          if (generalContainer) generalContainer.style.display = 'none';
+          if (modelContainer)   modelContainer.style.display   = 'block';
+          if (menuContainer)    menuContainer.style.display    = 'flex';
+        });
+      };
+      waitForStartButton();
 
-  window.changeLanguage = changeLanguage;
+      // Handle Gallery → lazy load gallery code
+      if (galleryLink) {
+        galleryLink.addEventListener('click', async (e) => {
+          e.preventDefault();
 
-  // Simplified language switcher logic
-  const enBtn = document.querySelector('.EnBtn');
-  enBtn.addEventListener('click', () => {
-    const currentLang = localStorage.getItem('language') || 'vi';
-    const newLang = currentLang === 'vi' ? 'en' : 'vi';
-    localStorage.setItem('language', newLang);
-    changeLanguage(newLang);
-    // You can add visual feedback for the button change here if needed
-  });
-</script>
+          if (!galleryContainer) {
+            galleryContainer = document.createElement('div');
+            galleryContainer.id = 'gallery-main-container';
+            Object.assign(galleryContainer.style, {
+              width: '100vw', height: '100vh', background: '#fff',
+              position: 'absolute', top: '0', left: '0', zIndex: '1000'
+            });
+            document.body.appendChild(galleryContainer);
+          }
+
+          if (generalContainer) generalContainer.style.display = 'none';
+          if (modelContainer)   modelContainer.style.display   = 'none';
+          if (menuContainer)    menuContainer.style.display    = 'none';
+          galleryContainer.style.display = 'block';
+
+          const { initGalleryPage } = await import('./src/gallery_logic.js');
+          initGalleryPage(galleryContainer);
+        });
+      }
+
+      // Prefetch game bundle in idle time for smoother Start click
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(() => import('./src/game_logic/index.js'));
+      } else {
+        setTimeout(() => import('./src/game_logic/index.js'), 1500);
+      }
+    </script>
+
   </body>
 </html>

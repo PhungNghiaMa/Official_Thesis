@@ -24,6 +24,11 @@ export default class ThirdPersonPlayer {
     this.turnRate = THREE.MathUtils.degToRad(this.turnRateDegree);
     this.cameraCollider = new Sphere(new THREE.Vector3(0,1,0), 0.35);
 
+    this._capsuleWorldBox = new THREE.Box3();
+    this._tmpMin = new THREE.Vector3();
+    this._tmpMax = new THREE.Vector3();
+
+
 
     // Start position inside building (adjust as needed)
     const start = new THREE.Vector3(0, 2, 0);
@@ -56,17 +61,24 @@ export default class ThirdPersonPlayer {
     this.tempSegment = new THREE.Line3();
   }
 
-  buildBVH(scene) {
-    this.bvhMeshes = [];
-    scene.traverse((child) => {
-      if (child.isMesh && child.geometry) {
-        child.updateMatrixWorld(true);
+buildBVH(scene) {
+  this.bvhMeshes = [];
+  scene.traverse((child) => {
+    if (child.isMesh && child.geometry) {
+      child.updateMatrixWorld(true);
+      if (!child.geometry.boundsTree) {
         child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
-        this.bvhMeshes.push(child);
       }
-    });
-    this.bvhReady = true;
-  }
+      // cache static world AABB and inverse world matrix
+      child.userData.worldBox = new THREE.Box3().setFromObject(child);
+      child.userData.invWorld = child.matrixWorld.clone().invert();
+
+      this.bvhMeshes.push(child);
+    }
+  });
+  this.bvhReady = true;
+}
+
 
   // Backup function in the case that index.js fail to load character model
   loadModel(url, DracoLoader, KTX2Loader, renderer) {
@@ -245,7 +257,7 @@ playAction(action) {
     }
 
     // --- input forces ---
-        const baseSpeed = this.playerOnFloor ? 8 : 18;
+        const baseSpeed = this.playerOnFloor ? 10 : 18;
     // ✅ FIX: Increase speed when the run button is pressed
     const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
     const speedDelta = delta * finalSpeed;
@@ -254,7 +266,6 @@ playAction(action) {
     const tempCamVector = new THREE.Vector3();
     this.camera.getWorldDirection(tempCamVector);
     tempCamVector.y = 0;
-    const cameraForward = tempCamVector.normalize();
 
     // const cameraSide = new THREE.Vector3().copy(cameraForward).cross(new THREE.Vector3(0, 1, 0)).normalize();
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.model.quaternion).setY(0).normalize();
@@ -280,12 +291,30 @@ playAction(action) {
 
     // --- collisions (your existing shapecast; make sure it sets playerOnFloor) ---
     this.playerOnFloor = false;
+
+    // compute world AABB of the capsule
+    this._tmpMin.set(
+      Math.min(this.playerCollider.start.x, this.playerCollider.end.x) - this.playerCollider.radius,
+      Math.min(this.playerCollider.start.y, this.playerCollider.end.y) - this.playerCollider.radius,
+      Math.min(this.playerCollider.start.z, this.playerCollider.end.z) - this.playerCollider.radius
+    );
+    this._tmpMax.set(
+      Math.max(this.playerCollider.start.x, this.playerCollider.end.x) + this.playerCollider.radius,
+      Math.max(this.playerCollider.start.y, this.playerCollider.end.y) + this.playerCollider.radius,
+      Math.max(this.playerCollider.start.z, this.playerCollider.end.z) + this.playerCollider.radius
+    );
+    this._capsuleWorldBox.set(this._tmpMin, this._tmpMax);
+
     for (const mesh of this.bvhMeshes) {
       const bvh = mesh.geometry.boundsTree;
       if (!bvh) continue;
+      if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(this._capsuleWorldBox)) continue;
+
 
       this.tempBox.makeEmpty();
-      this.tempMat.copy(mesh.matrixWorld).invert();
+      // this.tempMat.copy(mesh.matrixWorld).invert();
+      this.tempMat.copy(mesh.userData.invWorld);
+
       this.tempSegment.copy(this.playerCollider);
       this.tempSegment.start.applyMatrix4(this.tempMat);
       this.tempSegment.end.applyMatrix4(this.tempMat);

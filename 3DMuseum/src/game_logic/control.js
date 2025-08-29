@@ -24,8 +24,8 @@ const PHYSICS_DT = 1 / 60;
 const MAX_ACCUM = 0.25;
 
 // Camera smoothing
-const LERP_POS = 0.03;   // like TP
-const SLERP_ROT = 0.02;
+const LERP_POS = 0.05;   // like TP
+const SLERP_ROT = 0.04;
 
 export default class FirstPersonPlayer {
   constructor(camera, scene, playerCollider) {
@@ -58,6 +58,11 @@ export default class FirstPersonPlayer {
     this._accumulator = 0;
     this._cameraSnapped = false;
 
+    this._capsuleBox = new THREE.Box3();
+    this._tmpMin = new THREE.Vector3();
+    this._tmpMax = new THREE.Vector3();
+
+
     // temps
     this._forward = new THREE.Vector3();
     this._tempBox = new THREE.Box3();
@@ -78,6 +83,8 @@ export default class FirstPersonPlayer {
           c.updateMatrixWorld(true);
           c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
         }
+        c.userData.worldBox = new THREE.Box3().setFromObject(c);
+        c.userData.invWorld = c.matrixWorld.clone().invert();
         meshes.push(c);
       }
     });
@@ -192,11 +199,26 @@ export default class FirstPersonPlayer {
 
     // collisions
     this.playerOnFloor = false;
+
+    // capsule world AABB
+    this._tmpMin.set(
+      Math.min(this.playerCollider.start.x, this.playerCollider.end.x) - this.playerCollider.radius,
+      Math.min(this.playerCollider.start.y, this.playerCollider.end.y) - this.playerCollider.radius,
+      Math.min(this.playerCollider.start.z, this.playerCollider.end.z) - this.playerCollider.radius
+    );
+    this._tmpMax.set(
+      Math.max(this.playerCollider.start.x, this.playerCollider.end.x) + this.playerCollider.radius,
+      Math.max(this.playerCollider.start.y, this.playerCollider.end.y) + this.playerCollider.radius,
+      Math.max(this.playerCollider.start.z, this.playerCollider.end.z) + this.playerCollider.radius
+    );
+    this._capsuleBox.set(this._tmpMin, this._tmpMax);
+
     for (const mesh of this.bvhMeshes) {
       const bvh = mesh.geometry.boundsTree;
       if (!bvh) continue;
+      if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(this._capsuleBox)) continue;
 
-      this._tempMat.copy(mesh.matrixWorld).invert();
+      this._tempMat.copy(mesh.userData.invWorld);
       this._tempSegment.start.copy(this.playerCollider.start).applyMatrix4(this._tempMat);
       this._tempSegment.end.copy(this.playerCollider.end).applyMatrix4(this._tempMat);
 
