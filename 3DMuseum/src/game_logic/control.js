@@ -75,6 +75,14 @@ export default class FirstPersonPlayer {
     this._orientQuat = new THREE.Quaternion();
   }
 
+  setYaw(yaw){
+    this.yaw = yaw;
+  }
+
+  setPitch(pitch){
+    this.pitch = pitch;
+  }
+
   buildBVH(target) {
     const meshes = [];
     target.traverse(c => {

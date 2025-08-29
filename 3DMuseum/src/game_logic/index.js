@@ -855,7 +855,7 @@ function animate() {
 
 
 // ──────────── switching function ────────────
-function activateThirdPerson() {
+function activateThirdPerson() { 
   activePlayer = 'tp';
   if (tpViewLoadLate){
     if(!tpViewExisted && character){
@@ -881,6 +881,21 @@ function activateThirdPerson() {
         tpViewLoadLate = false;
     }
   }else if (!tpViewLoadLate && tpViewExisted){
+    const camEuler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    const desiredYaw = camEuler.y ?? 0;
+
+    // rotate the character to face that yaw
+    tpView.model.quaternion.setFromEuler(new THREE.Euler(0, desiredYaw, 0, 'YXZ'));
+        
+    // reset TP smoothing state so camera snaps to the correct position
+    if (tpView.tempQuaternion) tpView.tempQuaternion.copy(tpView.model.quaternion);
+    if (typeof tpView._cameraSnapped !== 'undefined') tpView._cameraSnapped = false;
+        
+    // place smoothed position near actual collider head if available
+    if (tpView._smoothedPlayerPosition && tpView.playerCollider) {
+        tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+    }
+    tpView.setInitialRotationFromYaw(camYaw);
     scene.add(tpView.model);
   }
 }
@@ -892,7 +907,10 @@ function activateFirstPerson() {
     const e = new THREE.Euler().setFromQuaternion(tpView.model.quaternion, 'YXZ');
     camYaw = e.y;
     camPitch = 0; // or keep previous camPitch if desired
-    if (fpView) fpView.yaw = camYaw;
+    if (fpView){
+        fpView.setYaw(camYaw);
+        fpView.setPitch(camPitch);
+    } 
   }
   activePlayer = 'fp';
   if (tpView?.model) scene.remove(tpView.model);
