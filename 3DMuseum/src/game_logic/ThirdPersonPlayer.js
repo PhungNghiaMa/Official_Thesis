@@ -244,6 +244,13 @@ playAction(action) {
     this.model = model;
   }
 
+  setInitialRotationFromYaw(yaw) {
+    if (this.model) {
+      // Set the player model's rotation to match the camera's yaw
+      this.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    }
+  }
+
   update(delta) {
     if (!this.bvhReady || !this.model) return;
 
