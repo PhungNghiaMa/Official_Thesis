@@ -38,7 +38,7 @@ const scene = new THREE.Scene();
 let menuOpen = false;
 let currentMuseumId = Museum.ART_GALLERY;
 
-const STEPS_PER_FRAME = 3; // Number of physics steps per frame
+const STEPS_PER_FRAME = 2; // Number of physics steps per frame
 let fpView, tpView; // Instance of FirstPersonPlayer and ThirdPersonPlayer
 let playerCollider;
 let activePlayer = 'tp';
@@ -214,7 +214,7 @@ document.body.addEventListener("uploadevent", (event) => {
     }
 });
 
-renderer = new THREE.WebGLRenderer({ antialias: true, alpha:true});
+renderer = new THREE.WebGLRenderer({ antialias: true, alpha:true, powerPreference: 'high-performance'});
 
 // DRACO LOADER + KTX2 LOADER 
 // Initialize DracoLoader for geometry compression
@@ -356,7 +356,7 @@ function ensureUV2ForAO(geometry) {
 function animateProgress() {
   if (currentProgress < targetProgress) {
     // Maximum speed per frame (e.g. ~0.5% per frame at 60fps = ~30%/s)
-    const maxStep = 0.5;
+    const maxStep = 0.2;
 
     // Difference between target and current
     const diff = targetProgress - currentProgress;
@@ -396,9 +396,6 @@ function animateProgress() {
 }
 
 
-
-
-
 // src/game_logic/index.js
 async function loadModel() {
 
@@ -423,7 +420,7 @@ async function loadModel() {
     // Shadow-casting sun
     sun = new THREE.DirectionalLight(0xffffff, 2.0);
     sun.position.set(6, 10, 6);
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 0.1;
     sun.shadow.camera.far  = 40;
     sun.shadow.camera.left   = -15;
@@ -774,11 +771,16 @@ function animate() {
   const frameDelta = Math.min(0.05, clock.getDelta());
   const stepDelta  = frameDelta / STEPS_PER_FRAME;
 
+  if (outlinePass) {
+    const hasTargets = (outlinePass.selectedObjects?.length ?? 0) > 0;
+    outlinePass.enabled = hasTargets;
+  }
+
+
   if (physiscsReady && activePlayer === 'tp' && tpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
       tpView.update(1/60, camYaw);
       if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.4);
-
     }
 
     if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
@@ -857,7 +859,7 @@ function activateThirdPerson() {
   activePlayer = 'tp';
   if (tpViewLoadLate){
     if(!tpViewExisted && character){
-        tpView = new ThirdPersonPlayer(camera, scene, container, playerCollider, character.model , mixer);
+        tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model , mixer);
         tpView._cameraSnapped = false;
         tpView.buildBVH(currentScene);
         tpView.handleAnimation(character.model, character.gltf);
@@ -921,7 +923,8 @@ export function initializeGame(targetContainerId = 'model-container') {
     css3dRenderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(css3dRenderer.domElement);
 
-    renderer.setPixelRatio(window.devicePixelRatio);
+    // renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); // dynamic res clamp
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.5;
@@ -954,6 +957,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     outlinePass.hiddenEdgeColor.set("#000000");
     outlinePass.hiddenEdgeColor.multiplyScalar(0); // effectively transparent
     outlinePass.renderToScreen = true;      // if it's the last pass
+    outlinePass.enabled = false;
     outlinePass.clear = false;              // don’t clear the whole buffer
     outlinePass.clearAlpha = 0;             // transparent, not black
     composer.addPass(outlinePass);
