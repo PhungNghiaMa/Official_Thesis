@@ -119,6 +119,16 @@ export default class FirstPersonPlayer {
   setYaw(y) { this.baseYaw = y; this.yawOffset = 0; this.targetYawOffset = 0; }
   setPitch(p){ this.pitch = THREE.MathUtils.clamp(p, -1.2, 0.8); }
 
+  // add inside the class
+  resetControls() {
+    this.input.forward = this.input.backward =
+    this.input.left    = this.input.right =
+    this.input.run     = false;
+    this.playerVelocity.set(0, 0, 0);
+    this.playerOnFloor = true;
+  }
+
+
   update(frameDelta, yawFromMouse = null, pitchFromMouse = null) {
     if (!this.bvhReady) return;
 

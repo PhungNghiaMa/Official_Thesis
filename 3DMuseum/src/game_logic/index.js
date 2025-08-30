@@ -779,7 +779,7 @@ function animate() {
 
   if (physiscsReady && activePlayer === 'tp' && tpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      tpView.update(1/60, camYaw);
+      tpView.update(1/60);
       if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.4);
     }
 
@@ -857,64 +857,97 @@ function animate() {
 // ──────────── switching function ────────────
 function activateThirdPerson() { 
   activePlayer = 'tp';
-  if (tpViewLoadLate){
-    if(!tpViewExisted && character){
-        tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model , mixer);
-        tpView._cameraSnapped = false;
-        tpView.buildBVH(currentScene);
-        tpView.handleAnimation(character.model, character.gltf);
-        scene.add(tpView.model)
-        tpViewExisted = true;
-        tpViewLoadLate = false;
-    }else if (tpViewExisted && character){
-        if (!tpView.model){
-            tpView.attachModel(character.model);
-        }
-        tpView.handleAnimation(character.model, character.gltf);
-        scene.add(tpView.model);
-        tpViewExisted = true;
-        tpViewLoadLate = false;
-    }else{
-        console.info("Not finish load Character Model yet ! Reactivating, please wait ...")
-        setTimeout(activateThirdPerson, 1000);
-        tpViewExisted = false;
-        tpViewLoadLate = false;
-    }
-  }else if (!tpViewLoadLate && tpViewExisted){
-    const camEuler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
-    const desiredYaw = camEuler.y ?? 0;
 
-    // rotate the character to face that yaw
-    tpView.model.quaternion.setFromEuler(new THREE.Euler(0, desiredYaw, 0, 'YXZ'));
-        
-    // reset TP smoothing state so camera snaps to the correct position
-    if (tpView.tempQuaternion) tpView.tempQuaternion.copy(tpView.model.quaternion);
-    if (typeof tpView._cameraSnapped !== 'undefined') tpView._cameraSnapped = false;
-        
-    // place smoothed position near actual collider head if available
-    if (tpView._smoothedPlayerPosition && tpView.playerCollider) {
+  if (tpViewLoadLate) {
+    // TP not yet created → build it now
+    if (!tpViewExisted && character) {
+      tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model, mixer);
+      tpView.buildBVH(currentScene);
+      tpView.handleAnimation(character.model, character.gltf);
+
+      // 🔹 snap smoothing state immediately
+      if (tpView.playerCollider) {
         tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+      }
+      if (tpView.tempQuaternion && tpView.model) {
+        tpView.tempQuaternion.copy(tpView.model.quaternion);
+      }
+      tpView._cameraSnapped = false;
+
+      scene.add(tpView.model);
+      tpViewExisted = true;
+      tpViewLoadLate = false;
+    } 
+    else if (tpViewExisted && character) {
+      // reattach if model exists
+      if (!tpView.model) {
+        tpView.attachModel(character.model);
+      }
+      tpView.handleAnimation(character.model, character.gltf);
+
+      // 🔹 snap smoothing state
+      if (tpView.playerCollider) {
+        tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+      }
+      if (tpView.tempQuaternion && tpView.model) {
+        tpView.tempQuaternion.copy(tpView.model.quaternion);
+      }
+      tpView._cameraSnapped = false;
+
+      scene.add(tpView.model);
+      tpViewLoadLate = false;
+    } 
+    else {
+      console.info("Not finish load Character Model yet! Reactivating, please wait ...");
+      setTimeout(activateThirdPerson, 1000);
+      tpViewExisted = false;
+      tpViewLoadLate = false;
     }
-    tpView.setInitialRotationFromYaw(camYaw);
+  } 
+  else if (!tpViewLoadLate && tpViewExisted) {
+    // 🔹 Reset movement/input so no auto-walk carries over
+    tpView.resetControls();
+
+    // 🔹 Align facing with current FP yaw
+    tpView.faceYaw(camYaw);
+
+    // 🔹 Snap smoothing state so model + camera align immediately
+    if (tpView.playerCollider) {
+      tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+    }
+    if (tpView.tempQuaternion && tpView.model) {
+      tpView.tempQuaternion.copy(tpView.model.quaternion);
+    }
+    tpView._cameraSnapped = false;
+
     scene.add(tpView.model);
   }
 }
 
 
+
 function activateFirstPerson() {
   if (tpView && tpView.model) {
-    // extract TP yaw (Y-axis) and set global camYaw and fpView.yaw
     const e = new THREE.Euler().setFromQuaternion(tpView.model.quaternion, 'YXZ');
     camYaw = e.y;
-    camPitch = 0; // or keep previous camPitch if desired
-    if (fpView){
-        fpView.setYaw(camYaw);
-        fpView.setPitch(camPitch);
-    } 
+    camPitch = 0;
+    if (fpView) {
+      fpView.resetControls();      // 🔹 stop stale movement
+      if (fpView._smoothedPlayerPosition && fpView.playerCollider) {
+        fpView._smoothedPlayerPosition.copy(fpView.playerCollider.end);
+      }
+      if (typeof fpView.tempQuaternion !== 'undefined' && fpView.model) {
+        fpView.tempQuaternion.copy(fpView.model.quaternion || new THREE.Quaternion());
+      }
+      fpView.setYaw(camYaw);
+      fpView.setPitch(camPitch);
+      fpView._cameraSnapped = false; // 🔹 snap camera next frame
+    }
   }
   activePlayer = 'fp';
   if (tpView?.model) scene.remove(tpView.model);
 }
+
 
 
 export function initializeGame(targetContainerId = 'model-container') {
@@ -979,11 +1012,22 @@ export function initializeGame(targetContainerId = 'model-container') {
     outlinePass.clear = false;              // don’t clear the whole buffer
     outlinePass.clearAlpha = 0;             // transparent, not black
     composer.addPass(outlinePass);
-
     composer.addPass(new OutputPass());
 
+    const clearAllInputs = () => {
+        if (fpView) fpView.resetControls();
+        if (tpView) tpView.resetControls();
+    }
   
     window.addEventListener('resize', onWindowResize);
+
+    window.addEventListener('blur', clearAllInputs);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) clearAllInputs();
+    });
+    document.addEventListener('pointerlockchange', () => {
+        if (!document.pointerLockElement) clearAllInputs();
+    });
 
     window.addEventListener('keydown', (event) => {
         if (event.code === 'KeyV'){
