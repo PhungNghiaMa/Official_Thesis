@@ -37,6 +37,9 @@ export default class ThirdPersonPlayer {
       start.clone().add(new THREE.Vector3(0, 1.0, 0)),
       0.35
     );
+
+
+
     this._smoothedPlayerPosition = new THREE.Vector3().copy(this.playerCollider.end);
 
     this.bvhMeshes = [];
@@ -61,81 +64,37 @@ export default class ThirdPersonPlayer {
     this.tempSegment = new THREE.Line3();
   }
 
-buildBVH(scene) {
-  this.bvhMeshes = [];
-  scene.traverse((child) => {
-    if (child.isMesh && child.geometry) {
-      child.updateMatrixWorld(true);
-      if (!child.geometry.boundsTree) {
-        child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
-      }
-      // cache static world AABB and inverse world matrix
-      child.userData.worldBox = new THREE.Box3().setFromObject(child);
-      child.userData.invWorld = child.matrixWorld.clone().invert();
-
-      this.bvhMeshes.push(child);
-    }
-  });
-  this.bvhReady = true;
-}
-
-
-  // Backup function in the case that index.js fail to load character model
-  loadModel(url, DracoLoader, KTX2Loader, renderer) {
-    const loader = new GLTFLoader();
-    loader.setDRACOLoader(DracoLoader);
-    loader.setKTX2Loader(KTX2Loader);
-
-    loader.load(url, (gltf) => {
-      this.model = gltf.scene;
-      this.model.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
+  buildBVH(scene) {
+    this.bvhMeshes = [];
+    scene.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        child.updateMatrixWorld(true);
+        if (!child.geometry.boundsTree) {
+          child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
         }
-        if (child.material && child.material.map) {
-          child.material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
-          child.material.map.colorSpace = THREE.SRGBColorSpace;
-          child.material.map.needsUpdate = true;
-        }
-      });
-      // this.scene.add(this.model);
+        // cache static world AABB and inverse world matrix
+        child.userData.worldBox = new THREE.Box3().setFromObject(child);
+        child.userData.invWorld = child.matrixWorld.clone().invert();
 
-      const bbox = new THREE.Box3().setFromObject(this.model);
-      this.footOffset = -bbox.min.y;
-
-      this.mixer = new AnimationMixer(this.model);
-      if (gltf.animations && gltf.animations.length > 0) {
-        gltf.animations.forEach((clip) =>{
-          console.log(clip.name)
-          switch (clip.name){
-            case "Idle":
-              this.idleAction = this.mixer.clipAction(clip);
-              break;
-            case "WalkForward":
-              this.walkAction = this.mixer.clipAction(clip);
-              break;
-            case "Running":
-              this.runningAction = this.mixer.clipAction(clip);
-              break;
-            case "LeftTurn":
-              this.leftTurnAction = this.mixer.clipAction(clip);
-              break;
-            case "RightTurn":
-              this.rightTurnAction = this.mixer.clipAction(clip);
-              break;
-            default:
-              break;    
-          }
-        })
-        if (this.idleAction){
-          this.idleAction.play();
-          this.currentAction = this.idleAction;
-        }
+        this.bvhMeshes.push(child);
       }
     });
+    this.bvhReady = true;
   }
 
+  resetControls() {
+    this.input.forward = this.input.backward =
+    this.input.left    = this.input.right =
+    this.input.run     = false;
+    this.playerVelocity.set(0, 0, 0);
+    this.playerOnFloor = true; // optional, helps settle instantly
+  }
+
+  faceYaw(yaw) {
+    if (!this.model) return;
+    this.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    if (this.tempQuaternion) this.tempQuaternion.copy(this.model.quaternion); // keep camera smoothing aligned
+  }
 
   // Function to handle animation
   // Function to handle animation when model was preloaded in index.js
@@ -285,11 +244,38 @@ playAction(action) {
 
     // --- Rotation while moving ---
     // (so pressing A/D curves movement into an arc)
+    // if (this.input.left) {
+    //   this.model.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), this.turnRate * delta);
+    // }
+    // if (this.input.right) {
+    //   this.model.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), -this.turnRate * delta);
+    // }
+
+    // --- TURNING: rotate the model AND rotate horizontal velocity so momentum follows the facing direction
+    const yawAxis = new THREE.Vector3(0, 1, 0);
+
     if (this.input.left) {
-      this.model.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), this.turnRate * delta);
+      const yawDelta = this.turnRate * delta;
+      // rotate model visually
+      this.model.rotateOnWorldAxis(yawAxis, yawDelta);
+
+      // rotate horizontal velocity vector by same yaw so momentum stays aligned to model
+      const tmpVel = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z);
+      const yawQuat = new THREE.Quaternion().setFromAxisAngle(yawAxis, yawDelta);
+      tmpVel.applyQuaternion(yawQuat);
+      this.playerVelocity.x = tmpVel.x;
+      this.playerVelocity.z = tmpVel.z;
     }
+
     if (this.input.right) {
-      this.model.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), -this.turnRate * delta);
+      const yawDelta = -this.turnRate * delta;
+      this.model.rotateOnWorldAxis(yawAxis, yawDelta);
+
+      const tmpVel = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z);
+      const yawQuat = new THREE.Quaternion().setFromAxisAngle(yawAxis, yawDelta);
+      tmpVel.applyQuaternion(yawQuat);
+      this.playerVelocity.x = tmpVel.x;
+      this.playerVelocity.z = tmpVel.z;
     }
 
     // --- integrate position ---
@@ -351,19 +337,38 @@ playAction(action) {
     }
 
     // --- update model transform ---
-    this.model.position.set(
-      this.playerCollider.end.x,
-      // this.playerCollider.start.y + this.footOffset,
-      this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
-      this.playerCollider.end.z
-    );
+    // this.model.position.set(
+    //   this.playerCollider.end.x,
+    //   // this.playerCollider.start.y + this.footOffset,
+    //   this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
+    //   this.playerCollider.end.z
+    // );
+
+    const horiz = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+    if (horiz < 0.001) {
+      this.playerVelocity.x = 0;
+      this.playerVelocity.z = 0;
+    }
 
     this._smoothedPlayerPosition.lerp(this.playerCollider.end, 0.18); // tune 0.12-0.25
+    this.model.position.set(
+      this._smoothedPlayerPosition.x,
+      this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
+      this._smoothedPlayerPosition.z
+    );
     this.tempQuaternion.slerp(this.model.quaternion, 0.12);            // tune 0.08-0.16
 
     // play/pause walk (mixer is advanced once per frame in animate())
     // --- Animation state handling ---
     const speed = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z).length();
+
+    if (!this.input.forward && !this.input.backward && !this.input.left && !this.input.right) {
+      const horiz = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+      if (horiz < 0.02) { // tiny threshold to kill float error
+        this.playerVelocity.x = 0;
+        this.playerVelocity.z = 0;
+      }
+    }
 
     if (speed < 0.05) {
       // --- IDLE ---
