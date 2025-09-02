@@ -1,13 +1,10 @@
 import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { AnimationMixer } from 'three';
 import { Sphere } from 'three';
 
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
-
-
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const GRAVITY = 30;
@@ -28,8 +25,6 @@ export default class ThirdPersonPlayer {
     this._tmpMin = new THREE.Vector3();
     this._tmpMax = new THREE.Vector3();
 
-
-
     // Start position inside building (adjust as needed)
     const start = new THREE.Vector3(0, 2, 0);
     this.playerCollider = playerCollider ?? new Capsule(
@@ -37,8 +32,6 @@ export default class ThirdPersonPlayer {
       start.clone().add(new THREE.Vector3(0, 1.0, 0)),
       0.35
     );
-
-
 
     this._smoothedPlayerPosition = new THREE.Vector3().copy(this.playerCollider.end);
 
@@ -64,23 +57,40 @@ export default class ThirdPersonPlayer {
     this.tempSegment = new THREE.Line3();
   }
 
-  buildBVH(scene) {
-    this.bvhMeshes = [];
-    scene.traverse((child) => {
-      if (child.isMesh && child.geometry) {
-        child.updateMatrixWorld(true);
-        if (!child.geometry.boundsTree) {
-          child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
-        }
-        // cache static world AABB and inverse world matrix
-        child.userData.worldBox = new THREE.Box3().setFromObject(child);
-        child.userData.invWorld = child.matrixWorld.clone().invert();
+  // buildBVH(scene) {
+  //   this.bvhMeshes = [];
+  //   scene.traverse((child) => {
+  //     if (child.isMesh && child.geometry) {
+  //       child.updateMatrixWorld(true);
+  //       if (!child.geometry.boundsTree) {
+  //         child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
+  //       }
+  //       // cache static world AABB and inverse world matrix
+  //       child.userData.worldBox = new THREE.Box3().setFromObject(child);
+  //       child.userData.invWorld = child.matrixWorld.clone().invert();
 
-        this.bvhMeshes.push(child);
+  //       this.bvhMeshes.push(child);
+  //     }
+  //   });
+  //   this.bvhReady = true;
+  // }
+
+  // Add inside ThirdPersonPlayer class
+  buildBVHFromMeshes(meshes) {
+    this.bvhMeshes = [];
+    meshes.forEach((child) => {
+      if (!child.isMesh || !child.geometry) return;
+      child.updateMatrixWorld(true);
+      if (!child.geometry.boundsTree) {
+        child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
       }
+      child.userData.worldBox = new THREE.Box3().setFromObject(child);
+      child.userData.invWorld = child.matrixWorld.clone().invert();
+      this.bvhMeshes.push(child);
     });
     this.bvhReady = true;
   }
+
 
   resetControls() {
     this.input.forward = this.input.backward =
@@ -96,7 +106,6 @@ export default class ThirdPersonPlayer {
     if (this.tempQuaternion) this.tempQuaternion.copy(this.model.quaternion); // keep camera smoothing aligned
   }
 
-  // Function to handle animation
   // Function to handle animation when model was preloaded in index.js
   handleAnimation(model, characterGLTF) {
     if (!model || !characterGLTF) return;
@@ -147,9 +156,12 @@ export default class ThirdPersonPlayer {
       return f.normalize();
     }
     const v = new THREE.Vector3();
-    this.camera.getWorldDirection(v);
-    v.y = 0;
-    return v.normalize();
+    if (this.camera) {
+      this.camera.getWorldDirection(v);
+      v.y = 0;
+      return v.normalize();
+    }
+    return new THREE.Vector3(0, 0, 1);
   }
 
   getSideVector() {
@@ -157,25 +169,26 @@ export default class ThirdPersonPlayer {
     return new THREE.Vector3().copy(f).cross(new THREE.Vector3(0, 1, 0)).normalize();
   }
 
-playAction(action) {
-  action.enabled = true;
-  action.paused = false;
-  // If the action is already playing, do nothing to avoid redundant calls.
-  if (this.currentAction === action) {
-    return;
+  playAction(action) {
+    if (!action) return; // safe-guard
+    action.enabled = true;
+    action.paused = false;
+    // If the action is already playing, do nothing to avoid redundant calls.
+    if (this.currentAction === action) {
+      return;
+    }
+
+    // If there's a different action currently playing, crossfade to the new one.
+    if (this.currentAction) {
+      this.currentAction.crossFadeTo(action, 0.5, false); // Added a crossfade duration for smoother transitions
+    }
+
+    // Play the new action.
+    action.reset().play();
+
+    // Update the current action.
+    this.currentAction = action;
   }
-
-  // If there's a different action currently playing, crossfade to the new one.
-  if (this.currentAction) {
-    this.currentAction.crossFadeTo(action, 0.5, false); // Added a crossfade duration for smoother transitions
-  }
-
-  // Play the new action.
-  action.reset().play();
-
-  // Update the current action.
-  this.currentAction = action;
-}
 
   onKeyDown(event) {
     switch (event.code) {
@@ -199,8 +212,12 @@ playAction(action) {
     }
   }
 
-  attachModel(model){
+  // Attach model. Optionally pass the GLTF so animations are prepared immediately.
+  attachModel(model, characterGLTF = null){
     this.model = model;
+    if (characterGLTF) {
+      this.handleAnimation(model, characterGLTF);
+    }
   }
 
   setInitialRotationFromYaw(yaw) {
@@ -208,6 +225,66 @@ playAction(action) {
       // Set the player model's rotation to match the camera's yaw
       this.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
     }
+  }
+
+  /**
+   * Central animation decision logic extracted so it can be reused by NPC controllers.
+   * speed: horizontal speed in world units (m/s)
+   * opts: { left: bool, right: bool, run: bool }  - optional flags
+   */
+  updateAnimationState(speed, opts = {}) {
+    const left = !!opts.left;
+    const right = !!opts.right;
+    const run = !!opts.run;
+
+    // safe-guards if actions not present
+    const hasIdle = !!this.idleAction;
+    const hasWalk = !!this.walkAction;
+    const hasRun = !!this.runningAction;
+    const hasLeft = !!this.leftTurnAction;
+    const hasRight = !!this.rightTurnAction;
+
+    if (speed < 0.05) {
+      // Idle
+      if (hasIdle) {
+        this.playAction(this.idleAction);
+        if (this.currentAction) this.currentAction.timeScale = 1.0;
+      }
+    } else {
+      // Movement
+      if (run && hasRun) {
+        this.runningAction.timeScale = 1.5;
+        this.playAction(this.runningAction);
+        if (this.currentAction) {
+          this.currentAction.timeScale = 1.5;
+        }
+      } else if (hasWalk) {
+        this.playAction(this.walkAction);
+        if (this.currentAction) {
+          this.currentAction.timeScale = 1.0;
+        }
+      }
+
+      // Optional turn animations if nearly stationary
+      if (speed < 0.2) {
+        if (left && hasLeft) {
+          this.playAction(this.leftTurnAction);
+          if (this.currentAction) this.currentAction.timeScale = 1.3;
+        } else if (right && hasRight) {
+          this.playAction(this.rightTurnAction);
+          if (this.currentAction) this.currentAction.timeScale = 1.0;
+        }
+      }
+    }
+  }
+
+  /**
+   * Public helper for NPC controllers:
+   * npcController should call this each frame with NPC horizontal speed and flags.
+   * Example: npcPlayer.setNPCAnimationState( speed, { left:false, right:false, run:false } )
+   */
+  setNPCAnimationState(speed, opts = {}) {
+    this.updateAnimationState(speed, opts);
   }
 
   update(delta) {
@@ -223,17 +300,12 @@ playAction(action) {
     }
 
     // --- input forces ---
-        const baseSpeed = this.playerOnFloor ? 10 : 18;
-    // ✅ FIX: Increase speed when the run button is pressed
+    const baseSpeed = this.playerOnFloor ? 10 : 18;
+    // Increase speed when the run button is pressed
     const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
     const speedDelta = delta * finalSpeed;
 
-    // ✅ FIX: Use the camera's direction for movement input
-    const tempCamVector = new THREE.Vector3();
-    this.camera.getWorldDirection(tempCamVector);
-    tempCamVector.y = 0;
-
-    // const cameraSide = new THREE.Vector3().copy(cameraForward).cross(new THREE.Vector3(0, 1, 0)).normalize();
+    // Use model-forward for movement
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.model.quaternion).setY(0).normalize();
     if (this.input.forward) {
       this.playerVelocity.addScaledVector(forward, speedDelta);
@@ -241,15 +313,6 @@ playAction(action) {
     if (this.input.backward) {
       this.playerVelocity.addScaledVector(forward, -speedDelta * 0.6); // slower backwards
     }
-
-    // --- Rotation while moving ---
-    // (so pressing A/D curves movement into an arc)
-    // if (this.input.left) {
-    //   this.model.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), this.turnRate * delta);
-    // }
-    // if (this.input.right) {
-    //   this.model.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), -this.turnRate * delta);
-    // }
 
     // --- TURNING: rotate the model AND rotate horizontal velocity so momentum follows the facing direction
     const yawAxis = new THREE.Vector3(0, 1, 0);
@@ -303,9 +366,7 @@ playAction(action) {
       if (!bvh) continue;
       if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(this._capsuleWorldBox)) continue;
 
-
       this.tempBox.makeEmpty();
-      // this.tempMat.copy(mesh.matrixWorld).invert();
       this.tempMat.copy(mesh.userData.invWorld);
 
       this.tempSegment.copy(this.playerCollider);
@@ -336,14 +397,7 @@ playAction(action) {
       this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
     }
 
-    // --- update model transform ---
-    // this.model.position.set(
-    //   this.playerCollider.end.x,
-    //   // this.playerCollider.start.y + this.footOffset,
-    //   this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
-    //   this.playerCollider.end.z
-    // );
-
+    // clamp extremely small horizontal velocity to zero to avoid micro-drift
     const horiz = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
     if (horiz < 0.001) {
       this.playerVelocity.x = 0;
@@ -363,50 +417,15 @@ playAction(action) {
     const speed = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z).length();
 
     if (!this.input.forward && !this.input.backward && !this.input.left && !this.input.right) {
-      const horiz = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
-      if (horiz < 0.02) { // tiny threshold to kill float error
+      const horiz2 = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+      if (horiz2 < 0.02) { // tiny threshold to kill float error
         this.playerVelocity.x = 0;
         this.playerVelocity.z = 0;
       }
     }
 
-    if (speed < 0.05) {
-      // --- IDLE ---
-      this.playAction(this.idleAction);
-      if (this.currentAction) this.currentAction.timeScale = 1.0;
-
-    } else {
-      // --- MOVEMENT ---
-      if (this.input.run && this.runningAction) {
-        // RUNNING
-        this.runningAction.timeScale = 1.5;
-        this.playAction(this.runningAction);
-        if (this.currentAction) {
-          // Faster playback if moving faster
-          this.currentAction.timeScale = 1.5;
-        }
-
-      } else if (this.walkAction) {
-        // WALKING
-        this.playAction(this.walkAction);
-        if (this.currentAction) {
-          // Walk animation syncs to speed
-          this.currentAction.timeScale = 1.0
-        }
-      }
-
-      // --- OPTIONAL TURN ANIMS (play only if no forward/back movement) ---
-      if (speed < 0.2) {
-        if (this.input.left && this.leftTurnAction) {
-          this.playAction(this.leftTurnAction);
-          if (this.currentAction) this.currentAction.timeScale = 1.3;
-        } else if (this.input.right && this.rightTurnAction) {
-          this.playAction(this.rightTurnAction);
-          if (this.currentAction) this.currentAction.timeScale = 1.0;
-        }
-      }
-    }
-
+    // reuse central logic
+    this.updateAnimationState(speed, this.input);
   }
 
 }

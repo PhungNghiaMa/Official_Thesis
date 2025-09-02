@@ -12,7 +12,7 @@ import AnnotationDiv from "./annotationDiv";
 import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
 import { GetRoomAsset } from "./services";
 import { Museum } from "./constants";
-import { Capsule, DRACOLoader} from "three/examples/jsm/Addons.js";
+import { Capsule, DRACOLoader, Wireframe} from "three/examples/jsm/Addons.js";
 import RaycasterManager from "./raycaster.js"
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -23,8 +23,9 @@ import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Sphere } from "three";
 import { acceleratedRaycast } from "three-mesh-bvh";
-
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
+import { initRecastIfNeeded , buildNavMeshFromMeshes , getNavQuery , getNavHelper } from "./recastNav.js";
+import NPCGuide from "./NPCGuide.js";
 
 
 
@@ -74,6 +75,14 @@ let currentlyHoveredObject = null;
 // put these once near your input setup in index.js
 let camYaw = 0;
 let camPitch = 0;
+
+// NPC instance 
+let museumNPC = null;
+
+const navInputSet = new Set();   // meshes to feed into recast (floor + obstacles)
+const bvhMeshList = [];          // meshes used for BVH raycasts (ground snap + capsule checks)
+const navInputMeshes = [];   // meshes we will pass to recast
+
 
 // Container instance 
 let loadingManager = document.getElementById('loading-container');
@@ -571,6 +580,9 @@ async function loadModel() {
 
         gltf.scene.traverse((child) => {
             if(!child.isMesh) return;
+            
+            child.updateMatrixWorld(true);
+            bvhMeshList.push(child);
 
             child.receiveShadow = true;
             child.updateMatrixWorld(true);
@@ -583,7 +595,18 @@ async function loadModel() {
 
             ensureUV2ForAO(child.geometry);
 
+            if(child.userData && child.userData.navWalkable || child.userData.navObstacle){
+                navInputMeshes.push(child);
+            }
+
             if (child.isMesh) {
+                console.log('CHILD MESH NAME:', child.name);
+
+                // DEBUG FUNCTION
+                // if (child.name.includes("Cube024")){
+                //     const debugMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 , wireframe: true });
+                //     child.material = debugMaterial;
+                // }
                 const pos = new THREE.Vector3();
                 child.getWorldPosition(pos);
                 child.receiveShadow = true;
@@ -593,11 +616,17 @@ async function loadModel() {
                     fallbackZ = pos.z;
                 }
 
+                // Cube045: Stends --- Chair: chair --- Wall: Wall inside room
+                // if (child.name.includes("Cube045") || child.name.includes("Chair") || child.name.includes("Wall")){ 
+                //     navInputSet.add(child);
+                // }
+
                 if (/^Picture_Frame\d+$/.test(child.name)) {
                     pictureFramesArray.push(child);
                 }
 
                 if (child.name.toLowerCase().includes("floor")) {
+                    navInputSet.add(child);
                     child.receiveShadow = true;
                     child.material.side = THREE.DoubleSide; // Ensure floor is double-sided
                     child.material.roughness = 0.8; // Adjust roughness for better appearance
@@ -639,6 +668,56 @@ async function loadModel() {
             }
         });
 
+
+
+        // initialize recast (WASM) if needed
+        await initRecastIfNeeded();
+
+        const navMeshes = Array.from(navInputSet);
+
+        // DEBUG: show what meshes will be used for navmesh generation
+        console.info('Nav input mesh count for navmesh build:', navMeshes.length);
+        if (navMeshes.length > 0) {
+        console.table('Nav input meshes:', navMeshes.map(m => m.name || m.uuid));
+        const cfg = {
+        cs: 0.05,   // 0.2 units per voxel in X/Z (fits ~135 cells across floor)
+        ch: 0.1,   // 0.1 in Y (now extruded floor survives)
+        walkableSlopeAngle: 45,
+        walkableHeight: 2,
+        walkableClimb: 1,
+        walkableRadius: 2,
+        maxEdgeLen: 30,
+        maxSimplificationError: 3,
+        minRegionArea: 2,
+        mergeRegionArea: 20,
+        maxVertsPerPoly: 6,
+        detailSampleDist: 6,
+        detailSampleMaxError: 1,
+        };
+
+
+
+        try {
+            const { success, navMesh } = buildNavMeshFromMeshes(navMeshes, cfg , scene);
+            if (!success) {
+                console.warn('Failed to build navMesh from meshes - NPC path may not avoid props');
+            } else {
+                console.info('NavMesh built successfully.');
+            }
+        } catch (e) {
+            console.error('Error while building navmesh:', e);
+        }
+        } else {
+            console.warn('No navMesh input meshes found - NPC path may not avoid props. Check naming or set userData.navObstacle on props');
+        }
+
+        const helper = getNavHelper();
+        if (helper) {
+            helper.visible = true;   // set to false in production
+            console.info('Navmesh helper added. Visible = true');
+        }
+
+
         raycasterManager.setPictureFrames(pictureFramesArray);
         Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray);
         
@@ -669,19 +748,85 @@ async function loadModel() {
         // INIT FIRST VIEW PLAYER
         activateFirstPerson();
         fpView = new FirstPersonPlayer(camera, scene, playerCollider);
-        fpView.buildBVH(gltf.scene);
+        fpView.buildBVHFromMeshes(bvhMeshList);
 
         // INIT THIRD VIEW PLAYER
         tpView = new ThirdPersonPlayer(camera, scene, playerCollider, characterModel , mixer);
         tpViewExisted = true;
         tpViewLoadLate = true;
         tpView._cameraSnapped = false;
-        tpView.buildBVH(gltf.scene);        
-
-
-
+        // tpView.buildBVH(gltf.scene);
+        tpView.buildBVHFromMeshes(bvhMeshList)
         physiscsReady = true;
         hasLoadPlayer = true;
+
+        const navQuery = getNavQuery();
+        if (navQuery) {
+            // Option A: clone the player / third-person model (fast)
+            let npcModel = null;
+            if (characterModel) {
+                npcModel = characterModel.clone(true);
+                npcModel.position.set(playerStart.x + 1.0, playerStart.y, playerStart.z + 1.0);
+                scene.add(npcModel);
+            } else {
+                // fallback: simple box placeholder
+                npcModel = new THREE.Mesh(
+                new THREE.BoxGeometry(0.4, 1.6, 0.4),
+                new THREE.MeshBasicMaterial({ color: 0xffaa00 , wireframe: true })
+                );
+                npcModel.position.set(playerStart.x + 1.0, playerStart.y, playerStart.z + 1.0);
+                scene.add(npcModel);
+            }
+
+            // --- NEW: compute and store footOffset on the model (distance from model origin to feet) ---
+            npcModel.updateMatrixWorld(true);
+            const bb = new THREE.Box3().setFromObject(npcModel);
+            npcModel.userData = npcModel.userData || {};
+            // footOffset = positive number = distance from model origin to feet
+            npcModel.userData.footOffset = -bb.min.y;
+            // lift the model a little above floor so downward snap can run cleanly
+            npcModel.position.y = Math.max(
+            npcModel.position.y,
+            (playerStart.y || 0) + (npcModel.userData.footOffset || 0) + 0.02
+            );
+
+            museumNPC = new NPCGuide({
+                scene,
+                navQuery,
+                model: npcModel,
+                gltf: characterGLTF ?? null,         // pass GLTF if you want animations hooked up
+                bvhMeshes: bvhMeshList,             // reuse the BVH mesh list you collected earlier
+                walkSpeed: 1.3,
+                runSpeed: 2.2,
+                turnSpeed: 6.0,
+                heightOffset: 0.01,
+                useCapsuleCollision: true           // toggle on for extra safety (optional)
+            });
+
+            // snap NPC to ground immediately after spawn
+            try {
+            const ray = new THREE.Raycaster(
+                new THREE.Vector3(npcModel.position.x, npcModel.position.y + 2.0, npcModel.position.z),
+                new THREE.Vector3(0, -1, 0)
+            );
+            const hits = ray.intersectObjects(bvhMeshList, true);
+            if (hits.length) {
+                const footOffset = (museumNPC.animCtrl && typeof museumNPC.animCtrl.footOffset === 'number') ? museumNPC.animCtrl.footOffset : 0.01;
+                museumNPC.model.position.y = hits[0].point.y + footOffset + 0.01;
+            } else {
+                // fallback: ensure at least slightly above your computed playerStart
+                museumNPC.model.position.y = Math.max(museumNPC.model.position.y, playerStart.y + 0.02);
+            }
+            } catch (e) {
+                console.warn('NPC spawn snap error', e);
+            }
+
+
+            // Example: pick a target near the center of the main floor
+            const target = new THREE.Vector3(playerStart.x + 4.0, playerStart.y, playerStart.z);
+            museumNPC.setDestination(target);
+        }
+
         
         // --- POPULATE SCENE WITH DATA ---
         (Array.isArray(items) ? items : []).forEach(item => {
@@ -862,7 +1007,8 @@ function activateThirdPerson() {
     // TP not yet created → build it now
     if (!tpViewExisted && character) {
       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model, mixer);
-      tpView.buildBVH(currentScene);
+    //   tpView.buildBVH(currentScene);
+      tpView.buildBVHFromMeshes(bvhMeshList);
       tpView.handleAnimation(character.model, character.gltf);
 
       // 🔹 snap smoothing state immediately
