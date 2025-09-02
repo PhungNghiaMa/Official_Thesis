@@ -83,22 +83,39 @@ export default class FirstPersonPlayer {
     this.pitch = pitch;
   }
 
-  buildBVH(target) {
-    const meshes = [];
-    target.traverse(c => {
-      if (c.isMesh && c.geometry) {
-        if (!c.geometry.boundsTree) {
-          c.updateMatrixWorld(true);
-          c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
-        }
-        c.userData.worldBox = new THREE.Box3().setFromObject(c);
-        c.userData.invWorld = c.matrixWorld.clone().invert();
-        meshes.push(c);
+  // buildBVH(target) {
+  //   const meshes = [];
+  //   target.traverse(c => {
+  //     if (c.isMesh && c.geometry) {
+  //       if (!c.geometry.boundsTree) {
+  //         c.updateMatrixWorld(true);
+  //         c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
+  //       }
+  //       c.userData.worldBox = new THREE.Box3().setFromObject(c);
+  //       c.userData.invWorld = c.matrixWorld.clone().invert();
+  //       meshes.push(c);
+  //     }
+  //   });
+  //   this.bvhMeshes = meshes;
+  //   this.bvhReady = true;
+  // }
+
+  // Replace the old buildBVH(target) with this:
+  buildBVHFromMeshes(meshes) {
+    this.bvhMeshes = [];
+    meshes.forEach((c) => {
+      if (!c.isMesh || !c.geometry) return;
+      c.updateMatrixWorld(true);
+      if (!c.geometry.boundsTree) {
+        c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
       }
+      c.userData.worldBox = new THREE.Box3().setFromObject(c);
+      c.userData.invWorld = c.matrixWorld.clone().invert();
+      this.bvhMeshes.push(c);
     });
-    this.bvhMeshes = meshes;
     this.bvhReady = true;
   }
+
 
   onKeyDown(e) {
     if (e.code === 'KeyW') this.input.forward = true;
