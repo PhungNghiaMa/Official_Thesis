@@ -140,41 +140,17 @@ export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
       console.error('NavMeshQuery construction failed:', e);
       navQuery = null;
     }// replace the navHelper creation block in buildNavMeshFromMeshes
-if (scene) {
-  try {
-    if (navHelper && navHelper.parent) navHelper.parent.remove(navHelper);
 
-    // Material tuned to avoid z-fighting. Slightly offset polygons so helper renders cleanly.
-    const nmMat = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
-      transparent: true,
-      opacity: 0.30,
-      side: THREE.DoubleSide
-    });
-    nmMat.polygonOffset = true;
-    nmMat.polygonOffsetFactor = -1;   // push the navmesh polygons slightly toward camera depth
-    nmMat.polygonOffsetUnits = -4;
-
-    navHelper = new NavMeshHelper(navMesh, {
-      navMeshMaterial: nmMat
-    });
-    scene.add(navHelper);
-  } catch (err) {
-    console.warn('Failed to create NavMeshHelper:', err);
-  }
-}
-
-
-    // attach debug helper if scene provided
     if (scene) {
       try {
         if (navHelper && navHelper.parent) navHelper.parent.remove(navHelper);
 
         // Material tuned to avoid z-fighting. Slightly offset polygons so helper renders cleanly.
         const nmMat = new THREE.MeshBasicMaterial({
-          color: 0x00ff00,
+          color: 0x000000,
+          wireframe: false,
           transparent: true,
-          opacity: 0.30,
+          opacity: 1,
           side: THREE.DoubleSide
         });
         nmMat.polygonOffset = true;
@@ -189,6 +165,8 @@ if (scene) {
         console.warn('Failed to create NavMeshHelper:', err);
       }
     }
+
+
 
     console.info('Navmesh generation succeeded.');
     return { success: true, navMesh: navMesh };
