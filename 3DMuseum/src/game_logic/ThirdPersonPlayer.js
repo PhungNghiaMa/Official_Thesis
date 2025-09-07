@@ -17,7 +17,7 @@ export default class ThirdPersonPlayer {
     this.playerVelocity = new THREE.Vector3();
     this.playerOnFloor = false;
     this.gravity = GRAVITY;
-    this.turnRateDegree = 60;
+    this.turnRateDegree = 50;
     this.turnRate = THREE.MathUtils.degToRad(this.turnRateDegree);
     this.cameraCollider = new Sphere(new THREE.Vector3(0,1,0), 0.35);
 
@@ -293,14 +293,14 @@ export default class ThirdPersonPlayer {
     // --- gravity + damping (stable) ---
     if (!this.playerOnFloor) {
       this.playerVelocity.y -= this.gravity * delta;
-      this.playerVelocity.multiplyScalar(Math.exp(-0.4 * delta));
+      this.playerVelocity.multiplyScalar(Math.exp(-1.5 * delta));
     } else {
       this.playerVelocity.y = 0;
-      this.playerVelocity.multiplyScalar(Math.exp(-8 * delta));
+      this.playerVelocity.multiplyScalar(Math.exp(-10 * delta));
     }
 
     // --- input forces ---
-    const baseSpeed = this.playerOnFloor ? 10 : 18;
+    const baseSpeed = this.playerOnFloor ? 1 : 18;
     // Increase speed when the run button is pressed
     const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
     const speedDelta = delta * finalSpeed;
@@ -403,14 +403,14 @@ export default class ThirdPersonPlayer {
       this.playerVelocity.x = 0;
       this.playerVelocity.z = 0;
     }
-
-    this._smoothedPlayerPosition.lerp(this.playerCollider.end, 0.18); // tune 0.12-0.25
+    const smoothing = 1.0 - Math.exp(-10 * delta); // dynamic smoothing
+    this._smoothedPlayerPosition.lerp(this.playerCollider.end, smoothing); // tune 0.12-0.25
     this.model.position.set(
       this._smoothedPlayerPosition.x,
       this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
       this._smoothedPlayerPosition.z
     );
-    this.tempQuaternion.slerp(this.model.quaternion, 0.12);            // tune 0.08-0.16
+    this.tempQuaternion.slerp(this.model.quaternion, 1.0 - Math.exp(-5 * delta));
 
     // play/pause walk (mixer is advanced once per frame in animate())
     // --- Animation state handling ---

@@ -1,6 +1,8 @@
 // src/game_logic/NPCGuide.js
 import * as THREE from 'three';
 import ThirdPersonPlayer from './ThirdPersonPlayer.js';
+import { acceleratedRaycast } from "three-mesh-bvh";
+if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export default class NPCGuide {
   constructor({
@@ -12,7 +14,7 @@ export default class NPCGuide {
     walkSpeed = 1.3,
     runSpeed = 2.2,
     turnSpeed = 6.0,
-    heightOffset = 0.01,
+    heightOffset = 1,
     arrivalRadius = 0.15,
     useCapsuleCollision = false, // optional fallback collision resolver
     capsule = { height: 1.6, radius: 0.35 }
@@ -30,10 +32,69 @@ export default class NPCGuide {
     this.useCapsuleCollision = useCapsuleCollision;
     this.capsule = capsule;
 
-    // Animation controller reuse
+    // NOTE: pass model into the correct parameter position (5th arg)
     this.animCtrl = new ThirdPersonPlayer(null, scene, null, model);
-    if (gltf) this.animCtrl.handleAnimation(model, gltf);
-    this.mixer = this.animCtrl.mixer;
+
+
+
+
+
+
+    // cache mixer pointer
+    this.mixer = this.animCtrl.mixer ?? null;
+
+    // if (gltf && this.animCtrl && typeof this.animCtrl.handleAnimation === 'function') {
+    //   this.animCtrl.handleAnimation(this.model, gltf);
+    // }
+
+
+    // compute robust foot offset (bone-aware)
+    // this will evaluate the mixer briefly so skeleton pose is applied
+    this.computeFootOffset = () => {
+      if (!this.model) return;
+      if (this.mixer) this.mixer.update(0.0001); // ensure skeleton poses applied
+
+      this.model.updateMatrixWorld(true);
+      let minY = Infinity;
+      const tmpVec = new THREE.Vector3();
+
+      this.model.traverse((child) => {
+        if (!child.isMesh) return;
+        child.updateMatrixWorld(true);
+
+        // consider bones for skinned meshes
+        if (child.isSkinnedMesh && child.skeleton && Array.isArray(child.skeleton.bones)) {
+          for (const bone of child.skeleton.bones) {
+            bone.getWorldPosition(tmpVec);
+            if (tmpVec.y < minY) minY = tmpVec.y;
+          }
+        }
+
+        // consider mesh bounding box as well (fallback/complement)
+        try {
+          const box = new THREE.Box3().setFromObject(child);
+          if (box.min.y < minY) minY = box.min.y;
+        } catch (e) {
+          // ignore objects that fail
+        }
+      });
+
+      if (!isFinite(minY)) {
+        const bb = new THREE.Box3().setFromObject(this.model);
+        minY = bb.min.y;
+      }
+
+      this.model.userData = this.model.userData || {};
+      // store: distance from model position.y to lowest world y (feet)
+      this.model.userData.footOffset = this.model.position.y - minY;
+      console.info('NPCGuide: recomputed footOffset =', this.model.userData.footOffset);
+    };
+
+    // compute initial robust foot offset
+    this.computeFootOffset();
+
+    // remove any other overriding footOffset (we now rely on computeFootOffset)
+    // (do not compute a second bounding-box-only offset that can be stale)
 
     this.currentPath = []; // array of THREE.Vector3
     this.pathIndex = 0;
@@ -53,29 +114,76 @@ export default class NPCGuide {
       this._segment = new THREE.Line3();
     }
 
-    // initial idle
-    this.animCtrl.setNPCAnimationState(0, { left: false, right: false, run: false });
+    // initial idle (use playAction of animCtrl if available)
+    if (this.animCtrl && this.animCtrl.idleAction && this.animCtrl.playAction) {
+      this.animCtrl.playAction(this.animCtrl.idleAction);
+    }
   }
 
-  async setDestination(worldTarget) {
-    if (!this.navQuery) {
-      console.warn('NPCGuide: navQuery missing');
-      return false;
-    }
-    const start = { x: this.model.position.x, y: this.model.position.y, z: this.model.position.z };
-    const end = { x: worldTarget.x, y: worldTarget.y, z: worldTarget.z };
+setNavQuery(navQuery){
+  if (!navQuery){
+    console.error("Please add navQuery parameter to setNavQuery function")
+  }
+  this.navQuery = navQuery;
+}
 
-    const res = this.navQuery.computePath(start, end);
-    if (!res || !res.success || !res.path || res.path.length === 0) {
-      this.currentPath = [];
-      this.pathIndex = 0;
-      return false;
-    }
+getAnimation() {
+  if (!this.animCtrl || !this.model || !this.gltf) return;
+  this.animCtrl.handleAnimation(this.model, this.gltf);
+  this.mixer = this.animCtrl.mixer; // keep local reference if you want
+}
 
-    this.currentPath = res.path.map(p => new THREE.Vector3(p.x ?? p[0], p.y ?? p[1], p.z ?? p[2]));
+
+  // Replace the existing setDestination(...) method with this
+  // inside NPCGuide.js
+setDestination(worldTarget) {
+  if (!this.navQuery) { console.warn('NPCGuide: navQuery missing'); return false; }
+  if (!worldTarget) { console.warn('NPCGuide: invalid destination', worldTarget); return false; }
+
+  // normalize inputs and accept either:
+  // - THREE.Vector3
+  // - {x,y,z}
+  // - array [x,y,z]
+  // - result from navQuery.findClosestPoint({...}) which has { point: {x,y,z}, ... }
+  const toPointObj = (p) => {
+    if (!p) return null;
+    // if user passed a navQuery result
+    if (p.point && typeof p.point.x === 'number') return { x: p.point.x, y: p.point.y, z: p.point.z };
+    if (p.isVector3) return { x: p.x, y: p.y, z: p.z };
+    if (Array.isArray(p)) return { x: p[0], y: p[1], z: p[2] };
+    return { x: p.x ?? p[0] ?? 0, y: p.y ?? p[1] ?? 0, z: p.z ?? p[2] ?? 0 };
+  };
+
+  const rawStart = toPointObj(this.model.position);
+  const rawEnd = toPointObj(worldTarget);
+
+  // project start/end onto navmesh (navQuery returns { point: {x,y,z}, ... })
+  const startRes = this.navQuery.findClosestPoint(rawStart);
+  const endRes   = this.navQuery.findClosestPoint(rawEnd);
+
+  const start = startRes?.point || rawStart;
+  const end   = endRes?.point   || rawEnd;
+
+  console.info('NPCGuide.setDestination -> start(onNav):', start, 'end(onNav):', end);
+
+  const res = this.navQuery.computePath(start, end);
+  console.info('NPCGuide.computePath result:', res);
+
+  if (!res || !res.success || !res.path || res.path.length === 0) {
+    this.currentPath = [];
     this.pathIndex = 0;
-    return true;
+    console.warn('NPCGuide: computePath returned empty or failed — path NOT set.');
+    return false;
   }
+
+  this.currentPath = res.path.map(p => new THREE.Vector3(p.x ?? p[0], p.y ?? p[1], p.z ?? p[2]));
+  this.pathIndex = 0;
+  console.info('NPCGuide: path created with', this.currentPath.length, 'points');
+  return true;
+}
+
+
+
 
   async followWaypoints(waypoints = []) {
     if (!this.navQuery || waypoints.length === 0) return false;
@@ -93,7 +201,6 @@ export default class NPCGuide {
         full.push(...seg);
         start = seg[seg.length - 1].clone();
       } else {
-        // failed this segment — abort but keep what we have
         console.warn('NPCGuide: waypoint path segment failed', target);
       }
     }
@@ -134,20 +241,18 @@ export default class NPCGuide {
       bvh.shapecast({
         intersectsBounds: (box) => box.intersectsBox(this._segment.getBoundingBox(new THREE.Box3()).expandByScalar(radius)),
         intersectsTriangle: (tri) => {
-          // triangle.closestPointToSegment / tri-point closests logic from your player code
           const triPoint = new THREE.Vector3();
           const capPoint = new THREE.Vector3();
           const dist = tri.closestPointToSegment(this._segment, triPoint, capPoint);
           if (dist < radius) {
             const depth = radius - dist;
             const pushDir = capPoint.sub(triPoint).normalize();
-            // push capsule endpoints in local space and then transform back
             this._segment.start.addScaledVector(pushDir, depth);
             this._segment.end.addScaledVector(pushDir, depth);
-            // apply back to world
+
             const newStart = this._segment.start.clone().applyMatrix4(mesh.matrixWorld);
             const newEnd = this._segment.end.clone().applyMatrix4(mesh.matrixWorld);
-            // move model to newStart with simple translation
+
             const delta = newStart.clone().sub(this._capsuleStart);
             this.model.position.add(delta);
           }
@@ -157,10 +262,17 @@ export default class NPCGuide {
   }
 
   update(delta) {
+    // advance animations
     if (this.mixer) this.mixer.update(delta);
 
     if (!this.currentPath || this.currentPath.length === 0) {
-      this.animCtrl.setNPCAnimationState(0, { run: false, left: false, right: false });
+      // idle
+      // prefer playAction if available (ThirdPersonPlayer exposes this in your code)
+      if (this.animCtrl && this.animCtrl.idleAction && this.animCtrl.playAction) {
+        this.animCtrl.playAction(this.animCtrl.idleAction);
+      } else if (this.animCtrl && typeof this.animCtrl.setNPCAnimationState === 'function') {
+        this.animCtrl.setNPCAnimationState(0, { left: false, right: false, run: false });
+      }
       return;
     }
 
@@ -178,7 +290,9 @@ export default class NPCGuide {
         // reached final
         this.currentPath = [];
         this.pathIndex = 0;
-        this.animCtrl.setNPCAnimationState(0, { run: false, left: false, right: false });
+        if (this.animCtrl && this.animCtrl.idleAction && this.animCtrl.playAction) {
+          this.animCtrl.playAction(this.animCtrl.idleAction);
+        }
         return;
       }
     }
@@ -190,13 +304,13 @@ export default class NPCGuide {
       this.model.quaternion.slerp(facing, Math.min(1, this.turnSpeed * delta));
     }
 
-    // speed: small ramping by distance
+    // movement ramping
     const speed = Math.min(this.walkSpeed + dist * 0.5, this.runSpeed);
     const step = Math.min(dist, speed * delta);
     horiz.normalize();
     pos.addScaledVector(horiz, step);
 
-    // small forward buffer — raycast a short distance and back off a bit if colliding
+    // forward obstacle detection using BVH raycast
     if (this.bvhMeshes?.length) {
       this._fwdRay.set(pos.clone().add(new THREE.Vector3(0, 0.7, 0)), horiz);
       this._fwdRay.near = 0;
@@ -206,29 +320,42 @@ export default class NPCGuide {
     }
 
     // downward snap to BVH floor so feet land properly
-    // downward snap — raycast downward onto BVH meshes
     if (this.bvhMeshes?.length) {
       this._downRay.set(pos.clone().add(new THREE.Vector3(0, 2.0, 0)), new THREE.Vector3(0, -1, 0));
       const hits = this._downRay.intersectObjects(this.bvhMeshes, true);
 
       if (hits.length) {
-        const footOffset = (this.model?.userData?.footOffset ?? this.heightOffset ?? 0);
-        this.model.position.y = hits[0].point.y + footOffset + 0.01; // +0.01 safety epsilon
+        // prefer model.userData.footOffset if available, else animCtrl.footOffset, else heightOffset
+        const footOffset = (this.model?.userData?.footOffset !== undefined)
+          ? this.model.userData.footOffset
+          : ((this.animCtrl && typeof this.animCtrl.footOffset === 'number') ? this.animCtrl.footOffset : this.heightOffset);
+          pos.y = hits[0].point.y + footOffset + 0.01;
+
       } else {
-        // fallback: keep slightly above computed player start or previous y
+        // fallback: keep current Y (don’t sink)
         this.model.position.y = Math.max(
           this.model.position.y,
           (this.landedY ?? this.model.position.y)
         );
       }
-
     }
 
-
-    // Optional capsule penetration resolution for stubborn geometry
+    // optional capsule penetration resolution
     if (this.useCapsuleCollision) this._resolveCapsulePenetration();
 
-    // update animation
-    this.animCtrl.setNPCAnimationState(speed, { run: speed > this.walkSpeed * 1.4, left: false, right: false });
+    // animation selection (use animCtrl's actions if present)
+    if (this.animCtrl) {
+      // ensure animCtrl.mixer advances too (if separate)
+      if (this.animCtrl.mixer) this.animCtrl.mixer.update(delta);
+
+      const walked = speed;
+      if (walked > this.walkSpeed * 1.4 && this.animCtrl.runForwardAction) {
+        this.animCtrl.playAction(this.animCtrl.runForwardAction);
+      } else if (walked > 0.03 && this.animCtrl.walkForwardAction) {
+        this.animCtrl.playAction(this.animCtrl.walkForwardAction);
+      } else if (this.animCtrl.idleAction) {
+        this.animCtrl.playAction(this.animCtrl.idleAction);
+      }
+    }
   }
 }
