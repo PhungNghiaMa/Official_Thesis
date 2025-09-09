@@ -167,7 +167,7 @@ export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
         // Material tuned to avoid z-fighting. Slightly offset polygons so helper renders cleanly.
         const nmMat = new THREE.MeshBasicMaterial({
           color: 0x00ff00,
-          wireframe: false,
+          wireframe: true,
           transparent: true,
           opacity: 1,
           side: THREE.DoubleSide

@@ -27,8 +27,7 @@ if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 import { initRecastIfNeeded , buildNavMeshFromMeshes , getNavQuery , getNavHelper } from "./recastNav.js";
 import NPCGuide from "./NPCGuide.js";
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { addAgent, initCrowd, updateCrowd, getAgents, setAgentTarget } from './CrowdManager.js';
-import * as CrowdManager from './CrowdManager.js';
+
 
 
 
@@ -366,297 +365,95 @@ function ensureUV2ForAO(geometry) {
   }
 }
 
-        // function initNPC(scene, navQuery, bvhMeshes) {
+        function initNPC(scene, navQuery, bvhMeshes) {
+            if (!navQuery){
+                console.log("Nav query is not exist yet. museumNPC init may be fail");
+            }
+            const loader = new GLTFLoader();
+            // loader.load('/models/npc.glb', (gltf) => {
+                const npcModel = SkeletonUtils.clone(characterModel);
 
-        //     if (!navQuery){
-        //         console.log("Nav query is not exist yet. museumNPC init may be fail");
-        //     }
-        //     const loader = new GLTFLoader();
-        //     // loader.load('/models/npc.glb', (gltf) => {
-        //         const npcModel = SkeletonUtils.clone(characterModel);
-
-        //         // ensure model world matrix is updated
-        //         npcModel.updateMatrixWorld(true);
-        //           npcModel.traverse((child) => {
-        //             if (child.isMesh) {
-        //             child.castShadow = true;
-        //             child.receiveShadow = true;
-        //             // optional: re-tune material if you have tuneMaterial helper
-        //             if (Array.isArray(child.material)) child.material = child.material.map(tuneMaterial);
-        //             else child.material = tuneMaterial(child.material);
-        //             }
-        //         });
+                // ensure model world matrix is updated
+                npcModel.updateMatrixWorld(true);
+                  npcModel.traverse((child) => {
+                    if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    // optional: re-tune material if you have tuneMaterial helper
+                    if (Array.isArray(child.material)) child.material = child.material.map(tuneMaterial);
+                    else child.material = tuneMaterial(child.material);
+                    }
+                });
 
 
-        //         // choose a starting position (example near player start)
-        //         npcModel.position.set(0.5, 0, 0.5);
-        //         scene.add(npcModel);
+                // choose a starting position (example near player start)
+                npcModel.position.set(0.5, 0, 0.5);
+                scene.add(npcModel);
 
-        //         if (characterGLTF){
-        //             console.info("characterGLTF exist already");
-        //         }else{
-        //             console.warn("characterGLTF not exist yet. museumNPC init may be fail")
-        //         }
+                if (characterGLTF){
+                    console.info("characterGLTF exist already");
+                }else{
+                    console.warn("characterGLTF not exist yet. museumNPC init may be fail")
+                }
 
-        //         // create NPCGuide (this handles animation, floor snap, obstacle detection)
-        //         museumNPC = new NPCGuide({
-        //             scene,
-        //             navQuery: navQuery ? navQuery : null,
-        //             model: npcModel,
-        //             gltf: characterGLTF,
-        //             bvhMeshes: bvhMeshes,             // your navmesh or floor/obstacle meshes
-        //             walkSpeed: 1.2,
-        //             runSpeed: 2.4,
-        //             turnSpeed: 6.0,
-        //             heightOffset: 1.0,
-        //             arrivalRadius: 0.15,
-        //             useCapsuleCollision: false,  // turn true if you want capsule sweep
-        //         });
+                // create NPCGuide (this handles animation, floor snap, obstacle detection)
+                museumNPC = new NPCGuide({
+                    scene,
+                    navQuery: navQuery ? navQuery : null,
+                    model: npcModel,
+                    gltf: characterGLTF,
+                    bvhMeshes: bvhMeshes,             // your navmesh or floor/obstacle meshes
+                    walkSpeed: 1.2,
+                    runSpeed: 2.4,
+                    turnSpeed: 6.0,
+                    heightOffset: 1.0,
+                    arrivalRadius: 0.15,
+                    useCapsuleCollision: false,  // turn true if you want capsule sweep
+                });
 
-        //         museumNPC.getAnimation();
+                museumNPC.getAnimation();
             
-        //         if (museumNPC.computeFootOffset) museumNPC.computeFootOffset();
+                if (museumNPC.computeFootOffset) museumNPC.computeFootOffset();
 
 
-        //         // after NPCGuide computes its foot offset, do an initial downward snap
-        //         // const downRay = new THREE.Raycaster(
-        //         // npcModel.position.clone().add(new THREE.Vector3(0, 1, 0)),
-        //         // new THREE.Vector3(0, -1, 0)
-        //         // );
-        //         // const hits = downRay.intersectObjects(bvhMeshes, true);
-        //         // if (hits.length > 0) {
-        //         // const footOffset = npcModel.userData?.footOffset ?? 0.01;
-        //         // npcModel.position.y = hits[0].point.y + footOffset + 1e-3;
-        //         // }
-        //         // initial vertical snap: prefer navmesh projection
-        //         const footOffset = npcModel.userData?.footOffset ?? 0.01;
-        //         let snapped = false;
-        //         if (navQuery) {
-        //         try {
-        //             const np = navQuery.findClosestPoint({ x: npcModel.position.x, y: npcModel.position.y + 1.0, z: npcModel.position.z });
-        //             if (np && np.point) {
-        //             npcModel.position.y = np.point.y + footOffset + 1e-3;
-        //             snapped = true;
-        //             }
-        //         } catch (e) {
-        //             console.warn('initNPC: navQuery.findClosestPoint failed:', e);
-        //         }
-        //         }
-        //         if (!snapped && bvhMeshes?.length) {
-        //         const downRay = new THREE.Raycaster(npcModel.position.clone().add(new THREE.Vector3(0, 1, 0)), new THREE.Vector3(0, -1, 0));
-        //         const hits = downRay.intersectObjects(bvhMeshes, true);
-        //         if (hits.length > 0) {
-        //             npcModel.position.y = hits[0].point.y + footOffset + 1e-3;
-        //         }
-        //         }
+                // after NPCGuide computes its foot offset, do an initial downward snap
+                // const downRay = new THREE.Raycaster(
+                // npcModel.position.clone().add(new THREE.Vector3(0, 1, 0)),
+                // new THREE.Vector3(0, -1, 0)
+                // );
+                // const hits = downRay.intersectObjects(bvhMeshes, true);
+                // if (hits.length > 0) {
+                // const footOffset = npcModel.userData?.footOffset ?? 0.01;
+                // npcModel.position.y = hits[0].point.y + footOffset + 1e-3;
+                // }
+                // initial vertical snap: prefer navmesh projection
+                const footOffset = npcModel.userData?.footOffset ?? 0.01;
+                let snapped = false;
+                if (navQuery) {
+                try {
+                    const np = navQuery.findClosestPoint({ x: npcModel.position.x, y: npcModel.position.y + 1.0, z: npcModel.position.z });
+                    if (np && np.point) {
+                    npcModel.position.y = np.point.y + footOffset + 1e-3;
+                    snapped = true;
+                    }
+                } catch (e) {
+                    console.warn('initNPC: navQuery.findClosestPoint failed:', e);
+                }
+                }
+                if (!snapped && bvhMeshes?.length) {
+                const downRay = new THREE.Raycaster(npcModel.position.clone().add(new THREE.Vector3(0, 1, 0)), new THREE.Vector3(0, -1, 0));
+                const hits = downRay.intersectObjects(bvhMeshes, true);
+                if (hits.length > 0) {
+                    npcModel.position.y = hits[0].point.y + footOffset + 1e-3;
+                }
+                }
 
 
-        //         console.info('NPC initialized at', npcModel.position);
-        //     // });
-        // }
+                console.info('NPC initialized at', npcModel.position);
+            // });
+        }
 
 // Smooth animation loop
-// function initNPC(scene, navQuery, bvhMeshes) {
-//     const npcModel = SkeletonUtils.clone(characterModel);
-
-//     npcModel.traverse((child) => {
-//         if (child.isMesh) {
-//             child.castShadow = true;
-//             child.receiveShadow = true;
-//             if (Array.isArray(child.material)) child.material = child.material.map(tuneMaterial);
-//             else child.material = tuneMaterial(child.material);
-//         }
-//     });
-
-//     const startPosition = new THREE.Vector3(0.5, 0, 0.5);
-    
-//     // Find the closest valid navmesh point to our desired start
-//     const { point: navStartPoint } = navQuery.findClosestPoint(startPosition);
-//     if (navStartPoint) {
-//       npcModel.position.copy(navStartPoint);
-//     } else {
-//       npcModel.position.copy(startPosition);
-//       console.warn('NPC start position is not on the navmesh.');
-//     }
-    
-//     scene.add(npcModel);
-
-//     // This is a simplified animation controller, reusing your ThirdPersonPlayer class
-//     // for its animation logic ONLY. We won't use its physics or movement.
-//     const animCtrl = new ThirdPersonPlayer(null, scene, null, npcModel);
-//     animCtrl.handleAnimation(npcModel, characterGLTF);
-
-//     // Add an agent to the crowd simulation
-//     if (npcModel){
-//         museumNPC = {
-//             model: npcModel,
-//             animCtrl: null,
-//             agentId: null, // Initialize agentId to null
-//             // setDestination: (destination) => {
-//             //     // Your custom setDestination logic here
-//             //     // This is where you would call CrowdManager.setAgentTarget
-//             // }
-//         };
-//         console.info("NPC MODEL IS PUT AT: ",npcModel.position ?? "Cannot get npcModel postition");
-//         const animCtrl = new ThirdPersonPlayer(null, scene , null , npcModel);
-//         const agentId = CrowdManager.addAgent(
-//             navStartPoint,
-//             {
-//                 radius: 0.35,
-//                 height: 1.8,
-//                 maxSpeed: 1.5, // walking speed
-//             },
-//             { model: npcModel, animCtrl: animCtrl } // Pass our objects as user data
-//         );
-//         console.log('Agent ID in index.js:', agentId);
-//         if (agentId !== null && agentId > -1 ) {
-//             // Store our complete NPC object
-//             museumNPC = {
-//                 model: npcModel,
-//                 animCtrl: animCtrl,
-//                 agentId: agentId,
-
-//             };
-//             console.info('NPC initialized with Detour Crowd Agent ID:', agentId);
-//         } else {
-//             console.error('Failed to initialize NPC agent in crowd.');
-//             return;
-//         }
-//     }
-// }
-
-// src/game_logic/index.js
-
-// function initNPC(scene, navQuery, bvhMeshes) {
-//     const npcModel = SkeletonUtils.clone(characterModel);
-
-//     npcModel.traverse((child) => {
-//         if (child.isMesh) {
-//             child.castShadow = true;
-//             child.receiveShadow = true;
-//             if (Array.isArray(child.material)) child.material = child.material.map(tuneMaterial);
-//             else child.material = tuneMaterial(child.material);
-//         }
-//     });
-
-//     const desiredStartPosition = new THREE.Vector3(0.5, 0, 0.5);
-    
-//     // --- DEBUG & VALIDATION START ---
-//     console.log('Attempting to find navmesh point near:', desiredStartPosition);
-//     const closestNavPointResult = navQuery.findClosestPoint(desiredStartPosition);
-//     const navStartPoint = closestNavPointResult ? closestNavPointResult.point : null;
-
-//     if (navStartPoint) {
-//         const distance = desiredStartPosition.distanceTo(new THREE.Vector3(navStartPoint.x, navStartPoint.y, navStartPoint.z));
-//         console.log('Found closest navmesh point at:', navStartPoint, `(Distance: ${distance.toFixed(2)})`);
-
-//         // A large distance suggests the desired start point is very far from the navmesh
-//         if (distance > 2.0) { // 2 meters is a reasonable threshold
-//             console.warn('WARNING: The desired NPC start position is very far from the actual navmesh. Check your model floor position and the spawn point.');
-//         }
-
-//         npcModel.position.set(navStartPoint.x, navStartPoint.y, navStartPoint.z);
-
-//     } else {
-//         console.error('CRITICAL: navQuery.findClosestPoint failed. Could not find any point on the navmesh. NPC will not have pathfinding.');
-//         // Place the model anyway for visual debugging, but don't try to create a crowd agent.
-//         npcModel.position.copy(desiredStartPosition);
-//         scene.add(npcModel);
-//         return; // Exit the function since we can't proceed
-//     }
-//     // --- DEBUG & VALIDATION END ---
-    
-//     scene.add(npcModel);
-
-//     // Add an agent to the crowd simulation
-//     const animCtrl = new ThirdPersonPlayer(null, scene, null, npcModel);
-    
-//     const agentParams = {
-//         radius: 0.35,
-//         height: 1.8,
-//         maxSpeed: 1.5,
-//         maxAcceleration: 4.0,
-//         separationWeight: 2.0
-//     };
-
-//     // IMPORTANT: Pass the validated navStartPoint to the CrowdManager
-//     const agentId = CrowdManager.addAgent(navStartPoint, agentParams, { model: npcModel, animCtrl: animCtrl });
-    
-//     if (agentId !== null && agentId > -1) {
-//         museumNPC = {
-//             model: npcModel,
-//             animCtrl: animCtrl,
-//             agentId: agentId,
-//         };
-//         console.info('✅ NPC initialized successfully with Detour Crowd Agent ID:', agentId);
-//     } else {
-//         console.error('Failed to initialize NPC agent in crowd. The validated start point was likely still invalid for the crowd system.');
-//         // The NPC model is in the scene, but it won't be able to move.
-//     }
-// }
-
-// src/game_logic/index.js
-
-function initNPC(scene, navQuery, bvhMeshes) {
-    const npcModel = SkeletonUtils.clone(characterModel);
-
-    npcModel.traverse((child) => {
-        if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-            if (Array.isArray(child.material)) child.material = child.material.map(tuneMaterial);
-            else child.material = tuneMaterial(child.material);
-        }
-    });
-
-    const desiredStartPosition = new THREE.Vector3(0.5, 0.5, 0.5); // A little height helps
-    const searchExtent = new THREE.Vector3(1, 1, 1); // Search 1 unit around the start pos
-
-    // --- NEW, MORE ROBUST SPAWN LOGIC ---
-    console.log('Attempting to find navmesh polygon near:', desiredStartPosition);
-    const nearestPoly = navQuery.findNearestPoly(desiredStartPosition, searchExtent);
-    
-    // The center of the found polygon is a guaranteed safe spawn point.
-    const navStartPoint = nearestPoly ? nearestPoly.center : null;
-
-    if (!navStartPoint) {
-        console.error('CRITICAL: Could not find any navmesh polygon near the start position. NPC cannot be created.');
-        // Add model to scene for visual debugging, but exit function.
-        npcModel.position.copy(desiredStartPosition);
-        scene.add(npcModel);
-        return; 
-    }
-    
-    console.log('Found safe spawn point at polygon center:', navStartPoint);
-    npcModel.position.set(navStartPoint.x, navStartPoint.y, navStartPoint.z);
-    scene.add(npcModel);
-    // --- END OF NEW SPAWN LOGIC ---
-
-    const animCtrl = new ThirdPersonPlayer(null, scene, null, npcModel);
-    
-    const agentParams = {
-        radius: 0.35,
-        height: 1.8,
-        maxSpeed: 1.5,
-        maxAcceleration: 4.0,
-        separationWeight: 2.0
-    };
-
-    const agentId = CrowdManager.addAgent(navStartPoint, agentParams, { model: npcModel, animCtrl: animCtrl });
-    
-    if (agentId !== null && agentId > -1) {
-        museumNPC = {
-            model: npcModel,
-            animCtrl: animCtrl,
-            agentId: agentId,
-        };
-        console.info('✅ NPC initialized successfully with Detour Crowd Agent ID:', agentId);
-    } else {
-        console.error('Failed to initialize NPC agent in crowd. This is unusual if a safe point was found.');
-    }
-}
-
-
 function animateProgress() {
   if (currentProgress < targetProgress) {
     // Maximum speed per frame (e.g. ~0.5% per frame at 60fps = ~30%/s)
@@ -1122,7 +919,6 @@ async function loadModel() {
             if (!success) {
                 console.warn('Failed to build navMesh from meshes - NPC path may not avoid props');
             } else {
-                CrowdManager.initCrowd(navMesh, 2 , 0.35);
                 console.info('NavMesh built successfully.');
             }
         } catch (e) {
@@ -1189,7 +985,12 @@ async function loadModel() {
             console.log("Nav query: ", navQuery)
         }
         initNPC(scene, navQuery, bvhMeshList);
-        // console.log("ClosestPoint from navQuery to NPC position",navQuery.findClosestPoint(museumNPC.model.position));
+        if (museumNPC.animCtrl && museumNPC.animCtrl.buildBVHFromMeshes) {
+            museumNPC.animCtrl.buildBVHFromMeshes(bvhMeshList);
+            console.log("BVH built on", bvhMeshList.filter(m => m.geometry?.boundsTree).length, "meshes");
+
+        }
+        console.log("ClosestPoint from navQuery to NPC position",navQuery.findClosestPoint(museumNPC.model.position));
 
         
         // Find a point IN FRONT of Wall001 for the NPC to move to
@@ -1230,10 +1031,10 @@ async function loadModel() {
         // }
 
         // call immediately after init or in console:
-        // goToMesh(Wall001, {
-        //     localForwardVector: new THREE.Vector3(1, 0, 0),
-        //     desiredDistance: 12 // How far in front to stand
-        // });
+        goToMesh(Wall001, {
+            localForwardVector: new THREE.Vector3(1, 0, 0),
+            desiredDistance: 12 // How far in front to stand
+        });
 
 
 
@@ -1335,17 +1136,6 @@ function animate() {
     outlinePass.enabled = hasTargets;
   }
 
-  CrowdManager.updateCrowd(frameDelta);
-
-  const agents = CrowdManager.getAgents();
-  agents.forEach(({model, animCtrl, agent}, agentId) =>{
-    if (!agent){
-        return;
-    }
-    model.position.copy(agent.position);
-  })
-
-
 
   if (physiscsReady && activePlayer === 'tp' && tpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
@@ -1412,6 +1202,7 @@ function animate() {
     }
   }
 
+  if(physiscsReady && museumNPC) museumNPC.update(frameDelta);
 
 //   if (tpView?.mixer) tpView.mixer.update(FIXED_TIMESTEP);
   if (mixer) mixer.update(frameDelta);
@@ -1678,20 +1469,27 @@ export function initializeGame(targetContainerId = 'model-container') {
         // onHoverPictureFrame: (object, isHovering) => {}
         onNPCPathFollow: (intersection) => {
             const navQuery = getNavQuery();
-            if (!navQuery) { // Check for the new npc object
-                console.warn('NavMesh is not ready. Cannot find path.');
-                return;
-            }
-            if (!museumNPC){
-                console.warn('NPC is not ready. Cannot find path.');
+            if (!navQuery || !museumNPC) {
+                console.warn('NavMesh or NPC is not ready. Cannot find path.');
                 return;
             }
 
+            // intersection.point is a THREE.Vector3
             const targetPoint = intersection.point;
-            console.log("Click to point: ", targetPoint);
-            // Use the CrowdManager to set the agent's destination
-            CrowdManager.setAgentTarget(museumNPC.agentId, targetPoint, navQuery);
+            // Ask the navQuery to find the closest navmesh point to the clicked point
+            const closest = navQuery.findClosestPoint({ x: targetPoint.x, y: targetPoint.y, z: targetPoint.z });
+
+            if (closest && closest.point) {
+                // create a THREE.Vector3 to pass to NPC (or pass closest.point if NPC expects {x,y,z})
+                const dest = new THREE.Vector3(closest.point.x, closest.point.y, closest.point.z);
+                console.info('Click → world:', targetPoint, ' → snapped to navmesh point:', dest);
+                museumNPC.setDestination(dest);
+            } else {
+                console.warn('Clicked point not near navmesh (no closest point). Raw click:', targetPoint);
+            }
         }
+    
+        
     });
     raycasterManager.setOutlinePass(outlinePass);
 

@@ -9,14 +9,31 @@ const agents = new Map(); // Maps agent index (id) to our custom agent data
  * @param {number} maxAgents - The maximum number of agents the crowd can manage.
  * @param {number} maxAgentRadius - The radius of the largest agent.
  */
-export function initCrowd(navMesh, maxAgents, maxAgentRadius) {
-    if (!navMesh) {
-        console.error('CrowdManager: Cannot initialize without a navMesh.');
-        return;
-    }
+// export function initCrowd(navMesh, maxAgents, maxAgentRadius) {
+//     if (!navMesh) {
+//         console.error('CrowdManager: Cannot initialize without a navMesh.');
+//         return;
+//     }
+//     crowd = new Crowd(navMesh, maxAgents, maxAgentRadius);
+//     console.log('Detour Crowd initialized.');
+// }
+
+export function initCrowd(navMesh, maxAgents = 1, maxAgentRadius = 0.5) {
+  if (!navMesh) {
+    console.error('CrowdManager: Cannot initialize without a navMesh.');
+    return false;
+  }
+  try {
     crowd = new Crowd(navMesh, maxAgents, maxAgentRadius);
-    console.log('Detour Crowd initialized.');
+    console.log('Detour Crowd initialized.', { maxAgents, maxAgentRadius });
+    return true;
+  } catch (err) {
+    console.error('CrowdManager.initCrowd failed:', err);
+    crowd = null;
+    return false;
+  }
 }
+
 
 /**
  * Adds a new agent to the crowd simulation.
@@ -60,42 +77,64 @@ export function initCrowd(navMesh, maxAgents, maxAgentRadius) {
 //     }
 // }
 
-// src/game_logic/CrowdManager.js
-
+// --- replace the existing addAgent implementation in CrowdManager.js with this ---
 export function addAgent(position, agentParams, userData = {}) {
-    if (!crowd) {
-        console.error("Crowd manager is not initialized.");
-        return null;
-    }
+  if (!crowd) {
+    console.error("Crowd manager is not initialized.");
+    return null;
+  }
 
-    const params = { ...crowdAgentParamsDefaults };
-    params.radius = agentParams.radius ?? 0.4;
-    params.height = agentParams.height ?? 1.8;
-    params.maxAcceleration = agentParams.maxAcceleration ?? 4.0;
-    params.maxSpeed = agentParams.maxSpeed ?? 1.5;
-    params.collisionQueryRange = params.radius * 8;
-    params.pathOptimizationRange = params.radius * 30;
-    params.updateFlags = 0; 
-    params.separationWeight = agentParams.separationWeight ?? 2.0;
+  const params = { ...crowdAgentParamsDefaults };
+  params.radius = agentParams.radius ?? 0.4;
+  params.height = agentParams.height ?? 2.0;
+  params.maxAcceleration = agentParams.maxAcceleration ?? 4.0;
+  params.maxSpeed = agentParams.maxSpeed ?? 1.5;
+  params.collisionQueryRange = params.radius * 8;
+  params.pathOptimizationRange = params.radius * 30;
+  params.updateFlags = 0;
+  params.separationWeight = agentParams.separationWeight ?? 2.0;
 
-    const agentIndex = crowd.addAgent(position, params);
+  // crowd.addAgent may return a number (index) OR a CrowdAgent object depending on the wrapper/version.
+  const res = crowd.addAgent(position, params);
 
-    if (agentIndex !== -1) {
-        agents.set(agentIndex, {
-            ...userData,
-            agent: crowd.getAgent(agentIndex),
-        });
-        console.log(`Agent ${agentIndex} added to crowd at`, position);
-        return agentIndex;
-    } else {
-        // ✅ NEW: More detailed error log
-        console.error(
-            "Failed to add agent to crowd. The crowd might be full, or the provided position is invalid.",
-            "\nFailed Position:", position
-        );
-        return null;
-    }
+  // normalize
+  let numericIndex = null;
+  let agentHandle = null;
+
+  if (typeof res === 'number') {
+    numericIndex = res;
+    if (numericIndex !== -1) agentHandle = crowd.getAgent(numericIndex);
+  } else if (res && typeof res === 'object') {
+    // wrapper returned a CrowdAgent object (or similar)
+    agentHandle = res;
+    // if it exposes an internal agentIndex, use that as numeric id when available
+    if (typeof res.agentIndex === 'number') numericIndex = res.agentIndex;
+    // some wrappers expose raw.ptr — that's not a numeric agent index, but we'll keep agentHandle
+  }
+
+  // success if we have either a numeric index (not -1) or a valid agentHandle object
+  const success = (typeof numericIndex === 'number' && numericIndex !== -1) || (!!agentHandle);
+
+  if (success) {
+    // choose a stable key: prefer numericIndex if available, otherwise use the agentHandle object as key
+    const key = (typeof numericIndex === 'number' && numericIndex !== -1) ? numericIndex : agentHandle;
+    // ensure stored agent object is a usable object (agentHandle if present, otherwise try to query crowd)
+    const storedAgent = agentHandle || (typeof numericIndex === 'number' ? crowd.getAgent(numericIndex) : null);
+
+    agents.set(key, {
+      ...userData,
+      agent: storedAgent,
+    });
+
+    console.log('Agent added to crowd:', { key, numericIndex, agentHandle, position });
+    // return numeric id when available (most callers expect a number), otherwise return the agent handle object
+    return (typeof numericIndex === 'number' && numericIndex !== -1) ? numericIndex : agentHandle;
+  } else {
+    console.error('Failed to add agent to crowd. crowd.addAgent returned:', res, 'position:', position);
+    return null;
+  }
 }
+
 
 /**
  * Sets the navigation target for a specific agent.
