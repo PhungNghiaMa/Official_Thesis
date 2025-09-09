@@ -35,11 +35,6 @@ export default class NPCGuide {
     // NOTE: pass model into the correct parameter position (5th arg)
     this.animCtrl = new ThirdPersonPlayer(null, scene, null, model);
 
-
-
-
-
-
     // cache mixer pointer
     this.mixer = this.animCtrl.mixer ?? null;
 
@@ -477,7 +472,4 @@ setDestination(worldTarget) {
         this.animCtrl.setNPCAnimationState(Math.min(speed, this.runSpeed), { run: speed > this.walkSpeed });
       }
     }
-
-
-
 }
