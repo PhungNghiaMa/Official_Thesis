@@ -212,6 +212,63 @@ setDestination(worldTarget) {
     return false;
   }
 
+  // helper: returns true if a capsule at testPos would penetrate any BVH mesh
+  _wouldPenetrateAt(testPos) {
+    if (!this.bvhMeshes?.length) return false;
+    const radius = this.capsule.radius;
+    const start = new THREE.Vector3(testPos.x, testPos.y - 0.1, testPos.z);
+    const end   = new THREE.Vector3(testPos.x, testPos.y + (this.capsule.height || 1.6) - 0.1, testPos.z);
+
+    const worldSegBox = new THREE.Box3().setFromPoints([start, end]).expandByScalar(radius);
+
+    let hitSomething = false;
+
+    for (const mesh of this.bvhMeshes) {
+      const bvh = mesh.geometry?.boundsTree;
+      if (mesh.name === 'Floor') continue;
+      if (!bvh) continue;
+      if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(worldSegBox)) continue;
+
+      const inv = mesh.matrixWorld.clone().invert();
+      const localStart = start.clone().applyMatrix4(inv);
+      const localEnd   = end.clone().applyMatrix4(inv);
+      const localSeg   = new THREE.Line3(localStart, localEnd);
+
+      let penetrated = false;
+      bvh.shapecast({
+        intersectsBounds: (box) => {
+          const segBoxLocal = new THREE.Box3().setFromPoints([localStart, localEnd]).expandByScalar(radius);
+          return box.intersectsBox(segBoxLocal);
+        },
+        intersectsTriangle: (tri) => {
+          const triPoint = new THREE.Vector3();
+          const capPoint = new THREE.Vector3();
+          const dist = tri.closestPointToSegment(localSeg, triPoint, capPoint);
+          if (dist < radius) {
+            penetrated = true;
+            return true;
+          }
+        }
+      });
+
+      if (penetrated) {
+        hitSomething = true;
+        // DEBUG LOG
+        console.log("⚠️ Capsule penetration at", testPos.toArray(), "against mesh", mesh.name);
+        return true;
+      }
+    }
+
+    if (!hitSomething) {
+      // DEBUG LOG
+      console.log("✅ Capsule clear at", testPos.toArray());
+    }
+
+    return false;
+  }
+
+
+
   // optional small helper to resolve capsule penetration using BVH shapecast
   _resolveCapsulePenetration() {
     if (!this.useCapsuleCollision || !this.bvhMeshes?.length) return;
@@ -239,7 +296,12 @@ setDestination(worldTarget) {
       this._segment.end.copy(this._capsuleEnd).applyMatrix4(this._invMat);
 
       bvh.shapecast({
-        intersectsBounds: (box) => box.intersectsBox(this._segment.getBoundingBox(new THREE.Box3()).expandByScalar(radius)),
+        intersectsBounds: (box) => {
+          const segBox = new THREE.Box3()
+            .setFromPoints([this._segment.start, this._segment.end])
+            .expandByScalar(radius);
+          return box.intersectsBox(segBox);
+        },
         intersectsTriangle: (tri) => {
           const triPoint = new THREE.Vector3();
           const capPoint = new THREE.Vector3();
@@ -258,104 +320,164 @@ setDestination(worldTarget) {
           }
         }
       });
+
     }
   }
 
-  update(delta) {
-    // advance animations
-    if (this.mixer) this.mixer.update(delta);
-
-    if (!this.currentPath || this.currentPath.length === 0) {
-      // idle
-      // prefer playAction if available (ThirdPersonPlayer exposes this in your code)
-      if (this.animCtrl && this.animCtrl.idleAction && this.animCtrl.playAction) {
-        this.animCtrl.playAction(this.animCtrl.idleAction);
-      } else if (this.animCtrl && typeof this.animCtrl.setNPCAnimationState === 'function') {
-        this.animCtrl.setNPCAnimationState(0, { left: false, right: false, run: false });
-      }
-      return;
-    }
-
-    const pos = this.model.position;
-    const target = this.currentPath[this.pathIndex];
-    this._tmpV.subVectors(target, pos);
-    const horiz = this._tmpV.clone(); horiz.y = 0;
-    const dist = horiz.length();
-
-    if (dist < this.arrivalRadius) {
-      if (this.pathIndex < this.currentPath.length - 1) {
-        this.pathIndex++;
-        return;
-      } else {
-        // reached final
-        this.currentPath = [];
-        this.pathIndex = 0;
+  // Replace the existing update(delta) function with this implementation
+    update(delta) {
+      if (!this.model) return;
+      if (!this.currentPath || this.currentPath.length === 0) {
         if (this.animCtrl && this.animCtrl.idleAction && this.animCtrl.playAction) {
           this.animCtrl.playAction(this.animCtrl.idleAction);
+        } else if (this.animCtrl && typeof this.animCtrl.setNPCAnimationState === 'function') {
+          this.animCtrl.setNPCAnimationState(0, { left: false, right: false, run: false });
         }
         return;
       }
-    }
 
-    // face direction smoothly
-    if (horiz.lengthSq() > 1e-6) {
-      const targetYaw = Math.atan2(horiz.x, horiz.z);
-      const facing = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
-      this.model.quaternion.slerp(facing, Math.min(1, this.turnSpeed * delta));
-    }
+      const pos = this.model.position;
+      const target = this.currentPath[this.pathIndex];
+      this._tmpV.subVectors(target, pos);
+      const horiz = this._tmpV.clone(); horiz.y = 0;
+      const dist = horiz.length();
 
-    // movement ramping
-    const speed = Math.min(this.walkSpeed + dist * 0.5, this.runSpeed);
-    const step = Math.min(dist, speed * delta);
-    horiz.normalize();
-    pos.addScaledVector(horiz, step);
+      if (dist < this.arrivalRadius) {
+        if (this.pathIndex < this.currentPath.length - 1) {
+          this.pathIndex++;
+          return;
+        } else {
+          this.currentPath = [];
+          this.pathIndex = 0;
+          if (this.animCtrl && this.animCtrl.idleAction && this.animCtrl.playAction) {
+            this.animCtrl.playAction(this.animCtrl.idleAction);
+          }
+          return;
+        }
+      }
 
-    // forward obstacle detection using BVH raycast
-    if (this.bvhMeshes?.length) {
-      this._fwdRay.set(pos.clone().add(new THREE.Vector3(0, 0.7, 0)), horiz);
-      this._fwdRay.near = 0;
-      this._fwdRay.far = 0.35;
-      const hit = this._fwdRay.intersectObjects(this.bvhMeshes, true);
-      if (hit.length) pos.addScaledVector(horiz, -0.06);
-    }
+      if (horiz.lengthSq() > 1e-6) {
+        const targetYaw = Math.atan2(horiz.x, horiz.z);
+        const facing = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+        this.model.quaternion.slerp(facing, Math.min(1, this.turnSpeed * delta));
+      }
 
-    // downward snap to BVH floor so feet land properly
-    if (this.bvhMeshes?.length) {
-      this._downRay.set(pos.clone().add(new THREE.Vector3(0, 2.0, 0)), new THREE.Vector3(0, -1, 0));
-      const hits = this._downRay.intersectObjects(this.bvhMeshes, true);
+      const speed = Math.min(this.walkSpeed + dist * 0.5, this.runSpeed);
+      const step = Math.min(dist, speed * delta);
+      horiz.normalize();
 
-      if (hits.length) {
-        // prefer model.userData.footOffset if available, else animCtrl.footOffset, else heightOffset
-        const footOffset = (this.model?.userData?.footOffset !== undefined)
-          ? this.model.userData.footOffset
-          : ((this.animCtrl && typeof this.animCtrl.footOffset === 'number') ? this.animCtrl.footOffset : this.heightOffset);
-          pos.y = hits[0].point.y + footOffset + 0.01;
+      const predictedPosStraight = pos.clone().addScaledVector(horiz, step);
 
-      } else {
-        // fallback: keep current Y (don’t sink)
-        this.model.position.y = Math.max(
-          this.model.position.y,
-          (this.landedY ?? this.model.position.y)
-        );
+      const footOffset = (this.model?.userData?.footOffset !== undefined)
+        ? this.model.userData.footOffset
+        : ((this.animCtrl && typeof this.animCtrl.footOffset === 'number') ? this.animCtrl.footOffset : this.heightOffset);
+
+      const wouldPenetrate = (worldPos) => this._wouldPenetrateAt(worldPos);
+
+      let allowedDir = null;
+
+      // ✅ STRAIGHT TEST
+      let straightClear = true;
+      if (this.useCapsuleCollision && wouldPenetrate(predictedPosStraight)) {
+        straightClear = false;
+      }
+      if (straightClear && this.bvhMeshes?.length) {
+        this._fwdRay.set(pos.clone().add(new THREE.Vector3(0, 0.7, 0)), horiz);
+        this._fwdRay.near = 0;
+        this._fwdRay.far = Math.max(0.35, step + 0.05);
+        const hits = this._fwdRay.intersectObjects(this.bvhMeshes, true);
+        if (hits.length) {
+          const hit = hits[0];
+          const normalY = Math.abs(hit.face?.normal.y ?? 0);
+          if (hit.distance < step && normalY < 0.7) {
+            straightClear = false; // real obstacle
+          }
+        }
+      }
+      if (straightClear) allowedDir = horiz;
+
+      // ✅ STEERING
+      if (!allowedDir) {
+        const angles = [30, -30, 60, -60, 90, -90];
+        const yAxis = new THREE.Vector3(0, 1, 0);
+        for (let a of angles) {
+          const rad = THREE.MathUtils.degToRad(a);
+          const testDir = horiz.clone().applyAxisAngle(yAxis, rad).normalize();
+          const testPos = pos.clone().addScaledVector(testDir, step);
+          if (this.useCapsuleCollision && wouldPenetrate(testPos)) continue;
+
+          let rayOk = true;
+          if (this.bvhMeshes?.length) {
+            this._fwdRay.set(pos.clone().add(new THREE.Vector3(0, 0.7, 0)), testDir);
+            this._fwdRay.near = 0;
+            this._fwdRay.far = Math.max(0.35, step + 0.05);
+            const hits = this._fwdRay.intersectObjects(this.bvhMeshes, true);
+            if (hits.length) {
+              const hit = hits[0];
+              const normalY = Math.abs(hit.face?.normal.y ?? 0);
+              if (hit.distance < step && normalY < 0.7) rayOk = false;
+            }
+          }
+          if (rayOk) { allowedDir = testDir; break; }
+        }
+      }
+
+      // ✅ REPLAN
+      if (!allowedDir && this.navQuery) {
+        try {
+          const startRes = this.navQuery.findClosestPoint({ x: pos.x, y: pos.y + 1.0, z: pos.z });
+          const endWorld = this.currentPath[this.currentPath.length - 1];
+          const endRes = this.navQuery.findClosestPoint({ x: endWorld.x, y: endWorld.y + 1.0, z: endWorld.z });
+          if (startRes?.point && endRes?.point) {
+            const repl = this.navQuery.computePath(startRes.point, endRes.point);
+            if (repl?.success && repl.path?.length) {
+              this.currentPath = repl.path.map(p => new THREE.Vector3(p.x ?? p[0], p.y ?? p[1], p.z ?? p[2]));
+              this.pathIndex = 0;
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('NPCGuide: local replan failed:', e);
+        }
+      }
+
+      if (!allowedDir) {
+        console.log('NPC blocked at', pos.toArray());
+        return;
+      }
+
+      // ✅ APPLY MOVEMENT
+      const newPos = pos.clone().addScaledVector(allowedDir, step);
+      let snapped = false;
+      if (this.navQuery) {
+        try {
+          const proj = this.navQuery.findClosestPoint({ x: newPos.x, y: newPos.y + 1.0, z: newPos.z });
+          if (proj?.point) {
+            newPos.y = proj.point.y + footOffset + 0.01;
+            snapped = true;
+          }
+        } catch {}
+      }
+      if (!snapped && this.bvhMeshes?.length) {
+        this._downRay.set(newPos.clone().add(new THREE.Vector3(0, 2.0, 0)), new THREE.Vector3(0, -1, 0));
+        const hits = this._downRay.intersectObjects(this.bvhMeshes, true);
+        if (hits.length) {
+          newPos.y = hits[0].point.y + footOffset + 0.01;
+          snapped = true;
+        }
+      }
+      if (!snapped) newPos.y = Math.max(newPos.y, (this.landedY ?? pos.y));
+
+      pos.copy(newPos);
+      if (this.useCapsuleCollision) this._resolveCapsulePenetration();
+
+      if (this.animCtrl && this.animCtrl.walkAction && this.animCtrl.playAction) {
+        this.animCtrl.playAction(this.animCtrl.walkAction);
+      } else if (this.animCtrl && typeof this.animCtrl.setNPCAnimationState === 'function') {
+        this.animCtrl.setNPCAnimationState(Math.min(speed, this.runSpeed), { run: speed > this.walkSpeed });
       }
     }
 
-    // optional capsule penetration resolution
-    if (this.useCapsuleCollision) this._resolveCapsulePenetration();
 
-    // animation selection (use animCtrl's actions if present)
-    if (this.animCtrl) {
-      // ensure animCtrl.mixer advances too (if separate)
-      if (this.animCtrl.mixer) this.animCtrl.mixer.update(delta);
 
-      const walked = speed;
-      if (walked > this.walkSpeed * 1.4 && this.animCtrl.runForwardAction) {
-        this.animCtrl.playAction(this.animCtrl.runForwardAction);
-      } else if (walked > 0.03 && this.animCtrl.walkForwardAction) {
-        this.animCtrl.playAction(this.animCtrl.walkForwardAction);
-      } else if (this.animCtrl.idleAction) {
-        this.animCtrl.playAction(this.animCtrl.idleAction);
-      }
-    }
-  }
 }
