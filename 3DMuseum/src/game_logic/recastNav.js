@@ -55,15 +55,30 @@ function bakeGeometryToWorld(mesh) {
  *  - Call threeToSoloNavMesh with an array containing the final mesh(s)
  */
 export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
-  if (!Array.isArray(meshes) || meshes.length === 0) {
+    if (!Array.isArray(meshes) || meshes.length === 0) {
     console.warn('buildNavMeshFromMeshes: no meshes provided');
     return { success: false, error: 'no meshes' };
   }
 
+  // ---------- NEW: choose floor-only meshes by default ----------
+  const meshesToBake = meshes.filter(m => m && m.isMesh &&   (
+    m.userData?.navWalkable ||
+    !m.userData?.navObstacle ||
+    (m.name && m.name.toLowerCase().includes('floor'))
+  ));
+
+  if (meshesToBake.length === 0) {
+    console.warn('buildNavMeshFromMeshes: no valid meshes were provided to bake.');
+    return { success: false, error: 'no meshes' };
+  }
+
+  console.info('NavMesh build will use the following meshes:');
+  meshesToBake.forEach(m => console.info('  -', m.name || m.uuid));
+
   // Bake each mesh into a world-space BufferGeometry
   const bakedGeoms = [];
-  for (let i = 0; i < meshes.length; i++) {
-    const m = meshes[i];
+  for (let i = 0; i < meshesToBake.length; i++) {
+    const m = meshesToBake[i];
     try {
       const g = bakeGeometryToWorld(m);
       bakedGeoms.push(g);
@@ -114,7 +129,11 @@ export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
     const slabGeom = new THREE.BoxGeometry(size.x + padXZ, MIN_HEIGHT, size.z + padXZ);
     const slabMesh = new THREE.Mesh(slabGeom, new THREE.MeshBasicMaterial({ visible: false }));
     // position slab so its top is roughly near the original geometry's center
-    slabMesh.position.set(center.x, bbox.min.y - MIN_HEIGHT / 2, center.z);
+    // Place the slab so its TOP aligns just above the original mesh top (bbox.max.y).
+    // This avoids generating a navmesh under the visible floor.
+    const epsilon = 0.01; // tiny lift to avoid z-fighting / numerical edge cases
+    const slabTop = bbox.max.y + epsilon;
+    slabMesh.position.set(center.x, slabTop - MIN_HEIGHT / 2, center.z);
     slabMesh.updateMatrixWorld(true);
 
     finalMeshes.push(slabMesh);
@@ -147,7 +166,7 @@ export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
 
         // Material tuned to avoid z-fighting. Slightly offset polygons so helper renders cleanly.
         const nmMat = new THREE.MeshBasicMaterial({
-          color: 0x000000,
+          color: 0x00ff00,
           wireframe: false,
           transparent: true,
           opacity: 1,
