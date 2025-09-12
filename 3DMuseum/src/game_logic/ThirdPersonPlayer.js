@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
-import { AnimationMixer } from 'three';
+// import { AnimationMixer } from 'three';
 import { Sphere } from 'three';
+import { createAnimController } from './createAnimationController';
 
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -57,24 +58,6 @@ export default class ThirdPersonPlayer {
     this.tempSegment = new THREE.Line3();
   }
 
-  // buildBVH(scene) {
-  //   this.bvhMeshes = [];
-  //   scene.traverse((child) => {
-  //     if (child.isMesh && child.geometry) {
-  //       child.updateMatrixWorld(true);
-  //       if (!child.geometry.boundsTree) {
-  //         child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
-  //       }
-  //       // cache static world AABB and inverse world matrix
-  //       child.userData.worldBox = new THREE.Box3().setFromObject(child);
-  //       child.userData.invWorld = child.matrixWorld.clone().invert();
-
-  //       this.bvhMeshes.push(child);
-  //     }
-  //   });
-  //   this.bvhReady = true;
-  // }
-
   // Add inside ThirdPersonPlayer class
   buildBVHFromMeshes(meshes) {
     this.bvhMeshes = [];
@@ -108,46 +91,31 @@ export default class ThirdPersonPlayer {
 
   // Function to handle animation when model was preloaded in index.js
   handleAnimation(model, characterGLTF) {
-    if (!model || !characterGLTF) return;
+  if (!model || !characterGLTF) return;
+  this.model = model;
 
-    this.model = model;
+  // compute footOffset as before
+  const bbox = new THREE.Box3().setFromObject(this.model);
+  this.footOffset = -bbox.min.y;
 
-    // ensure the character can cast/receive shadow
-    this.model.traverse((child) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
-    // compute how much we must lift the model so feet = y:0 in model space
-    const bbox = new THREE.Box3().setFromObject(this.model);
-    this.footOffset = -bbox.min.y;
-
-    // mixer & clips
-    if (!this.mixer) this.mixer = new AnimationMixer(this.model);
-
-    if (characterGLTF.animations && characterGLTF.animations.length > 0) {
-      characterGLTF.animations.forEach((clip) => {
-        // prevent root translation from yanking us around
-        clip.tracks = clip.tracks.filter(track => !track.name.endsWith('.position'));
-
-        switch (clip.name) {
-          case 'Idle':         this.idleAction = this.mixer.clipAction(clip); break;
-          case 'WalkForward':  this.walkAction = this.mixer.clipAction(clip); break;
-          case 'Running':      this.runningAction = this.mixer.clipAction(clip); break;
-          case 'LeftTurn':     this.leftTurnAction = this.mixer.clipAction(clip); break;
-          case 'RightTurn':    this.rightTurnAction = this.mixer.clipAction(clip); break;
-          default: break;
-        }
-      });
-
-      if (this.idleAction) {
-        this.idleAction.play();
-        this.currentAction = this.idleAction;
-      }
-    }
+  // create a reusable controller and attach to model.userData
+  const animCtrl = createAnimController(this.model, characterGLTF);
+  this.mixer = animCtrl.mixer;
+  this.idleAction    = animCtrl.idleAction;
+  this.walkAction    = animCtrl.walkAction;
+  this.runningAction = animCtrl.runningAction;
+  this.leftTurnAction  = animCtrl.leftTurnAction;
+  this.rightTurnAction = animCtrl.rightTurnAction;
+  // make playAction and currentAction behavior remain local to the class (playAction already exists)
+  // initialize currentAction so playAction/crossfades work:
+  if (this.idleAction) {
+    this.currentAction = this.idleAction;
+    // ensure idle is playing
+    this.currentAction.play();
   }
+  // attach anim controller for external consumers (NPC sync already checks this path)
+  this.model.userData.animCtrl = animCtrl;
+}
 
   getForwardVector() {
     if (this.model) {

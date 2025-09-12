@@ -15,6 +15,7 @@ export default class RaycasterManager {
     this.outlineCallback = options.onHoverPictureFrame;
     this.pictureClickCallback = options.onClickPictureFrame;
     this.onNPCPathFollow = options.onNPCPathFollow;
+    this.onGroundClick = options.onGroundClick;
 
 
     this.pictureFrames = [];
@@ -90,6 +91,11 @@ handleClick(event) {
   if (this.onNPCPathFollow) {
     // pass the intersection object (has .point, .object, etc)
     this.onNPCPathFollow(first);
+  }
+  
+  // ground click callback for crowd agent movement
+  if (this.onGroundClick) {
+    this.onGroundClick(first);
   }
 }
 

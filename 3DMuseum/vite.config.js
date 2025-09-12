@@ -40,7 +40,12 @@ export default defineConfig({
       'three/examples/jsm/renderers/CSS3DRenderer.js',
       'three/examples/jsm/postprocessing/EffectComposer.js',
       'three/examples/jsm/postprocessing/RenderPass.js',
-      'three/examples/jsm/postprocessing/OutlinePass.js'
+      'three/examples/jsm/postprocessing/OutlinePass.js',
+      '@recast-navigation/three'
+    ],
+    exclude: [
+      'recast-navigation'
     ]
   }
 })
+
