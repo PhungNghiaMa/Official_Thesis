@@ -68,19 +68,30 @@ export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
 
     if (scene) {
       try {
-        if (navHelper && navHelper.parent) navHelper.parent.remove(navHelper);
+        if (navHelper && navHelper.parent){
+          navHelper.parent.remove(navHelper);
+          navHelper = null;
+        }
 
-        const nmMat = new THREE.MeshBasicMaterial({
-          color: 0x00ff00,
-          wireframe: false,
-          transparent: true,
-          opacity: 1,
-          side: THREE.DoubleSide,
-          polygonOffset: true,
-        });
+        // const navMeshMaterial = new THREE.MeshBasicMaterial({
+        //   color: 0x00ff00, // Change this to the color you want (e.g., 0x0000ff for blue, 0xff0000 for red)
+        //   wireframe: true,
+        //   transparent: true,
+        //   opacity: 0.5,
+        // });
+        // const helper = new NavMeshHelper(navMesh, { navMeshMaterial });
 
-        navHelper = new NavMeshHelper(navMesh, { navMeshMaterial: nmMat });
-        scene.add(navHelper);
+        // const nmMat = new THREE.MeshBasicMaterial({
+        //   color: 0x00ff00,
+        //   wireframe: true,
+        //   transparent: true,
+        //   opacity: 1,
+        //   side: THREE.DoubleSide,
+        //   polygonOffset: true,
+        // });
+
+        // navHelper = new NavMeshHelper(navMesh, { navMeshMaterial: nmMat });
+        // scene.add(navHelper);
       } catch (err) {
         console.warn('Failed to create NavMeshHelper:', err);
       }
@@ -101,69 +112,6 @@ export function getNavQuery() {
 export function getNavHelper() {
   return navHelper;
 }
-
-// export async function LoadExternalNavMesh(scene, url) {
-//     try {
-//         const loader = new THREE.FileLoader();
-//         loader.setResponseType('arraybuffer');
-
-//         // Start the file loading process
-//         loader.loadAsync(
-//             url,
-//             // onLoad callback function - THIS is where the data is available
-//             (data) => {
-//                 if (!data) {
-//                     console.error("File loaded but data is empty/undefined");
-//                     return {success: false , navMesh: null , navQuery: null};
-//                 }
-//                 console.log("Data loaded, length:", data.byteLength);
-
-//                 // Initialize the Uint8Array with the loaded data
-//                 const myUint8Array = new Uint8Array(data);
-//                 console.log("MyUint8Array length:", myUint8Array.length);
-
-//                 // Move all the import and setup logic inside this callback
-//                 const { navMesh: nm} = importNavMesh(myUint8Array);
-
-//                 if (!nm) {
-//                     console.error('importNavMesh returned failure (no navmesh).');
-//                     return { success: false, navMesh: null, navQuery: null };
-//                 }
-
-//                 navMesh = nm;
-//                 console.log("NavMesh: ", navMesh)
-//                 navQuery = new navQuery(navMesh); // importNavMesh now returns the navQuery as well
-//                 console.log("NavQuery: ", navQuery);
-
-//                 // Remove existing helper if it exists
-//                 if (navHelper && navHelper.parent) {
-//                     navHelper.parent.remove(navHelper);
-//                     navHelper = null;
-//                 }
-
-//                 const helper = new NavMeshHelper(navMesh);
-//                 scene.add(helper);
-//                 navHelper = helper;
-
-//                 console.log("NavMesh imported successfully!");
-//                 return { success: true, navMesh: navMesh, navQuery: navQuery };
-//             },
-//             // onProgress (optional)
-//             (xhr) => {
-//                 if (xhr.lengthComputable) {
-//                     console.log((xhr.loaded / xhr.total * 100).toFixed(2) + '% loaded');
-//                 }
-//             },
-//             // onError (optional)
-//             (err) => {
-//                 console.error('Failed to load file:', err);
-//             }
-//         );
-//     } catch (err) {
-//         console.error('Exception while loading external navmesh:', err);
-//         return { success: false, navMesh: null, navQuery: null };
-//     }
-// }
 
 export async function LoadExternalNavMesh(scene, url) {
   try {
@@ -204,9 +152,9 @@ export async function LoadExternalNavMesh(scene, url) {
       navHelper.parent.remove(navHelper);
       navHelper = null;
     }
-    const helper = new NavMeshHelper(navMesh);
-    scene.add(helper);
-    navHelper = helper;
+    // const helper = new NavMeshHelper(navMesh);
+    // scene.add(helper);
+    // navHelper = helper;
 
     console.log("NavMesh imported successfully!");
     return { success: true, navMesh, navQuery };
