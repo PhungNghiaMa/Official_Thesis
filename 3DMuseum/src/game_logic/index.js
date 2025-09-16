@@ -12,7 +12,7 @@ import AnnotationDiv from "./annotationDiv";
 import { displayUploadModal, initUploadModal , Mapping_PictureFrame_ImageMesh , DisplayImageOnDiv} from "./utils";
 import { GetRoomAsset } from "./services";
 import { Museum } from "./constants";
-import { Capsule, DRACOLoader, Wireframe} from "three/examples/jsm/Addons.js";
+import { Capsule, DRACOLoader} from "three/examples/jsm/Addons.js";
 import RaycasterManager from "./raycaster.js"
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -26,10 +26,8 @@ import { acceleratedRaycast } from "three-mesh-bvh";
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 import { initRecastIfNeeded  , getNavQuery , LoadExternalNavMesh } from "./recastNav.js";
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { updateCrowd , getAgents , addAgent, initCrowd, setAgentTarget } from "./CrowdManager.js";
+import { updateCrowd , addAgent, initCrowd, setAgentTarget, startAgentTour , updateAgentTours , stopAgentTour  } from "./CrowdManager.js";
 import { createAnimController } from "./createAnimationController.js";
-
-
 
 
 THREE.Cache.enabled = true; // Enable caching for better performance
@@ -97,6 +95,7 @@ const npcAgents = [];
 const navInputSet = new Set();   // meshes to feed into recast (floor + obstacles)
 const bvhMeshList = [];          // meshes used for BVH raycasts (ground snap + capsule checks)
 const navInputMeshes = [];   // meshes we will pass to recast
+let  pictureFramesArray = [];
 
 
 // Container instance 
@@ -140,14 +139,14 @@ let interactedDoor;
 const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_9.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_12.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
-let pictureFramesArray = []
-let imageMeshesArray = []
+let imageMeshesArray = [];
 let doorBoundingBox = null;
 let hasEnteredNewScene = false;
+let tourTargetsMap = new Map();
 
 // DOM Elements
 let container, cssRenderer, css3dRenderer, renderer, camera;
@@ -373,7 +372,7 @@ function ensureUV2ForAO(geometry) {
   }
 }
 
-// Smooth animation loop
+// FUNCTION TO INIT NPC
 function initNPC(scene, navQuery, bvhMeshes) {
   if (!navQuery) {
     console.warn("initNPC: Nav query not ready yet — NPC init may fail.");
@@ -395,32 +394,47 @@ function initNPC(scene, navQuery, bvhMeshes) {
     }
   });
 
-  if (characterGLTF){ 
-    // Because the npc and Third View Character has the same animation so we will make use the characterGLTF created when loaded the model of Third View Character
-    const npcAnimation = createAnimController(npcModel , characterGLTF);
+  if (characterGLTF) {
+    // reuse the same animation controller as your TP player
+    const npcAnimation = createAnimController(npcModel, characterGLTF);
     npcModel.userData.animationCtrl = npcAnimation;
   }
 
-  // Pick starting position
+  // choose a starting position (example near player start)
   npcModel.position.set(0.5, 0, 0.5);
   scene.add(npcModel);
 
-  if (!characterGLTF) {
-    console.warn("initNPC: characterGLTF not loaded yet. NPC animation may not work.");
+  // --- compute an automatic footOffset if not provided by your importer ---
+  if (typeof npcModel.userData.footOffset !== 'number') {
+    try {
+      const bbox = new THREE.Box3().setFromObject(npcModel);
+      // bbox.min.y is where the lowest vertex sits in world-space.
+      // We want footOffset so model sits on top of ground when we set model.position.y = floorY + footOffset
+      // If the model's root is at 0 then bbox.min.y is negative and -bbox.min.y gives the distance from root to foot.
+      const modelMinY = bbox.min.y;
+      npcModel.userData.footOffset = -modelMinY;
+      console.debug('initNPC: auto footOffset computed:', npcModel.userData.footOffset);
+    } catch (e) {
+      npcModel.userData.footOffset = 0;
+      console.warn('initNPC: failed to compute auto footOffset, using fallback 0', e);
+    }
   }
 
-  // Initial snap to navmesh or ground
-  const footOffset = npcModel.userData?.footOffset ?? 0.01;
+  // --- initial vertical snap: prefer navmesh projection (so agent starts on navmesh) ---
+  const footOffset = npcModel.userData?.footOffset ?? 0.0001;
   let snapped = false;
+  let navY = null;
+  let floorY = null;
 
   if (navQuery) {
     try {
       const np = navQuery.findClosestPoint({
         x: npcModel.position.x,
-        y: npcModel.position.y + 1.0,
+        y: npcModel.position.y + footOffset,
         z: npcModel.position.z,
       });
       if (np?.point) {
+        navY = np.point.y;
         npcModel.position.y = np.point.y + footOffset + 1e-3;
         snapped = true;
       }
@@ -429,16 +443,27 @@ function initNPC(scene, navQuery, bvhMeshes) {
     }
   }
 
-  if (!snapped && bvhMeshes?.length) {
-    const downRay = new THREE.Raycaster(
-      npcModel.position.clone().add(new THREE.Vector3(0, 1, 0)),
-      new THREE.Vector3(0, -1, 0)
-    );
-    const hits = downRay.intersectObjects(bvhMeshes, true);
-    if (hits.length > 0) {
-      npcModel.position.y = hits[0].point.y + footOffset + 1e-3;
+  // Also do a BVH down-ray now to get the ground Y (so we can compute nav→floor offset)
+  if (bvhMeshes?.length) {
+    try {
+      const downRay = new THREE.Raycaster(
+        npcModel.position.clone().add(new THREE.Vector3(0, 2.0, 0)),
+        new THREE.Vector3(0, -1, 0)
+      );
+      const hits = downRay.intersectObjects(bvhMeshes, true);
+      if (hits.length > 0) {
+        floorY = hits[0].point.y;
+        // If we didn't snap via navQuery above, snap now to BVH hit
+        if (!snapped) npcModel.position.y = floorY + footOffset + 1e-3;
+      }
+    } catch (e) {
+      console.warn('initNPC: BVH down-ray failed:', e);
     }
   }
+
+  // store the difference floorY - navY (fallback) so we can use it if per-frame BVH ray misses
+  npcModel.userData.navMeshToFloorOffset = (typeof floorY === 'number' && typeof navY === 'number') ? (floorY - navY) : 0;
+  console.debug('initNPC: navY, floorY, navMeshToFloorOffset', navY, floorY, npcModel.userData.navMeshToFloorOffset);
 
   // ✅ Register this NPC as a crowd agent
   const agent = addAgent(
@@ -462,8 +487,9 @@ function initNPC(scene, navQuery, bvhMeshes) {
 
   console.info("initNPC: NPC initialized as crowd agent", agent, "at", npcModel.position);
 
-  return { model: npcModel, agent , walkSpeed: 2.4 , runSpeed: 6.0 , state: {mode: 'idle'}, requestedGait: null };
+  return { model: npcModel, agent, walkSpeed: 2.4, runSpeed: 6.0, state: { mode: 'idle' }, requestedGait: null };
 }
+
 
 
 function animateProgress() {
@@ -800,8 +826,26 @@ async function loadModel() {
             });
         }
 
+        let index = 0;
+
         gltf.scene.traverse((child) => {
-            if(!child.isMesh) return;
+            // if(!child.isMesh) return;
+          if (child.name.startsWith('TourTarget_')) {
+            let frameName = child.name.replace('TourTarget_', '');
+            // Use a specific regex to handle the CubeXXX001 case
+            const match = frameName.match(/^(Cube\d{3})(\d{3,})$/);
+            // If a match is found, reformat the name
+            if (match) {
+                const base = match[1]; // 'Cube046'
+                const num = parseInt(match[2], 10); // 1
+                frameName = `${base}_${num}`;
+            }
+            tourTargetsMap.set(frameName, child);
+            // debug: print so we know the empties were found
+            const worldPos = new THREE.Vector3();
+            child.getWorldPosition(worldPos);
+            console.log('Found TourTarget:', child.name, '=> maps to', frameName, 'worldPos', worldPos);
+          }
             
             child.updateMatrixWorld(true);
             bvhMeshList.push(child);
@@ -819,6 +863,10 @@ async function loadModel() {
 
             if(child.userData && child.userData.navWalkable || child.userData.navObstacle){
                 navInputMeshes.push(child);
+            }
+
+            if (child.isObject3D && child.name.startsWith('TourTarget_')) {
+              console.log("Found an empty object of type Object3D:", child.name);
             }
 
             if (child.isMesh) {
@@ -902,6 +950,10 @@ async function loadModel() {
                     annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
                     annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
                 }
+
+                if (child.name.includes('Cube046')) {
+                    pictureFramesArray.push(child);
+                }
             }
         });
 
@@ -909,7 +961,7 @@ async function loadModel() {
         await initRecastIfNeeded();
 
         console.log("START LOADING EXTERNAL NAVMESH")
-        const ExternalNavMeshURL = './assets/navmesh/navmesh.bin'
+        const ExternalNavMeshURL = './assets/navmesh/new_nav_mesh.bin'
         const navMeshResult = await LoadExternalNavMesh(scene , ExternalNavMeshURL );
         if (!navMeshResult) {
             console.warn("LoadExternalNavMesh returned nothing!");
@@ -1199,39 +1251,68 @@ function animate() {
   const FIXED_CROWD_DT = 1 / 60;
   const MAX_CROWD_SUBSTEPS = 10;
   updateCrowd(FIXED_CROWD_DT, frameDelta, MAX_CROWD_SUBSTEPS);
+  updateAgentTours(navQuery ?? getNavQuery());
 
 
 // Sync NPC models with their agents (robust fallback)
 // ================= NPC sync (replacement) =================
+// NPC sync loop - paste-ready replacement
+// =======================
+// NPC Animate Sync Loop
+// =======================
 const NPC_ROT_LERP_SPEED = 8.0;
-const NPC_SPEED_THRESHOLD = 0.2;    // tiny threshold => considered moving
-const NPC_ARRIVAL_DIST = 0.15;      // arrival radius
-const NPC_MIXER_DISTANCE = 60;
+const NPC_SPEED_THRESHOLD = 0.2;    // below this, considered idle
+const NPC_ARRIVAL_DIST = 0.08;      // arrival radius
+const NPC_MIXER_DISTANCE = 60;      // only update mixer if near camera
+const NPC_VERTICAL_SMOOTH = 0.6;    // 0.0 = no smoothing, 1.0 = instant
 
 for (const entry of npcAgents) {
   const agent = entry.agent;
   const model = entry.model;
   if (!agent || !model) continue;
 
-  // Ensure state exists
   entry.state = entry.state || { mode: 'idle', requestedGait: null };
 
-  // animation controller handle
+  // animation controller
   const anim = model.userData?.animCtrl ?? model.userData?.animationCtrl;
-
-  // update mixer if present & near camera
   if (anim && anim.mixer && camera.position.distanceTo(model.position) < NPC_MIXER_DISTANCE) {
     anim.mixer.update(frameDelta * 0.9);
   }
 
-  // get agent interpolated position
+  // --- agent position ---
   let apos;
   try { apos = agent.interpolatedPosition ?? (typeof agent.position === 'function' ? agent.position() : agent.position); }
   catch (e) { apos = (typeof agent.position === 'function' ? agent.position() : agent.position); }
   if (!apos) continue;
+
   const agentPos = new THREE.Vector3(apos.x ?? apos[0], apos.y ?? apos[1], apos.z ?? apos[2]);
   const footOffset = typeof model.userData?.footOffset === 'number' ? model.userData.footOffset : 0;
-  const targetPos = agentPos.clone().add(new THREE.Vector3(0, footOffset, 0));
+
+  // --- snap vertically to visible floor ---
+  let targetPos = new THREE.Vector3(agentPos.x, agentPos.y, agentPos.z);
+  let snappedToBVH = false;
+
+  if (bvhMeshList && bvhMeshList.length) {
+    try {
+      const downOrigin = new THREE.Vector3(agentPos.x, agentPos.y + 2.0, agentPos.z);
+      const downRay = new THREE.Raycaster(downOrigin, new THREE.Vector3(0, -1, 0));
+      const hits = downRay.intersectObjects(bvhMeshList, true);
+      if (hits && hits.length) {
+        targetPos.y = hits[0].point.y;
+        snappedToBVH = true;
+      }
+    } catch (e) {}
+  }
+  if (!snappedToBVH) {
+    const navToFloor = (model.userData && typeof model.userData.navMeshToFloorOffset === 'number') ? model.userData.navMeshToFloorOffset : 0;
+    targetPos.y = agentPos.y + navToFloor;
+  }
+  targetPos.y += footOffset;
+
+  // smooth vertical
+  model.position.x = targetPos.x;
+  model.position.z = targetPos.z;
+  model.position.y = THREE.MathUtils.lerp(model.position.y, targetPos.y, NPC_VERTICAL_SMOOTH);
 
   // --- arrival handling ---
   let targetObj = null;
@@ -1246,24 +1327,17 @@ for (const entry of npcAgents) {
   }
 
   if (reached) {
-    // stop the agent immediately
-    try {
-      if (typeof agent.resetMoveTarget === 'function') agent.resetMoveTarget();
-      else if (typeof agent.requestMoveTarget === 'function') agent.requestMoveTarget(agentPos);
-      entry.state.preventRotation = true;
-    } catch (e) {}
+    try { if (typeof agent.resetMoveTarget === 'function') agent.resetMoveTarget(); } catch (e) {}
 
-    // snap model position
     model.position.copy(targetPos);
 
-    // idle immediately
     if (anim && anim.idleAction) {
       if (anim.currentAction && anim.currentAction !== anim.idleAction) {
-        anim.currentAction.crossFadeTo(anim.idleAction, 0.7, false);
+        anim.currentAction.crossFadeTo(anim.idleAction, 0.5, false); // instant switch
       }
       anim.idleAction.reset().play();
-      anim.idleAction.timeScale = 1.0;
       anim.currentAction = anim.idleAction;
+      anim.currentAction.timeScale = 1.0;
     }
 
     entry.state.requestedGait = null;
@@ -1271,96 +1345,86 @@ for (const entry of npcAgents) {
     continue;
   }
 
-  // --- movement: speed + desired direction ---
+  // --- constant speed override ---
+  const gaitWanted = entry.state.requestedGait ?? entry.state.mode;
+  const desiredGaitSpeed = (gaitWanted === 'run')
+    ? (entry.runSpeed ?? 6.0)
+    : (entry.walkSpeed ?? 1.6);
+
+  try {
+    if (typeof agent.updateParameters === 'function') {
+      agent.updateParameters({
+        maxSpeed: desiredGaitSpeed,
+        maxAcceleration: 30.0, // high accel → no easing/slowdown
+      });
+    }
+  } catch (e) {}
+
+  // --- velocity & rotation ---
+  // let vel = null;
+  // try { vel = (typeof agent.velocity === 'function') ? agent.velocity() : agent.velocity; } catch (e) { vel = null; }
+  // const vx = (vel?.x ?? vel?.[0]) ?? 0;
+  // const vz = (vel?.z ?? vel?.[2]) ?? 0;
+  // const speed = Math.sqrt(vx*vx + vz*vz);
+
+  // if (speed > 1e-4) {
+  //   const desiredDir = new THREE.Vector3(vx, 0, vz).normalize();
+  //   const targetYaw = Math.atan2(desiredDir.x, desiredDir.z);
+  //   const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+  //   model.quaternion.slerp(tq, Math.min(1, NPC_ROT_LERP_SPEED * frameDelta));
+  // }
+
+  // compute velocity once, for rotation + animation speed scaling
   let vel = null;
   try { vel = (typeof agent.velocity === 'function') ? agent.velocity() : agent.velocity; } catch (e) { vel = null; }
   const vx = (vel?.x ?? vel?.[0]) ?? 0;
   const vz = (vel?.z ?? vel?.[2]) ?? 0;
   const speed = Math.sqrt(vx*vx + vz*vz);
 
-  // agent parameters (for run thresholds)
-  let maxSpeed = 10.0;
-  try { if (typeof agent.parameters === 'function') { const p = agent.parameters(); if (p && p.maxSpeed) maxSpeed = p.maxSpeed; } } catch(e) {}
+  // rotation guard: honor tour-facing quaternion if set and not yet expired
+  const nowSec = (typeof performance !== 'undefined') ? performance.now() / 1000 : Date.now() / 1000;
 
-  const runThreshold = maxSpeed * 0.7;
-  const runToWalkThreshold = maxSpeed * 0.6; // hysteresis
-
-  // nominal mode from instantaneous speed
-  let nominalMode = (speed > runThreshold) ? 'run' : (speed > NPC_SPEED_THRESHOLD ? 'walk' : 'idle');
-  if (entry.state.mode === 'run' && nominalMode === 'walk' && speed > runToWalkThreshold) nominalMode = 'run';
-
-  // honor requested gait
-  if (entry.state.requestedGait === 'run') {
-    entry.state.mode = 'run';
-  } else if (entry.state.requestedGait === 'walk') {
-    entry.state.mode = 'walk';
+  if (entry.state?.preventRotationUntil && entry.state.preventRotationUntil > nowSec) {
+    if (entry.state.tourFacingQuat && model) {
+      model.quaternion.copy(entry.state.tourFacingQuat);
+    }
   } else {
-    entry.state.mode = nominalMode;
-  }
-
-  // rotation: prefer velocity dir, fallback to next path target
-  let desiredDir = null;
-  if (speed > 1e-4) {
-    desiredDir = new THREE.Vector3(vx, 0, vz).normalize();
-  } else {
-    try {
-      const next = (typeof agent.nextTargetInPath === 'function') ? agent.nextTargetInPath() : agent.nextTargetInPath;
-      if (next && (('x' in next) || Array.isArray(next))) {
-        const nx = next.x ?? next[0], nz = next.z ?? next[2];
-        const tmp = new THREE.Vector3(nx - agentPos.x, 0, nz - agentPos.z);
-        if (tmp.lengthSq() > 1e-6) desiredDir = tmp.normalize();
-      }
-    } catch (e) {}
-  }
-
-  if (entry.state.preventRotation) {
-  // do nothing, keep last orientation
-    entry.state.preventRotation = false; // reset for next move
-  } 
-  else if (desiredDir) {
-    const targetYaw = Math.atan2(desiredDir.x, desiredDir.z);
-    const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
-    model.quaternion.slerp(tq, Math.min(1, NPC_ROT_LERP_SPEED * frameDelta));
+    if (speed > 1e-4) {
+      const desiredDir = new THREE.Vector3(vx, 0, vz).normalize();
+      const targetYaw = Math.atan2(desiredDir.x, desiredDir.z);
+      const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+      model.quaternion.slerp(tq, Math.min(1, NPC_ROT_LERP_SPEED * frameDelta));
+    }
   }
 
 
 
-  // snap model pos
-  model.position.copy(targetPos);
-
-  // --- animation switching ---
+  // --- animation ---
   if (anim) {
     let nextAction = null;
-
-    if (entry.state.mode === 'run' && anim.runningAction) nextAction = anim.runningAction;
-    else if (entry.state.mode === 'walk' && anim.walkAction) nextAction = anim.walkAction;
+    if (gaitWanted === 'run' && anim.runningAction) nextAction = anim.runningAction;
+    else if (gaitWanted === 'walk' && anim.walkAction) nextAction = anim.walkAction;
     else if (anim.idleAction) nextAction = anim.idleAction;
 
     if (nextAction && anim.currentAction !== nextAction) {
       if (anim.currentAction) {
-        anim.currentAction.crossFadeTo(nextAction, 0.7, true); // smooth transition
+        anim.currentAction.crossFadeTo(nextAction, 0.5, true);
       }
       nextAction.reset().play();
       anim.currentAction = nextAction;
     }
 
-    // stride sync (timeScale)
     if (anim.currentAction) {
-      const runFlag = (entry.state.mode === 'run');
-      const runSpeed = entry.runSpeed ?? maxSpeed;
-      const walkSpeed = entry.walkSpeed ?? (runSpeed * 0.5);
-
-      const denom = runFlag ? Math.max(0.0001, runSpeed) : Math.max(0.0001, walkSpeed);
+      const denom = desiredGaitSpeed;
       const targetTimeScale = speed / denom;
-
-      const clamped = THREE.MathUtils.clamp(targetTimeScale, 0.45, 1.6);
-      const prev = (anim.currentAction.timeScale !== undefined) ? anim.currentAction.timeScale : 1.0;
-      const smoothed = THREE.MathUtils.lerp(prev, clamped, 0.18);
-
-      anim.currentAction.timeScale = smoothed;
+      const clamped = THREE.MathUtils.clamp(targetTimeScale, 0.6, 1.4);
+      anim.currentAction.timeScale = THREE.MathUtils.lerp(anim.currentAction.timeScale ?? 1.0, clamped, 0.25);
     }
   }
 }
+
+
+
 
 
 
@@ -1562,6 +1626,48 @@ export function initializeGame(targetContainerId = 'model-container') {
             activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
         }
 
+        // Toogle automatic agent room tour
+        if (event.code === 'KeyI') {
+          const navQ = getNavQuery() ?? navQuery;
+          if (!navQ) {
+            console.warn('Cannot start tour: navQuery not ready');
+          } else if (!npcAgents || npcAgents.length === 0) {
+            console.warn('No NPCs available to tour with');
+          } else {  
+            // pick the first NPC (change if you have multiple)
+            const npc = npcAgents[0];
+            if (!npc) return;
+            // simple toggle flag stored on the npc entry
+            if (npc.state?.touring) {
+              stopAgentTour(npc);
+              npc.state.touring = false;
+              console.info('Stopped museum tour for NPC');
+            } else {
+              if (!Array.isArray(pictureFramesArray) || pictureFramesArray.length === 0) {
+                console.warn('No picture frames found (pictureFramesArray is empty)');
+              } else {
+                // !!! IMPORTANT: force Three.js to update world matrices so getWorldPosition() is correct
+                if (scene && typeof scene.updateMatrixWorld === 'function') {
+                  scene.updateMatrixWorld(true);
+                }
+                // optionally update each picture mesh (defensive)
+                for (const m of pictureFramesArray) {
+                  if (m && typeof m.updateMatrixWorld === 'function') m.updateMatrixWorld(true);
+                }
+
+                // DEBUG logs to verify we are passing the expected things
+                console.log('Starting tour: framesCount=', pictureFramesArray.length, 'npc=', npc, 'navQ=', navQ);
+
+                // now start tour
+                startAgentTour(npc, pictureFramesArray, navQ, { loop: false, holdTime: 3.0, desiredDistance: 1.2, gait: 'walk', targetsMap: tourTargetsMap });
+                npc.state = npc.state || {};
+                npc.state.touring = true;
+                console.info('Started museum tour for NPC (I pressed)');
+              }
+            }
+          }
+        }
+
         if (activePlayer === 'fp' && fpView) {
             fpView.onKeyDown(event);
         } else if (activePlayer === 'tp' && tpView) {
@@ -1657,7 +1763,7 @@ export function initializeGame(targetContainerId = 'model-container') {
             const endPoint = closest.point;
 
             const pathLength = computeNavPathLength(navQuery, startPoint, endPoint);
-            const RUN_DISTANCE_THRESHOLD = 4.0; // tweak this threshold
+            const RUN_DISTANCE_THRESHOLD = 10.0; // tweak this threshold
 
             npcEntry.state = npcEntry.state || {};
             npcEntry.state.requestedGait = (pathLength >= RUN_DISTANCE_THRESHOLD) ? 'run' : 'walk';
