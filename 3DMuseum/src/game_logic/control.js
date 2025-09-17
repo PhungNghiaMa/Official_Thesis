@@ -7,7 +7,7 @@ if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 const GRAVITY = 30;
 
 // Movement tuning
-const FP_BASE_SPEED = 9;        // walk speed
+const FP_BASE_SPEED = 10;        // walk speed
 const FP_AIR_BASE_SPEED = 3.5;  // air control speed
 const FP_RUN_MULTIPLIER = 2.0;  // run multiplier
 const FP_BACKWARD_MULT = 0.6;   // backward slower
@@ -37,7 +37,7 @@ export default class FirstPersonPlayer {
     this.yawOffset = 0;
     this.targetYawOffset = 0;
     this.pitch = 0;
-    this.turnRate = THREE.MathUtils.degToRad(60);
+    this.turnRate = THREE.MathUtils.degToRad(90);
 
     // collider
     const start = new THREE.Vector3(0, 1.0, 0);
@@ -83,22 +83,39 @@ export default class FirstPersonPlayer {
     this.pitch = pitch;
   }
 
-  buildBVH(target) {
-    const meshes = [];
-    target.traverse(c => {
-      if (c.isMesh && c.geometry) {
-        if (!c.geometry.boundsTree) {
-          c.updateMatrixWorld(true);
-          c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
-        }
-        c.userData.worldBox = new THREE.Box3().setFromObject(c);
-        c.userData.invWorld = c.matrixWorld.clone().invert();
-        meshes.push(c);
+  // buildBVH(target) {
+  //   const meshes = [];
+  //   target.traverse(c => {
+  //     if (c.isMesh && c.geometry) {
+  //       if (!c.geometry.boundsTree) {
+  //         c.updateMatrixWorld(true);
+  //         c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
+  //       }
+  //       c.userData.worldBox = new THREE.Box3().setFromObject(c);
+  //       c.userData.invWorld = c.matrixWorld.clone().invert();
+  //       meshes.push(c);
+  //     }
+  //   });
+  //   this.bvhMeshes = meshes;
+  //   this.bvhReady = true;
+  // }
+
+  // Replace the old buildBVH(target) with this:
+  buildBVHFromMeshes(meshes) {
+    this.bvhMeshes = [];
+    meshes.forEach((c) => {
+      if (!c.isMesh || !c.geometry) return;
+      c.updateMatrixWorld(true);
+      if (!c.geometry.boundsTree) {
+        c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
       }
+      c.userData.worldBox = new THREE.Box3().setFromObject(c);
+      c.userData.invWorld = c.matrixWorld.clone().invert();
+      this.bvhMeshes.push(c);
     });
-    this.bvhMeshes = meshes;
     this.bvhReady = true;
   }
+
 
   onKeyDown(e) {
     if (e.code === 'KeyW') this.input.forward = true;

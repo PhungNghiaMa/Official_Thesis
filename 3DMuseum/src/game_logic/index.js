@@ -23,10 +23,11 @@ import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Sphere } from "three";
 import { acceleratedRaycast } from "three-mesh-bvh";
-
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
-
-
+import { initRecastIfNeeded  , getNavQuery , LoadExternalNavMesh } from "./recastNav.js";
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { updateCrowd , addAgent, initCrowd, setAgentTarget, startAgentTour , updateAgentTours , stopAgentTour  } from "./CrowdManager.js";
+import { createAnimController } from "./createAnimationController.js";
 
 
 THREE.Cache.enabled = true; // Enable caching for better performance
@@ -49,6 +50,7 @@ let animation = null;
 let mixer = null;
 let hasLoadPlayer = false;
 let physiscsReady = false;
+let physicsTimeAccumulator = 0;
 let currentScene = null;
 
 // Third person character model instance
@@ -59,6 +61,9 @@ let characterGLTF = null;
 let tpViewExisted = null;
 let tpViewLoadLate = false;
 let cameraCollider = new Sphere(new THREE.Vector3(), 0.35)
+
+// Floor instance 
+let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null, count = 0;
 
 // Progress loading instance 
 let currentProgress = 0;
@@ -74,6 +79,24 @@ let currentlyHoveredObject = null;
 // put these once near your input setup in index.js
 let camYaw = 0;
 let camPitch = 0;
+
+// NPC instance 
+let museumNPC = null;
+
+// TESTING NAVMESH OBJECT
+let Wall001 = null;
+
+// Instance of navmesh building 
+let navQuery = null;
+let navMesh = null;
+let crowd = null;
+const npcAgents = [];
+
+const navInputSet = new Set();   // meshes to feed into recast (floor + obstacles)
+const bvhMeshList = [];          // meshes used for BVH raycasts (ground snap + capsule checks)
+const navInputMeshes = [];   // meshes we will pass to recast
+let  pictureFramesArray = [];
+
 
 // Container instance 
 let loadingManager = document.getElementById('loading-container');
@@ -116,16 +139,14 @@ let interactedDoor;
 const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_8.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_12.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
-let pictureFramesArray = []
-let imageMeshesArray = []
-const raycaster = new THREE.Raycaster();
-const pointer = new THREE.Vector2();
+let imageMeshesArray = [];
 let doorBoundingBox = null;
 let hasEnteredNewScene = false;
+let tourTargetsMap = new Map();
 
 // DOM Elements
 let container, cssRenderer, css3dRenderer, renderer, camera;
@@ -351,8 +372,126 @@ function ensureUV2ForAO(geometry) {
   }
 }
 
+// FUNCTION TO INIT NPC
+function initNPC(scene, navQuery, bvhMeshes) {
+  if (!navQuery) {
+    console.warn("initNPC: Nav query not ready yet — NPC init may fail.");
+  }
 
-// Smooth animation loop
+  // Clone base character model
+  const npcModel = SkeletonUtils.clone(characterModel);
+  npcModel.updateMatrixWorld(true);
+
+  npcModel.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(tuneMaterial);
+      } else {
+        child.material = tuneMaterial(child.material);
+      }
+    }
+  });
+
+  if (characterGLTF) {
+    // reuse the same animation controller as your TP player
+    const npcAnimation = createAnimController(npcModel, characterGLTF);
+    npcModel.userData.animationCtrl = npcAnimation;
+  }
+
+  // choose a starting position (example near player start)
+  npcModel.position.set(0.5, 0, 0.5);
+  scene.add(npcModel);
+
+  // --- compute an automatic footOffset if not provided by your importer ---
+  if (typeof npcModel.userData.footOffset !== 'number') {
+    try {
+      const bbox = new THREE.Box3().setFromObject(npcModel);
+      // bbox.min.y is where the lowest vertex sits in world-space.
+      // We want footOffset so model sits on top of ground when we set model.position.y = floorY + footOffset
+      // If the model's root is at 0 then bbox.min.y is negative and -bbox.min.y gives the distance from root to foot.
+      const modelMinY = bbox.min.y;
+      npcModel.userData.footOffset = -modelMinY;
+      console.debug('initNPC: auto footOffset computed:', npcModel.userData.footOffset);
+    } catch (e) {
+      npcModel.userData.footOffset = 0;
+      console.warn('initNPC: failed to compute auto footOffset, using fallback 0', e);
+    }
+  }
+
+  // --- initial vertical snap: prefer navmesh projection (so agent starts on navmesh) ---
+  const footOffset = npcModel.userData?.footOffset ?? 0.0001;
+  let snapped = false;
+  let navY = null;
+  let floorY = null;
+
+  if (navQuery) {
+    try {
+      const np = navQuery.findClosestPoint({
+        x: npcModel.position.x,
+        y: npcModel.position.y + footOffset,
+        z: npcModel.position.z,
+      });
+      if (np?.point) {
+        navY = np.point.y;
+        npcModel.position.y = np.point.y + footOffset + 1e-3;
+        snapped = true;
+      }
+    } catch (e) {
+      console.warn("initNPC: navQuery.findClosestPoint failed:", e);
+    }
+  }
+
+  // Also do a BVH down-ray now to get the ground Y (so we can compute nav→floor offset)
+  if (bvhMeshes?.length) {
+    try {
+      const downRay = new THREE.Raycaster(
+        npcModel.position.clone().add(new THREE.Vector3(0, 2.0, 0)),
+        new THREE.Vector3(0, -1, 0)
+      );
+      const hits = downRay.intersectObjects(bvhMeshes, true);
+      if (hits.length > 0) {
+        floorY = hits[0].point.y;
+        // If we didn't snap via navQuery above, snap now to BVH hit
+        if (!snapped) npcModel.position.y = floorY + footOffset + 1e-3;
+      }
+    } catch (e) {
+      console.warn('initNPC: BVH down-ray failed:', e);
+    }
+  }
+
+  // store the difference floorY - navY (fallback) so we can use it if per-frame BVH ray misses
+  npcModel.userData.navMeshToFloorOffset = (typeof floorY === 'number' && typeof navY === 'number') ? (floorY - navY) : 0;
+  console.debug('initNPC: navY, floorY, navMeshToFloorOffset', navY, floorY, npcModel.userData.navMeshToFloorOffset);
+
+  // ✅ Register this NPC as a crowd agent
+  const agent = addAgent(
+    npcModel.position,
+    {
+      radius: 0.6,
+      height: 2.0,
+      maxAcceleration: 14.0,
+      maxSpeed: 10.0,
+      separationWeight: 5.0,
+      collisionQueryRange: 0.35 * 10,
+      pathOptimizationRange: 0.35 * 30.0,
+    },
+    { model: npcModel }
+  );
+
+  if (!agent) {
+    console.error("initNPC: Failed to add NPC as crowd agent.");
+    return null;
+  }
+
+  console.info("initNPC: NPC initialized as crowd agent", agent, "at", npcModel.position);
+
+  return { model: npcModel, agent, walkSpeed: 2.4, runSpeed: 6.0, state: { mode: 'idle' }, requestedGait: null };
+}
+
+
+
 function animateProgress() {
   if (currentProgress < targetProgress) {
     // Maximum speed per frame (e.g. ~0.5% per frame at 60fps = ~30%/s)
@@ -395,6 +534,123 @@ function animateProgress() {
   }
 }
 
+// Robust helper: returns a navmesh point (object {x,y,z}) in front of a wall or null
+// in index.js, replace the old findReachableNavPointNearMesh with this new one
+
+// Robust helper: returns a navmesh point (object {x,y,z}) in front of a mesh
+function findReachableNavPointNearMesh(targetMesh, opts = {}) {
+  // NEW: Added localForwardVector option
+  const { desiredDistance = 1.5, maxSearch = 4.0, step = 0.2, fanSteps = 16, localForwardVector = null } = opts;
+  const nq = getNavQuery();
+  if (!nq) {
+    console.warn('findReachableNavPointNearMesh: navQuery missing');
+    return null;
+  }
+  if (!museumNPC || !museumNPC.model) {
+    console.warn('findReachableNavPointNearMesh: museumNPC not ready');
+    return null;
+  }
+  if (!targetMesh) return null;
+
+  const npcWorld = museumNPC.model.position.clone();
+  const npcProjRes = nq.findClosestPoint(npcWorld);
+  if (!npcProjRes?.point) {
+    console.warn('findReachableNavPointNearMesh: NPC projection failed', npcWorld);
+    return null;
+  }
+  const startNav = new THREE.Vector3(npcProjRes.point.x, npcProjRes.point.y, npcProjRes.point.z);
+
+  const meshWorld = new THREE.Vector3();
+  targetMesh.getWorldPosition(meshWorld);
+  const floorY = startNav.y;
+  const base = new THREE.Vector3(meshWorld.x, floorY, meshWorld.z);
+  
+  let dir = new THREE.Vector3();
+
+  // =========================================================================
+  // ✅ STRATEGY 1 (BEST): Use the provided local forward vector. This is reliable.
+  // =========================================================================
+  if (localForwardVector && localForwardVector.isVector3) {
+      const q = targetMesh.getWorldQuaternion(new THREE.Quaternion());
+      dir.copy(localForwardVector).applyQuaternion(q);
+      dir.y = 0;
+      dir.normalize();
+  } else {
+  // =========================================================================
+  // ⚠️ STRATEGY 2 (FALLBACK): Calculate direction from mesh towards the NPC.
+  // =========================================================================
+      dir.subVectors(npcWorld, base);
+      dir.y = 0;
+      if (dir.lengthSq() < 1e-6) {
+        dir.set(0, 0, 1); // Failsafe if NPC is on top of target
+      }
+      dir.normalize();
+  }
+
+  // (The rest of the function remains the same)
+  const startForPath = { x: startNav.x, y: startNav.y, z: startNav.z };
+  function checkCandidate(candidateVec3) {
+    const proj = nq.findClosestPoint({ x: candidateVec3.x, y: candidateVec3.y, z: candidateVec3.z });
+    if (!proj?.point) return null;
+    const navPt = new THREE.Vector3(proj.point.x, proj.point.y, proj.point.z);
+
+    // const maxSnapDist = Math.max(0.8, step * 3);
+    const maxSnapDist = 2
+    if (navPt.distanceTo(candidateVec3) > maxSnapDist) return null;
+
+    const pathRes = nq.computePath(startForPath, { x: navPt.x, y: navPt.y, z: navPt.z });
+    if (!pathRes || !pathRes.success || !pathRes.path || pathRes.path.length === 0) return null;
+
+    return { x: navPt.x, y: navPt.y, z: navPt.z };
+  }
+
+  for (let d = desiredDistance; d >= 0; d -= step) {
+    const cand = base.clone().add(dir.clone().multiplyScalar(d));
+    const ok = checkCandidate(cand);
+    if (ok) return ok;
+  }
+
+  for (let d = desiredDistance + step; d <= maxSearch; d += step) {
+    const cand = base.clone().add(dir.clone().multiplyScalar(d));
+    const ok = checkCandidate(cand);
+    if (ok) return ok;
+  }
+  
+  // (Fan sampling and final fallback remain the same)
+  for (let i = 0; i < fanSteps; i++) {
+    const angle = (i / fanSteps) * Math.PI * 2;
+    const rotated = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+    for (let d = step; d <= maxSearch; d += step) {
+      const cand = base.clone().add(rotated.clone().multiplyScalar(d));
+      const ok = checkCandidate(cand);
+      if (ok) return ok;
+    }
+  }
+
+  const last = nq.findClosestPoint({ x: base.x, y: base.y, z: base.z });
+  if (last?.point) return { x: last.point.x, y: last.point.y, z: last.point.z };
+
+  return null;
+}
+
+// --------- helper: compute nav path length (meters) ----------
+function computeNavPathLength(navQuery, startPoint, endPoint) {
+  if (!navQuery || !startPoint || !endPoint) return 0;
+  try {
+    const res = navQuery.computePath(startPoint, endPoint);
+    if (!res || !res.success || !res.path || res.path.length < 2) return 0;
+    // path entries can be {x,y,z} objects or arrays
+    const pts = res.path.map(p => new THREE.Vector3(p.x ?? p[0], p.y ?? p[1], p.z ?? p[2]));
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += pts[i].distanceTo(pts[i-1]);
+    return len;
+  } catch (e) {
+    console.warn('computeNavPathLength failed:', e);
+    return 0;
+  }
+}
+
+
 
 // src/game_logic/index.js
 async function loadModel() {
@@ -430,7 +686,9 @@ async function loadModel() {
     sun.shadow.bias = -0.0002;
     sun.castShadow = true;
     scene.add(sun);
-    scene.add(sun.target);
+    scene.add(sun.target); 
+
+    // TRY TO LOAD EXTERNAL NAVMESH 
 
 
 
@@ -554,7 +812,6 @@ async function loadModel() {
         animation = gltf.animations;
         mixer = new THREE.AnimationMixer(gltf.scene);
 
-        let floorMesh = null, maxArea = 0, fallbackY = Infinity, fallbackX = 0, fallbackZ = 0, floorBoxMaxY = null, count = 0;
 
         if(characterModel){
             characterModel.traverse((child) => {
@@ -569,8 +826,29 @@ async function loadModel() {
             });
         }
 
+        let index = 0;
+
         gltf.scene.traverse((child) => {
-            if(!child.isMesh) return;
+            // if(!child.isMesh) return;
+          if (child.name.startsWith('TourTarget_')) {
+            let frameName = child.name.replace('TourTarget_', '');
+            // Use a specific regex to handle the CubeXXX001 case
+            const match = frameName.match(/^(Cube\d{3})(\d{3,})$/);
+            // If a match is found, reformat the name
+            if (match) {
+                const base = match[1]; // 'Cube046'
+                const num = parseInt(match[2], 10); // 1
+                frameName = `${base}_${num}`;
+            }
+            tourTargetsMap.set(frameName, child);
+            // debug: print so we know the empties were found
+            const worldPos = new THREE.Vector3();
+            child.getWorldPosition(worldPos);
+            console.log('Found TourTarget:', child.name, '=> maps to', frameName, 'worldPos', worldPos);
+          }
+            
+            child.updateMatrixWorld(true);
+            bvhMeshList.push(child);
 
             child.receiveShadow = true;
             child.updateMatrixWorld(true);
@@ -583,7 +861,39 @@ async function loadModel() {
 
             ensureUV2ForAO(child.geometry);
 
+            if(child.userData && child.userData.navWalkable || child.userData.navObstacle){
+                navInputMeshes.push(child);
+            }
+
+            if (child.isObject3D && child.name.startsWith('TourTarget_')) {
+              console.log("Found an empty object of type Object3D:", child.name);
+            }
+
             if (child.isMesh) {
+                console.log('CHILD MESH NAME:', child.name);
+                child.userData.navWalkable = false;
+                child.userData.navObstacle = true;
+
+                if (child.name.toLowerCase().includes("floor")) {
+                    child.userData.navWalkable = true;
+                    child.userData.navObstacle = false;
+                } else {
+                    // By default, every other mesh is considered an obstacle.
+                    child.userData.navWalkable = false;
+                    child.userData.navObstacle = true;
+                }
+
+                // Second, now that properties are set, check if it should be part of the navmesh.
+                if (child.userData.navWalkable || child.userData.navObstacle) {
+                    navInputMeshes.push(child);
+                }
+                // --- END OF CORRECTED LOGIC ---
+
+                // DEBUG FUNCTION
+                // if (child.name.includes("Cube024")){
+                //     const debugMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 , wireframe: true });
+                //     child.material = debugMaterial;
+                // }
                 const pos = new THREE.Vector3();
                 child.getWorldPosition(pos);
                 child.receiveShadow = true;
@@ -593,17 +903,21 @@ async function loadModel() {
                     fallbackZ = pos.z;
                 }
 
+                if (child.name === "Wall001"){
+                    child.receiveShadow = true;
+                    Wall001 = child;
+                    Wall001.material = new THREE.MeshStandardMaterial({ color: 0x00ff00 , wireframe: false });
+                    console.log("Wall001 position is: ", Wall001.position)
+                }
+
                 if (/^Picture_Frame\d+$/.test(child.name)) {
                     pictureFramesArray.push(child);
                 }
 
                 if (child.name.toLowerCase().includes("floor")) {
                     child.receiveShadow = true;
-                    child.material.side = THREE.DoubleSide; // Ensure floor is double-sided
-                    child.material.roughness = 0.8; // Adjust roughness for better appearance
-                    child.material.metalness = 0.0; // Set metalness to 0
-                    
-                    console.log("FLOOR POSITION IS: ",child.position.x, child.position.y, child.position.z)
+                    console.log("Floor bbox: ", child.geometry.boundingBox)
+                    // console.log("FLOOR POSITION IS: ",child.position.x, child.position.y, child.position.z)
                     const box = new THREE.Box3().setFromObject(child);
                     const size = box.getSize(new THREE.Vector3());
                     const area = size.x * size.z;
@@ -636,9 +950,85 @@ async function loadModel() {
                     annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
                     annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
                 }
+
+                if (child.name.includes('Cube046')) {
+                    pictureFramesArray.push(child);
+                }
             }
         });
 
+        // initialize recast (WASM) if needed
+        await initRecastIfNeeded();
+
+        console.log("START LOADING EXTERNAL NAVMESH")
+        const ExternalNavMeshURL = './assets/navmesh/new_nav_mesh.bin'
+        const navMeshResult = await LoadExternalNavMesh(scene , ExternalNavMeshURL );
+        if (!navMeshResult) {
+            console.warn("LoadExternalNavMesh returned nothing!");
+        } else if (navMeshResult.success) {
+            console.log("Successfully load external navmesh!");
+            navMesh = navMeshResult.navMesh;
+            navQuery = navMeshResult.navQuery;
+        } else {
+            console.warn("Failed to load external navmesh!");
+        }
+        const nearestPoint = navQuery.findClosestPoint({ x: 0.5, y: 0, z: 0.5 });
+        console.log('nearestPoint:', nearestPoint);
+
+        console.log("navMesh.raw exist: ", !!navMesh.raw);
+        console.log("navMesh.raw : ", navMesh.raw);
+        console.log("Crowd poly count:", navMesh.getPolyCount ? navMesh.getPolyCount() : "no getPolyCount()");
+
+
+
+
+        // After get navmesh , immediately call initCrowd() function to init Crowd so this can add the agent to this crowd
+        if (navMesh){
+            crowd = initCrowd(navMesh , 2 , 0.5);
+        }else{
+            console.warning("Fail to create Detour Crowd !");
+        }
+
+        // TEST INIT AGENT
+        // Test addAgent at navQuery.snapped point
+        const testPointRes = navQuery.findClosestPoint({ x: 0.5, y: 1.0, z: 0.5 });
+        console.log('Test snap point:', testPointRes);
+
+        // if (testPointRes?.point) {
+        // const p = testPointRes.point;
+        // const testPos = new Float32Array([p.x, p.y, p.z]);
+        // console.log('Trying crowd.addAgent at', Array.from(testPos));
+        // try {
+        //     const res = crowd.addAgent(testPos, {
+        //     radius: 1.0,
+        //     height: 2.0,
+        //     maxAcceleration: 20.0,
+        //     maxSpeed: 6.0,
+        //     separationWeight: 1.0,
+        //     });
+        //     console.log('crowd.addAgent returned ->', res);
+        //     // If res is number, good. If object, inspect agentIndex property
+        //     if (typeof res === 'number') {
+        //     console.log('Agent numeric id:', res);
+        //     } else {
+        //     console.log('Agent object:', res);
+        //     console.log('Agent.agentIndex:', res?.agentIndex ?? res?.index ?? 'no index');
+        //     }
+        // } catch (err) {
+        //     console.error('crowd.addAgent threw:', err);
+        // }
+        // } else {
+        // console.warn('testPointRes had no .point; cannot test addAgent at snapped point.');
+        // }
+
+        // Debug add agent
+        console.log('navMesh.raw.ptr:', navMesh.raw?.ptr);
+        console.log('navQuery.raw.ptr:', navQuery?.raw?.ptr);
+        console.log('crowd.navMesh.raw?.ptr:', crowd?.navMesh?.raw?.ptr);
+
+
+
+        // set up PictureFrame so it can be interact with the player
         raycasterManager.setPictureFrames(pictureFramesArray);
         Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray);
         
@@ -669,20 +1059,33 @@ async function loadModel() {
         // INIT FIRST VIEW PLAYER
         activateFirstPerson();
         fpView = new FirstPersonPlayer(camera, scene, playerCollider);
-        fpView.buildBVH(gltf.scene);
+        fpView.buildBVHFromMeshes(bvhMeshList);
 
         // INIT THIRD VIEW PLAYER
-        tpView = new ThirdPersonPlayer(camera, scene, playerCollider, characterModel , mixer);
+        tpView = new ThirdPersonPlayer(camera, scene, playerCollider, characterModel);
         tpViewExisted = true;
         tpViewLoadLate = true;
         tpView._cameraSnapped = false;
-        tpView.buildBVH(gltf.scene);        
-
-
-
+        // tpView.buildBVH(gltf.scene);
+        tpView.buildBVHFromMeshes(bvhMeshList)
         physiscsReady = true;
         hasLoadPlayer = true;
-        
+        if (!navQuery){
+            console.warn("Nav query is not exist yet. museumNPC init may be fail");
+        }else{
+            console.info("Nav query exist already")
+            console.log("Nav query: ", navQuery)
+        }
+        // Call initNPC function to init NPC 
+        const npcEntry = initNPC(scene, navQuery, bvhMeshList);
+       
+        if (npcEntry){
+          npcEntry.state = {mode: 'idle'};
+          npcAgents.push(npcEntry);
+        }else {
+          console.warn('initNPC failed - no entry created');
+        }
+
         // --- POPULATE SCENE WITH DATA ---
         (Array.isArray(items) ? items : []).forEach(item => {
             if (!item) return;
@@ -765,11 +1168,14 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 
+
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
 
+
   const frameDelta = Math.min(0.05, clock.getDelta());
-  const stepDelta  = frameDelta / STEPS_PER_FRAME;
+  physicsTimeAccumulator += frameDelta;
+  const FIXED_TIMESTEP = 1/60; // Run physics at a steady 60Hz
 
   if (outlinePass) {
     const hasTargets = (outlinePass.selectedObjects?.length ?? 0) > 0;
@@ -779,8 +1185,7 @@ function animate() {
 
   if (physiscsReady && activePlayer === 'tp' && tpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      tpView.update(1/60);
-      if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.4);
+      tpView.update(frameDelta);
     }
 
     if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
@@ -833,18 +1238,199 @@ function animate() {
       const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
         new THREE.Matrix4().lookAt(camera.position, lookAtPoint, camera.up)
       );
-      camera.quaternion.slerp(targetQuaternion, 0.04);
+      camera.quaternion.slerp(targetQuaternion, 0.05);
     }
   }
 
   if (physiscsReady && activePlayer === 'fp' && fpView) {
     for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      fpView.update(1/60, camYaw, camPitch);
+      fpView.update(frameDelta , camYaw, camPitch);
     }
   }
 
-//   if (tpView?.mixer) tpView.mixer.update(frameDelta);
-  if (mixer) mixer.update(frameDelta * 0.45);
+  const FIXED_CROWD_DT = 1 / 60;
+  const MAX_CROWD_SUBSTEPS = 10;
+  updateCrowd(FIXED_CROWD_DT, frameDelta, MAX_CROWD_SUBSTEPS);
+  updateAgentTours(navQuery ?? getNavQuery());
+
+
+// Sync NPC models with their agents (robust fallback)
+// ================= NPC sync (replacement) =================
+// NPC sync loop - paste-ready replacement
+// =======================
+// NPC Animate Sync Loop
+// =======================
+const NPC_ROT_LERP_SPEED = 8.0;
+const NPC_SPEED_THRESHOLD = 0.2;    // below this, considered idle
+const NPC_ARRIVAL_DIST = 0.08;      // arrival radius
+const NPC_MIXER_DISTANCE = 60;      // only update mixer if near camera
+const NPC_VERTICAL_SMOOTH = 0.6;    // 0.0 = no smoothing, 1.0 = instant
+
+for (const entry of npcAgents) {
+  const agent = entry.agent;
+  const model = entry.model;
+  if (!agent || !model) continue;
+
+  entry.state = entry.state || { mode: 'idle', requestedGait: null };
+
+  // animation controller
+  const anim = model.userData?.animCtrl ?? model.userData?.animationCtrl;
+  if (anim && anim.mixer && camera.position.distanceTo(model.position) < NPC_MIXER_DISTANCE) {
+    anim.mixer.update(frameDelta * 0.9);
+  }
+
+  // --- agent position ---
+  let apos;
+  try { apos = agent.interpolatedPosition ?? (typeof agent.position === 'function' ? agent.position() : agent.position); }
+  catch (e) { apos = (typeof agent.position === 'function' ? agent.position() : agent.position); }
+  if (!apos) continue;
+
+  const agentPos = new THREE.Vector3(apos.x ?? apos[0], apos.y ?? apos[1], apos.z ?? apos[2]);
+  const footOffset = typeof model.userData?.footOffset === 'number' ? model.userData.footOffset : 0;
+
+  // --- snap vertically to visible floor ---
+  let targetPos = new THREE.Vector3(agentPos.x, agentPos.y, agentPos.z);
+  let snappedToBVH = false;
+
+  if (bvhMeshList && bvhMeshList.length) {
+    try {
+      const downOrigin = new THREE.Vector3(agentPos.x, agentPos.y + 2.0, agentPos.z);
+      const downRay = new THREE.Raycaster(downOrigin, new THREE.Vector3(0, -1, 0));
+      const hits = downRay.intersectObjects(bvhMeshList, true);
+      if (hits && hits.length) {
+        targetPos.y = hits[0].point.y;
+        snappedToBVH = true;
+      }
+    } catch (e) {}
+  }
+  if (!snappedToBVH) {
+    const navToFloor = (model.userData && typeof model.userData.navMeshToFloorOffset === 'number') ? model.userData.navMeshToFloorOffset : 0;
+    targetPos.y = agentPos.y + navToFloor;
+  }
+  targetPos.y += footOffset;
+
+  // smooth vertical
+  model.position.x = targetPos.x;
+  model.position.z = targetPos.z;
+  model.position.y = THREE.MathUtils.lerp(model.position.y, targetPos.y, NPC_VERTICAL_SMOOTH);
+
+  // --- arrival handling ---
+  let targetObj = null;
+  try { targetObj = (typeof agent.target === 'function') ? agent.target() : agent.target; } catch (e) { targetObj = null; }
+
+  let reached = false;
+  if (targetObj && (('x' in targetObj) || Array.isArray(targetObj))) {
+    const tx = targetObj.x ?? targetObj[0];
+    const tz = targetObj.z ?? targetObj[2];
+    const tvec = new THREE.Vector3(tx, agentPos.y, tz);
+    if (agentPos.distanceTo(tvec) <= NPC_ARRIVAL_DIST) reached = true;
+  }
+
+  if (reached) {
+    try { if (typeof agent.resetMoveTarget === 'function') agent.resetMoveTarget(); } catch (e) {}
+
+    model.position.copy(targetPos);
+
+    if (anim && anim.idleAction) {
+      if (anim.currentAction && anim.currentAction !== anim.idleAction) {
+        anim.currentAction.crossFadeTo(anim.idleAction, 0.5, false); // instant switch
+      }
+      anim.idleAction.reset().play();
+      anim.currentAction = anim.idleAction;
+      anim.currentAction.timeScale = 1.0;
+    }
+
+    entry.state.requestedGait = null;
+    entry.state.mode = 'idle';
+    continue;
+  }
+
+  // --- constant speed override ---
+  const gaitWanted = entry.state.requestedGait ?? entry.state.mode;
+  const desiredGaitSpeed = (gaitWanted === 'run')
+    ? (entry.runSpeed ?? 6.0)
+    : (entry.walkSpeed ?? 1.6);
+
+  try {
+    if (typeof agent.updateParameters === 'function') {
+      agent.updateParameters({
+        maxSpeed: desiredGaitSpeed,
+        maxAcceleration: 30.0, // high accel → no easing/slowdown
+      });
+    }
+  } catch (e) {}
+
+  // --- velocity & rotation ---
+  // let vel = null;
+  // try { vel = (typeof agent.velocity === 'function') ? agent.velocity() : agent.velocity; } catch (e) { vel = null; }
+  // const vx = (vel?.x ?? vel?.[0]) ?? 0;
+  // const vz = (vel?.z ?? vel?.[2]) ?? 0;
+  // const speed = Math.sqrt(vx*vx + vz*vz);
+
+  // if (speed > 1e-4) {
+  //   const desiredDir = new THREE.Vector3(vx, 0, vz).normalize();
+  //   const targetYaw = Math.atan2(desiredDir.x, desiredDir.z);
+  //   const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+  //   model.quaternion.slerp(tq, Math.min(1, NPC_ROT_LERP_SPEED * frameDelta));
+  // }
+
+  // compute velocity once, for rotation + animation speed scaling
+  let vel = null;
+  try { vel = (typeof agent.velocity === 'function') ? agent.velocity() : agent.velocity; } catch (e) { vel = null; }
+  const vx = (vel?.x ?? vel?.[0]) ?? 0;
+  const vz = (vel?.z ?? vel?.[2]) ?? 0;
+  const speed = Math.sqrt(vx*vx + vz*vz);
+
+  // rotation guard: honor tour-facing quaternion if set and not yet expired
+  const nowSec = (typeof performance !== 'undefined') ? performance.now() / 1000 : Date.now() / 1000;
+
+  if (entry.state?.preventRotationUntil && entry.state.preventRotationUntil > nowSec) {
+    if (entry.state.tourFacingQuat && model) {
+      model.quaternion.copy(entry.state.tourFacingQuat);
+    }
+  } else {
+    if (speed > 1e-4) {
+      const desiredDir = new THREE.Vector3(vx, 0, vz).normalize();
+      const targetYaw = Math.atan2(desiredDir.x, desiredDir.z);
+      const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+      model.quaternion.slerp(tq, Math.min(1, NPC_ROT_LERP_SPEED * frameDelta));
+    }
+  }
+
+
+
+  // --- animation ---
+  if (anim) {
+    let nextAction = null;
+    if (gaitWanted === 'run' && anim.runningAction) nextAction = anim.runningAction;
+    else if (gaitWanted === 'walk' && anim.walkAction) nextAction = anim.walkAction;
+    else if (anim.idleAction) nextAction = anim.idleAction;
+
+    if (nextAction && anim.currentAction !== nextAction) {
+      if (anim.currentAction) {
+        anim.currentAction.crossFadeTo(nextAction, 0.5, true);
+      }
+      nextAction.reset().play();
+      anim.currentAction = nextAction;
+    }
+
+    if (anim.currentAction) {
+      const denom = desiredGaitSpeed;
+      const targetTimeScale = speed / denom;
+      const clamped = THREE.MathUtils.clamp(targetTimeScale, 0.6, 1.4);
+      anim.currentAction.timeScale = THREE.MathUtils.lerp(anim.currentAction.timeScale ?? 1.0, clamped, 0.25);
+    }
+  }
+}
+
+
+
+
+
+
+//   if (tpView?.mixer) tpView.mixer.update(FIXED_TIMESTEP);
+  if (mixer) mixer.update(frameDelta);
+  if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.9);
 
   checkPlayerPosition();
 
@@ -861,8 +1447,9 @@ function activateThirdPerson() {
   if (tpViewLoadLate) {
     // TP not yet created → build it now
     if (!tpViewExisted && character) {
-      tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model, mixer);
-      tpView.buildBVH(currentScene);
+      tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
+    //   tpView.buildBVH(currentScene);
+      tpView.buildBVHFromMeshes(bvhMeshList);
       tpView.handleAnimation(character.model, character.gltf);
 
       // 🔹 snap smoothing state immediately
@@ -921,6 +1508,7 @@ function activateThirdPerson() {
     tpView._cameraSnapped = false;
 
     scene.add(tpView.model);
+    tpView.model.visible = true;
   }
 }
 
@@ -945,7 +1533,10 @@ function activateFirstPerson() {
     }
   }
   activePlayer = 'fp';
-  if (tpView?.model) scene.remove(tpView.model);
+  if (tpView?.model){
+    scene.remove(tpView.model);
+    tpView.model.visible = false;
+  } 
 }
 
 
@@ -1035,6 +1626,48 @@ export function initializeGame(targetContainerId = 'model-container') {
             activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
         }
 
+        // Toogle automatic agent room tour
+        if (event.code === 'KeyI') {
+          const navQ = getNavQuery() ?? navQuery;
+          if (!navQ) {
+            console.warn('Cannot start tour: navQuery not ready');
+          } else if (!npcAgents || npcAgents.length === 0) {
+            console.warn('No NPCs available to tour with');
+          } else {  
+            // pick the first NPC (change if you have multiple)
+            const npc = npcAgents[0];
+            if (!npc) return;
+            // simple toggle flag stored on the npc entry
+            if (npc.state?.touring) {
+              stopAgentTour(npc);
+              npc.state.touring = false;
+              console.info('Stopped museum tour for NPC');
+            } else {
+              if (!Array.isArray(pictureFramesArray) || pictureFramesArray.length === 0) {
+                console.warn('No picture frames found (pictureFramesArray is empty)');
+              } else {
+                // !!! IMPORTANT: force Three.js to update world matrices so getWorldPosition() is correct
+                if (scene && typeof scene.updateMatrixWorld === 'function') {
+                  scene.updateMatrixWorld(true);
+                }
+                // optionally update each picture mesh (defensive)
+                for (const m of pictureFramesArray) {
+                  if (m && typeof m.updateMatrixWorld === 'function') m.updateMatrixWorld(true);
+                }
+
+                // DEBUG logs to verify we are passing the expected things
+                console.log('Starting tour: framesCount=', pictureFramesArray.length, 'npc=', npc, 'navQ=', navQ);
+
+                // now start tour
+                startAgentTour(npc, pictureFramesArray, navQ, { loop: false, holdTime: 3.0, desiredDistance: 1.2, gait: 'walk', targetsMap: tourTargetsMap });
+                npc.state = npc.state || {};
+                npc.state.touring = true;
+                console.info('Started museum tour for NPC (I pressed)');
+              }
+            }
+          }
+        }
+
         if (activePlayer === 'fp' && fpView) {
             fpView.onKeyDown(event);
         } else if (activePlayer === 'tp' && tpView) {
@@ -1099,7 +1732,64 @@ export function initializeGame(targetContainerId = 'model-container') {
             });
         },
 
-        onHoverPictureFrame: (object, isHovering) => {}
+        // onHoverPictureFrame: (object, isHovering) => {}
+          onNPCPathFollow: (intersection) => {
+            if (!navQuery) {
+              console.warn('NavMesh or NPC is not ready. Cannot find path.');
+              return;
+            }
+            if (!npcAgents || npcAgents.length === 0) {
+              console.warn('No NPC agents available yet.');
+              return;
+            }
+
+            const npcEntry = npcAgents[0];
+            if (!npcEntry || !npcEntry.agent || !npcEntry.model) {
+              console.warn('NPC entry not ready.');
+              return;
+            }
+
+            const targetPoint = intersection.point;
+            const closest = navQuery.findClosestPoint({ x: targetPoint.x, y: targetPoint.y, z: targetPoint.z });
+            if (!closest?.point) {
+              console.warn('Clicked point not near navmesh (no closest).', targetPoint);
+              return;
+            }
+
+            // compute path length just once at click time
+            const npcPos = npcEntry.model.position.clone();
+            const startRes = navQuery.findClosestPoint({ x: npcPos.x, y: npcPos.y + 1.0, z: npcPos.z });
+            const startPoint = startRes?.point ?? { x: npcPos.x, y: npcPos.y, z: npcPos.z };
+            const endPoint = closest.point;
+
+            const pathLength = computeNavPathLength(navQuery, startPoint, endPoint);
+            const RUN_DISTANCE_THRESHOLD = 10.0; // tweak this threshold
+
+            npcEntry.state = npcEntry.state || {};
+            npcEntry.state.requestedGait = (pathLength >= RUN_DISTANCE_THRESHOLD) ? 'run' : 'walk';
+            // update physical speed so walk is actually slower
+            if (npcEntry.state.requestedGait === 'run') {
+              npcEntry.agent.updateParameters({ maxSpeed: npcEntry.runSpeed });
+            } else {
+              npcEntry.agent.updateParameters({ maxSpeed: npcEntry.walkSpeed });
+            }
+            npcEntry.state.requestedGaitDistance = pathLength;
+
+            const dest = new THREE.Vector3(endPoint.x, endPoint.y, endPoint.z);
+            console.info('Click → world:', targetPoint, ' → snapped to navmesh point:', dest, 'pathLen=', pathLength);
+
+            // pass entry + gait state to setAgentTarget
+            setAgentTarget(npcEntry.agent, dest, navQuery, {
+              entry: npcEntry,
+              requestedGait: npcEntry.state.requestedGait,
+              pathLength
+            });
+          }
+
+
+
+    
+        
     });
     raycasterManager.setOutlinePass(outlinePass);
 
