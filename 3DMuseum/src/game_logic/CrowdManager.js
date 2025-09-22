@@ -261,6 +261,11 @@ export function stopAgentTour(agentEntry) {
   if (entry.state) {
     entry.state.preventRotationUntil = null;
     entry.state.tourFacingQuat = null;
+    entry.state.currentPictureMesh = null;
+    entry.state.mode = 'idle';
+    entry.state.requestedGait = null;
+    entry.state.isOnTour = false;
+    entry.state.atDestination = false;
   }
   return true;
 }
@@ -278,6 +283,10 @@ export function updateAgentTours(navQuery) {
 
       const entry = tour.entry ?? null;
       const model = entry?.model ?? (entry?.userData?.model ?? null);
+
+      if (entry && entry.state){
+        entry.state.mode = tour.status;
+      }
 
       // --- agent position (interpolated if available) ---
       let agentPosition;
@@ -316,8 +325,20 @@ export function updateAgentTours(navQuery) {
       if (tour.status === 'moving') {
         // arrival test
         const arrivalDist = (tour.arrivalDist ?? TOUR_DEFAULT.arrivalDist);
+        if (entry && entry.state) {
+          entry.state.currentPictureMesh = null;
+          entry.state.isOnTour = true;
+          entry.state.atDestination = false;
+          entry.state.isViewingPicture = false;
+        }
         if (dist <= arrivalDist) {
           console.warn('updateAgentTours: arrived at index', tour.index, 'for', current.pictureMesh?.name ?? '(unknown)', 'dist', dist.toFixed(3));
+          if (entry && entry.state){
+            entry.state.atDestination = true;
+            entry.state.currentPictureMesh = current.pictureMesh;
+            entry.state.isViewingPicture = true;
+
+          }
 
           // clear any move target on the agent (stop it immediately)
           try {
@@ -397,6 +418,10 @@ export function updateAgentTours(navQuery) {
               if (entry && entry.state) {
                 entry.state.preventRotationUntil = null;
                 entry.state.tourFacingQuat = null;
+                entry.state.atDestination = false;
+                entry.state.isOnTour = false;
+                entry.state.currentPictureMesh = null;
+                entry.state.isViewingPicture = false;
               }
               continue;
             }
