@@ -493,61 +493,158 @@ function initNPC(scene, navQuery, bvhMeshes) {
 }
 
 // FUNCTION TO MAKE THIRD PERSON PLAYER AGENT FOLLOW NPC IN ROOM TOUR 
-function setPlayerFollowTarget(playerAgent, npc, navQuery) {
-  // Follow *behind* the NPC (not to its right). Keep calls minimal while NPC is moving.
-  if (!playerAgent || !npc || !npc.model || !npc.agent) return;
+// function setPlayerFollowTarget(playerAgent, npc, navQuery) {
+//   // Follow *behind* the NPC (not to its right). Keep calls minimal while NPC is moving.
+//   if (!playerAgent || !npc || !npc.model || !npc.agent) return;
 
-  // get NPC world position
+//   // get NPC world position
+//   const npcPos = npc.model.position.clone();
+
+//   // get NPC forward direction (world), put player behind it
+//   let forward = new THREE.Vector3(0, 0, 1);
+//   try {
+//     forward = npc.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+//     if (forward.lengthSq() < 1e-6) forward.set(0, 0, 1);
+//   } catch (e) {
+//     forward.set(0, 0, 1);
+//   }
+
+//   // Check NPC velocity — only request movement while NPC is visibly moving
+//   let vel = null;
+//   try { vel = (typeof npc.agent.velocity === 'function') ? npc.agent.velocity() : npc.agent.velocity; } catch (e) { vel = null; }
+//   const speed = vel ? Math.sqrt((vel.x ?? 0) ** 2 + (vel.z ?? 0) ** 2) : 0;
+
+//   // If NPC is nearly stopped, clear player's move target so the TP agent doesn't keep nudging
+//   if (speed < 0.02) {
+//     try {
+//       if (typeof playerAgent.resetMoveTarget === 'function') playerAgent.resetMoveTarget();
+//     } catch (e) {}
+//     return;
+//   }
+
+//    // 1. Calculate the NPC's "right" vector using a cross product
+//   const upVector = new THREE.Vector3(0, 1, 0);
+//   const right = new THREE.Vector3().crossVectors(forward, upVector).normalize();
+
+//   // 2. Determine which side to be on (left or right)
+//   const sideMultiplier = (tpView.followSide === 'left') ? -1 : 1;
+
+//   // 3. Define the offsets
+//   const offsetSide = 0.5; // meters to the side (tweak this value)
+//   const offsetBack = 0.0; // meters behind (tweak this value)
+
+//   // 4. Calculate the total offset vector
+//   const sideOffsetVector = right.clone().multiplyScalar(offsetSide * sideMultiplier);
+//   const backOffsetVector = forward.clone().multiplyScalar(-offsetBack);
+//   const totalOffset = sideOffsetVector.add(backOffsetVector);
+
+//   // 5. Calculate the final target position for the player
+//   const playerTargetPos = npcPos.clone().add(totalOffset);
+
+
+//   // set the player agent's target via your navQuery/pathing helper
+//   if (navQuery && typeof setAgentTarget === 'function') {
+//     setAgentTarget(playerAgent, playerTargetPos, navQuery, { entry: null, requestedGait: (speed > 2.5 ? 'run' : 'walk') });
+//   }
+// }
+
+// index.js — replace setPlayerFollowTarget with the version below
+function setPlayerFollowTarget(playerAgent, npc, navQuery) {
+  if (!playerAgent || !npc || !npc.model || !npc.agent || !navQuery) return;
+
+  // global bvhMeshList is used for obstacle checks
   const npcPos = npc.model.position.clone();
 
-  // get NPC forward direction (world), put player behind it
+  // NPC forward & right (world-space, flattened Y)
   let forward = new THREE.Vector3(0, 0, 1);
   try {
     forward = npc.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
     if (forward.lengthSq() < 1e-6) forward.set(0, 0, 1);
-  } catch (e) {
-    forward.set(0, 0, 1);
-  }
+  } catch (e) { forward.set(0, 0, 1); }
 
-  // Check NPC velocity — only request movement while NPC is visibly moving
-  let vel = null;
-  try { vel = (typeof npc.agent.velocity === 'function') ? npc.agent.velocity() : npc.agent.velocity; } catch (e) { vel = null; }
-  const speed = vel ? Math.sqrt((vel.x ?? 0) ** 2 + (vel.z ?? 0) ** 2) : 0;
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
 
-  // If NPC is nearly stopped, clear player's move target so the TP agent doesn't keep nudging
-  if (speed < 0.02) {
+  // tuning: how far to the side and small back offset if needed
+  const offsetSide = 0.7;   // try 0.6-0.9 for closer/further
+  const offsetBack = 0.12;  // small backward so TP doesn't clip the NPC front
+
+  // prefer existing followSide, fallback to 'right'
+  const preferredSide = (tpView && tpView.followSide === 'left') ? -1 : 1;
+  const candidatesOrder = [preferredSide, -preferredSide]; // try preferred first
+
+  // compute NPC nav start for path checks
+  const npcNavProj = navQuery.findClosestPoint({ x: npcPos.x, y: npcPos.y, z: npcPos.z });
+  const startForPath = (npcNavProj && npcNavProj.point) ? npcNavProj.point : { x: npcPos.x, y: npcPos.y, z: npcPos.z };
+
+  function candidateIsValid(candidateWorldPos) {
+    // 1) snap to navmesh
+    const proj = navQuery.findClosestPoint({ x: candidateWorldPos.x, y: candidateWorldPos.y + 1.0, z: candidateWorldPos.z });
+    if (!proj?.point) return null;
+    const navPt = proj.point;
+    // 2) path check (short path from NPC to candidate)
     try {
-      if (typeof playerAgent.resetMoveTarget === 'function') playerAgent.resetMoveTarget();
-    } catch (e) {}
-    return;
+      const pathRes = navQuery.computePath(startForPath, { x: navPt.x, y: navPt.y, z: navPt.z });
+      if (!pathRes || !pathRes.success) return null;
+    } catch (e) {
+      return null;
+    }
+    // 3) BVH raycast: ensure there's no solid geometry blocking the straight line
+    try {
+      const dir = candidateWorldPos.clone().sub(npcPos).setY(0);
+      const dist = dir.length();
+      if (dist < 1e-4) return null;
+      dir.normalize();
+      const rayOrigin = npcPos.clone().add(new THREE.Vector3(0, 0.5, 0)); // ray from chest height
+      const ray = new THREE.Raycaster(rayOrigin, dir, 0.02, dist - 0.05);
+      const hits = ray.intersectObjects(bvhMeshList, true);
+      if (hits.length > 0) {
+        // blocked by geometry
+        return null;
+      }
+    } catch (e) {
+      // ignore ray errors, prefer path success
+    }
+    return navPt; // valid nav point
   }
 
-   // 1. Calculate the NPC's "right" vector using a cross product
-  const upVector = new THREE.Vector3(0, 1, 0);
-  const right = new THREE.Vector3().crossVectors(forward, upVector).normalize();
-
-  // 2. Determine which side to be on (left or right)
-  const sideMultiplier = (tpView.followSide === 'left') ? -1 : 1;
-
-  // 3. Define the offsets
-  const offsetSide = 0.5; // meters to the side (tweak this value)
-  const offsetBack = 0.0; // meters behind (tweak this value)
-
-  // 4. Calculate the total offset vector
-  const sideOffsetVector = right.clone().multiplyScalar(offsetSide * sideMultiplier);
-  const backOffsetVector = forward.clone().multiplyScalar(-offsetBack);
-  const totalOffset = sideOffsetVector.add(backOffsetVector);
-
-  // 5. Calculate the final target position for the player
-  const playerTargetPos = npcPos.clone().add(totalOffset);
-
-
-  // set the player agent's target via your navQuery/pathing helper
-  if (navQuery && typeof setAgentTarget === 'function') {
-    setAgentTarget(playerAgent, playerTargetPos, navQuery, { entry: null, requestedGait: (speed > 2.5 ? 'run' : 'walk') });
+  // Try preferred side then the other side
+  for (const mult of candidatesOrder) {
+    const cand = npcPos.clone()
+      .add(right.clone().multiplyScalar(offsetSide * mult))
+      .add(forward.clone().multiplyScalar(-offsetBack));
+    const validNavPt = candidateIsValid(cand);
+    if (validNavPt) {
+      // set player's crowd-agent to that nav point
+      setAgentTarget(playerAgent, validNavPt, navQuery, { entry: null, requestedGait: 'walk' });
+      // update tpView.followSide properly so later decisions prefer this side
+      if (tpView) tpView.followSide = (mult === -1 ? 'left' : 'right');
+      return;
+    }
   }
+
+  // Fan fallback: sample a few angles around NPC to find any reachable side near-by
+  const fanAngles = [Math.PI/6, -Math.PI/6, Math.PI/3, -Math.PI/3, Math.PI/2, -Math.PI/2];
+  for (const a of fanAngles) {
+    const rotated = forward.clone().applyAxisAngle(new THREE.Vector3(0,1,0), a);
+    const cand = npcPos.clone().add(rotated.multiplyScalar(offsetSide));
+    const validNavPt = candidateIsValid(cand);
+    if (validNavPt) {
+      setAgentTarget(playerAgent, validNavPt, navQuery, { entry: null, requestedGait: 'walk' });
+      // set followSide relative to right vector sign
+      if (tpView) {
+        const rel = Math.sign(right.dot(cand.clone().sub(npcPos)));
+        tpView.followSide = (rel < 0 ? 'left' : 'right');
+      }
+      return;
+    }
+  }
+
+  // final fallback: keep the TP agent very close to the NPC (snap to NPC nav point)
+  try {
+    const npcPt = navQuery.findClosestPoint({ x: npcPos.x, y: npcPos.y + 1.0, z: npcPos.z });
+    if (npcPt?.point) setAgentTarget(playerAgent, npcPt, navQuery, { entry: null, requestedGait: 'walk' });
+  } catch (e) {}
 }
-
 
 
 function animateProgress() {
@@ -1209,10 +1306,8 @@ function animate() {
       const npcEntry = npcAgents[0];
       const atDest = !!(npcEntry?.state?.mode === 'idle' && npcEntry?.state?.atDestination);
 
-      if (!atDest && npcEntry?.model) {
+      if (npcEntry && npcEntry.model && tpView && tpView.crowdAgent) {
         setPlayerFollowTarget(tpView.crowdAgent, npcEntry, navQuery);
-      } else if (tpView.crowdAgent) {
-        setAgentTarget(tpView.crowdAgent, tpView.crowdAgent.position, navQuery);
       }
     }
 
@@ -1839,10 +1934,9 @@ export function initializeGame(targetContainerId = 'model-container') {
               npc.state.touring = false;
               tpView.isTouring = false;
 
-              // stop TP crowd agent & visual following
               if (tpView) {
                 try {
-                  if (typeof tpView.stopFollowAgent === 'function'){
+                  if (typeof tpView.stopFollowAgent === 'function') {
                     tpView.stopFollowAgent();
                     tpView.isTouring = false;
                     npc.state.touring = false;
@@ -1880,26 +1974,81 @@ export function initializeGame(targetContainerId = 'model-container') {
               console.info('Started museum tour for NPC (I pressed)');
 
               // --- TELEPORT TP TO NPC START POSITION ---
-              // --- TELEPORT TP TO NPC START POSITION ---
               const npcStartPos = npc.model?.position.clone();
               if (npcStartPos && tpView) {
-                // Snap TP model to NPC position first
+                // Always snap TP model to NPC base position first
                 tpView.model?.position.copy(npcStartPos);
                 tpView._updateCapsuleToModel?.();
 
-                // Then offset TP to the right side of NPC
-                const sideOffset = new THREE.Vector3(1.2, 0, 0); // 1.2m to the right
-                sideOffset.applyQuaternion(npc.model.quaternion);
-                tpView.model.position.add(sideOffset);
+                // === Compute left & right offsets relative to NPC ===
+                const forward = new THREE.Vector3();
+                npc.model.getWorldDirection(forward);
+                forward.y = 0;
+                forward.normalize();
 
-                // Sync TP crowd agent too
+                const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+                const sideDist = 1.2;   // meters to the side
+                const behindDist = 0.5; // slight behind offset
+
+                const basePos = npcStartPos.clone().add(forward.clone().multiplyScalar(-behindDist));
+
+                const rightPos = basePos.clone().add(right.clone().multiplyScalar(sideDist));
+                const leftPos  = basePos.clone().add(right.clone().multiplyScalar(-sideDist));
+
+                // === Clearance check using raycast to floor ===
+                function checkClear(pos, npcPos) {
+                  const meshes = tpView.bvhMeshes ?? bvhMeshList ?? [];
+
+                  // 1. Floor check (raycast downward)
+                  const origin = pos.clone().add(new THREE.Vector3(0, 2, 0));
+                  const downRay = new THREE.Raycaster(origin, new THREE.Vector3(0, -1, 0), 0, 5);
+                  const floorHits = downRay.intersectObjects(meshes, true);
+                  if (floorHits.length === 0) return -Infinity; // invalid, no ground
+
+                  // 2. Side clearance check (raycast from NPC to candidate pos)
+                  const dir = pos.clone().sub(npcPos).setY(0).normalize();
+                  const sideRay = new THREE.Raycaster(npcPos.clone().add(new THREE.Vector3(0, 1, 0)), dir, 0, pos.distanceTo(npcPos));
+                  const sideHits = sideRay.intersectObjects(meshes, true);
+
+                  // If blocked by obstacle before reaching candidate → mark as bad
+                  if (sideHits.length > 0 && sideHits[0].distance < pos.distanceTo(npcPos) - 0.3) {
+                    return -Infinity;
+                  }
+
+                  // Return floor height diff (smaller = flatter = better)
+                  const floorY = floorHits[0].point.y;
+                  return -Math.abs(floorY - pos.y);
+                }
+
+
+                const rightClear = checkClear(rightPos, npcStartPos);
+                const leftClear = checkClear(leftPos, npcStartPos);
+
+                let chosenPos, chosenSide;
+                if (rightClear > leftClear) {
+                  chosenPos = rightPos;
+                  chosenSide = 1;
+                } else if (leftClear > rightClear) {
+                  chosenPos = leftPos;
+                  chosenSide = -1;
+                } else {
+                  if (Math.random() < 0.5) {
+                    chosenPos = rightPos;
+                    chosenSide = 1;
+                  } else {
+                    chosenPos = leftPos;
+                    chosenSide = -1;
+                  }
+                }
+
+                // Teleport TP model to chosen side
+                tpView.model?.position.copy(chosenPos);
+                tpView._updateCapsuleToModel?.();
+
                 if (tpView.crowdAgent) {
                   try {
-                    const targetPos = {
-                      x: tpView.model.position.x,
-                      y: tpView.model.position.y,
-                      z: tpView.model.position.z
-                    };
+                    const targetPos = { x: chosenPos.x, y: chosenPos.y, z: chosenPos.z };
                     if (typeof tpView.crowdAgent.teleport === 'function') {
                       tpView.crowdAgent.teleport(targetPos);
                     } else if (crowd && typeof crowd.teleportAgent === 'function') {
@@ -1911,55 +2060,51 @@ export function initializeGame(targetContainerId = 'model-container') {
                     console.warn('Teleport failed, fallback manual sync', e);
                   }
                 }
-              }
 
+                // --- ADD TP TO CROWD ---
+                if (tpView && crowd) {
+                  activateThirdPerson();
 
-              // --- ADD TP TO CROWD ---
-              if (tpView && crowd) {
-                activateThirdPerson();
-
-                // FIXED: always directly behind NPC
-                const followSide = 0;
-                const fixedOffsetBehind = 1.2;
-
-                if (!tpView.crowdAgent) {
-                  const agentResult = addThirdPersonToCrowd(scene, crowd, tpView);
-                  if (!tpView.crowdAgent && typeof agentResult === 'number' && crowd?.getAgent) {
-                    const resolved = crowd.getAgent(agentResult);
-                    if (resolved) tpView.setCrowdAgent(resolved);
+                  if (!tpView.crowdAgent) {
+                    const agentResult = addThirdPersonToCrowd(scene, crowd, tpView);
+                    if (!tpView.crowdAgent && typeof agentResult === 'number' && crowd?.getAgent) {
+                      const resolved = crowd.getAgent(agentResult);
+                      if (resolved) tpView.setCrowdAgent(resolved);
+                    }
                   }
-                }
 
-                // Make TP share NPC’s target
-                try {
-                  if (tpView.crowdAgent && npc.model && navQ && typeof setAgentTarget === 'function') {
-                    const npcPos = npc.model.position;
-                    setAgentTarget(tpView.crowdAgent, { x: npcPos.x, y: npcPos.y, z: npcPos.z }, navQ, {
-                      entry: null,
-                      requestedGait: 'walk'
-                    });
+                  // Make TP share NPC’s target
+                  try {
+                    if (tpView.crowdAgent && npc.model && navQ && typeof setAgentTarget === 'function') {
+                      const npcPos = npc.model.position;
+                      setAgentTarget(tpView.crowdAgent, { x: npcPos.x, y: npcPos.y, z: npcPos.z }, navQ, {
+                        entry: null,
+                        requestedGait: 'walk'
+                      });
+                    }
+                  } catch (e) {
+                    console.warn('Failed to set initial TP agent target:', e);
                   }
-                } catch (e) {
-                  console.warn('Failed to set initial TP agent target:', e);
-                }
 
-                // Start the TP visual follow
-                try {
-                  if (typeof tpView.startFollowAgent === 'function') {
-                    tpView.startFollowAgent(npc, {
-                      offsetBehind: 0.0,
-                      smoothing: 0.12,
-                      heightOffset: 0.0,
-                      side: followSide
-                    });
+                  // Start TP visual follow
+                  try {
+                    if (typeof tpView.startFollowAgent === 'function') {
+                      tpView.startFollowAgent(npc, {
+                        offsetBehind: behindDist,
+                        smoothing: 0.12,
+                        heightOffset: 0.0,
+                        side: chosenSide
+                      });
+                    }
+                  } catch (e) {
+                    console.warn('Error calling tpView.startFollowAgent:', e);
                   }
-                } catch (e) {
-                  console.warn('Error calling tpView.startFollowAgent:', e);
                 }
               }
             }
           }
         }
+
 
 
         if (activePlayer === 'fp' && fpView) {
