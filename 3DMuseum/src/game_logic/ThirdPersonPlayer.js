@@ -412,38 +412,90 @@ export default class ThirdPersonPlayer {
    * npcEntry should be the object that contains both .agent and .model (the code in index.js uses that).
    * options: { offsetBehind, heightOffset, smoothing }
    */
-  startFollowAgent(npcEntry, options = {}) {
-    if (!npcEntry || !npcEntry.agent) {
-      console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
-      return false;
-    }
-    this._follow = {
-      entry: npcEntry,
-      smoothing: options.smoothing ?? 0.12,   // lerp factor
-      offsetBehind: options.offsetBehind ?? 2.0,
-      heightOffset: options.heightOffset ?? 0.0,
-      mode: options.mode ?? 'behind'
-    };
+  // startFollowAgent(npcEntry, options = {}) {
+  //   if (!npcEntry || !npcEntry.agent) {
+  //     console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
+  //     return false;
+  //   }
+  //   this._follow = {
+  //     entry: npcEntry,
+  //     smoothing: options.smoothing ?? 0.12,   // lerp factor
+  //     offsetBehind: options.offsetBehind ?? 2.0,
+  //     heightOffset: options.heightOffset ?? 0.0,
+  //     mode: options.mode ?? 'behind'
+  //   };
 
-    this.followSide = options.followSide ?? this.followSide; // 'left' or 'right'
+  //   this.followSide = options.followSide ?? this.followSide; // 'left' or 'right'
 
-    // snap tp model to initial follow pose (if both models exist)
-    if (this.model && npcEntry.model) {
-      const ap = this._resolveAgentPosition(npcEntry.agent);
-      if (ap) {
-        // compute an initial desired position behind the NPC
-        const forward = npcEntry.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
-        const footOffset = this.footOffset ?? (this.model.userData?.footOffset ?? 0);
-        const desired = new THREE.Vector3(ap.x, ap.y + footOffset + (this._follow.heightOffset || 0), ap.z).add(forward.clone().multiplyScalar(-this._follow.offsetBehind));
-        this.model.position.copy(desired);
-        this.model.quaternion.copy(npcEntry.model.quaternion);
-        this._updateCapsuleToModel();
-        this._cameraSnapped = false; // allow camera snapping on start
-      }
-    }
-    this._follow.verticalVelocity = 0;
-    return true;
+  //   // snap tp model to initial follow pose (if both models exist)
+  //   if (this.model && npcEntry.model) {
+  //     const ap = this._resolveAgentPosition(npcEntry.agent);
+  //     if (ap) {
+  //       // compute an initial desired position behind the NPC
+  //       const forward = npcEntry.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+  //       const footOffset = this.footOffset ?? (this.model.userData?.footOffset ?? 0);
+  //       const desired = new THREE.Vector3(ap.x, ap.y + footOffset + (this._follow.heightOffset || 0), ap.z).add(forward.clone().multiplyScalar(-this._follow.offsetBehind));
+  //       this.model.position.copy(desired);
+  //       this.model.quaternion.copy(npcEntry.model.quaternion);
+  //       this._updateCapsuleToModel();
+  //       this._cameraSnapped = false; // allow camera snapping on start
+  //     }
+  //   }
+  //   this._follow.verticalVelocity = 0;
+  //   return true;
+  // }
+
+
+  // ThirdPersonPlayer.js — inside class ThirdPersonPlayer
+startFollowAgent(npcEntry, options = {}) {
+  if (!npcEntry || !npcEntry.agent) {
+    console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
+    return false;
   }
+
+  // new options: offsetSide, followSide (string 'left'|'right'), mode ('side'|'behind')
+  this._follow = {
+    entry: npcEntry,
+    smoothing: options.smoothing ?? 0.12,
+    offsetBehind: options.offsetBehind ?? 1.0,
+    offsetSide: options.offsetSide ?? 0.7,
+    heightOffset: options.heightOffset ?? 0.0,
+    mode: options.mode ?? 'side'
+  };
+
+  // accept either 'left'/'right' or fallback to existing state
+  this.followSide = options.followSide ?? (this.followSide || 'right');
+
+  // snap tp model to an initial follow pose (prefer a side position when mode==='side')
+  if (this.model && npcEntry.model) {
+    const ap = this._resolveAgentPosition(npcEntry.agent);
+    if (ap) {
+      const forward = npcEntry.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0) , forward).normalize();
+      const footOffset = this.footOffset ?? (this.model.userData?.footOffset ?? 0);
+
+      let desired = new THREE.Vector3(ap.x, ap.y + footOffset + (this._follow.heightOffset || 0), ap.z);
+
+      if (this._follow.mode === 'side') {
+        const sideMultiplier = (this.followSide === 'left') ? -1 : 1;
+        desired.add(right.clone().multiplyScalar((this._follow.offsetSide || 0.7) * sideMultiplier));
+        desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 0.12)));
+      } else {
+        // legacy behind behavior
+        desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 1.0)));
+      }
+
+      this.model.position.copy(desired);
+      this.model.quaternion.copy(npcEntry.model.quaternion);
+      this._updateCapsuleToModel();
+      this._cameraSnapped = false;
+    }
+  }
+
+  this._follow.verticalVelocity = 0;
+  return true;
+}
+
 
   stopFollowAgent() {
     this._follow = null;
