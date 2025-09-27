@@ -73,6 +73,10 @@ export default class FirstPersonPlayer {
     this._quatPitch = new THREE.Quaternion();
     this._horizVel = new THREE.Vector3();
     this._orientQuat = new THREE.Quaternion();
+
+    // agents & room tour
+    this.followAgent = null;
+    this.isTouring = false;
   }
 
   setYaw(yaw){
@@ -83,24 +87,6 @@ export default class FirstPersonPlayer {
     this.pitch = pitch;
   }
 
-  // buildBVH(target) {
-  //   const meshes = [];
-  //   target.traverse(c => {
-  //     if (c.isMesh && c.geometry) {
-  //       if (!c.geometry.boundsTree) {
-  //         c.updateMatrixWorld(true);
-  //         c.geometry.boundsTree = new MeshBVH(c.geometry, { maxLeafTris: 10 });
-  //       }
-  //       c.userData.worldBox = new THREE.Box3().setFromObject(c);
-  //       c.userData.invWorld = c.matrixWorld.clone().invert();
-  //       meshes.push(c);
-  //     }
-  //   });
-  //   this.bvhMeshes = meshes;
-  //   this.bvhReady = true;
-  // }
-
-  // Replace the old buildBVH(target) with this:
   buildBVHFromMeshes(meshes) {
     this.bvhMeshes = [];
     meshes.forEach((c) => {
@@ -115,7 +101,6 @@ export default class FirstPersonPlayer {
     });
     this.bvhReady = true;
   }
-
 
   onKeyDown(e) {
     if (e.code === 'KeyW') this.input.forward = true;
@@ -150,6 +135,69 @@ export default class FirstPersonPlayer {
     if (!this.bvhReady) return;
 
     frameDelta = Math.min(frameDelta, MAX_ACCUM);
+    
+    if (this.isTouring && this.followAgent) {
+        const npcEntry = this.followAgent;
+        if (!npcEntry.model || !npcEntry.agent) return;
+
+        let finalNpcPos = new THREE.Vector3();
+
+        try {
+            // ✅ LAG & JITTER FIX: This is the definitive solution.
+            // 1. Get the SMOOTH, interpolated position from the navigation agent for X and Z.
+            const agentData = (typeof npcEntry.agent.interpolatedPosition === 'function')
+                ? npcEntry.agent.interpolatedPosition()
+                : npcEntry.agent.position();
+            
+            // 2. Get the STABLE, floor-snapped position from the visible model for Y.
+            const modelY = npcEntry.model.position.y;
+
+            // 3. Combine them into a single, perfect source of truth.
+            finalNpcPos.set(
+                agentData.x ?? agentData[0],
+                modelY, // Using the model's Y prevents jitter.
+                agentData.z ?? agentData[2] // Using the agent's X/Z prevents lag.
+            );
+
+        } catch (e) {
+            // Fallback to model position if agent fails for any reason.
+            npcEntry.model.getWorldPosition(finalNpcPos);
+        }
+
+        const FOLLOW_DISTANCE = 2.5;
+        const EYE_HEIGHT = 1.7;
+
+        const npcForward = new THREE.Vector3();
+        npcEntry.model.getWorldDirection(npcForward);
+        npcForward.y = 0;
+        npcForward.normalize();
+        
+        const cameraTargetPosition = finalNpcPos.clone()
+            .add(new THREE.Vector3(0, EYE_HEIGHT, 0))
+            .add(npcForward.multiplyScalar(-FOLLOW_DISTANCE));
+
+        let cameraLookTarget = finalNpcPos.clone().add(new THREE.Vector3(0, EYE_HEIGHT, 0));
+
+        if (npcEntry.state?.atDestination && npcEntry.state.currentPictureMesh) {
+            const pic = npcEntry.state.currentPictureMesh;
+            pic.updateMatrixWorld(true);
+            pic.getWorldPosition(cameraLookTarget);
+        }
+
+        this.camera.position.lerp(cameraTargetPosition, 0.08);
+
+        const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+            new THREE.Matrix4().lookAt(this.camera.position, cameraLookTarget, this.camera.up)
+        );
+        this.camera.quaternion.slerp(targetQuaternion, 0.08);
+        
+        this.playerCollider.start.copy(this.camera.position).add(new THREE.Vector3(0, -1.4, 0));
+        this.playerCollider.end.copy(this.camera.position).add(new THREE.Vector3(0, 0, 0));
+        
+        return;
+    }
+   
+      // Original physics step logic for manual player control
 
     if (yawFromMouse !== null) this.baseYaw = yawFromMouse;
     if (pitchFromMouse !== null) this.setPitch(pitchFromMouse);
@@ -289,4 +337,29 @@ export default class FirstPersonPlayer {
   dispose() {
     this.bvhMeshes = null;
   }
+
+  setFollowAgent(npcEntry) {
+    this.followAgent = npcEntry;
+    this.isTouring = true;
+
+    // Sync collider immediately to NPC position
+    if (npcEntry?.model) {
+      const pos = new THREE.Vector3();
+      npcEntry.model.getWorldPosition(pos);
+
+      this.playerCollider.start.copy(pos).add(new THREE.Vector3(0, 0.2, 0));
+      this.playerCollider.end.copy(pos).add(new THREE.Vector3(0, 1.6, 0));
+    }
+
+    // Reset velocity to avoid drifting
+    this.playerVelocity.set(0, 0, 0);
+  }
+
+
+  stopFollowAgent(){
+    this.followAgent = null;
+    this.isTouring = false;
+  }
+
 }
+

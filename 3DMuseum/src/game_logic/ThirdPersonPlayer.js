@@ -403,106 +403,65 @@ export default class ThirdPersonPlayer {
     this.updateAnimationState(speed, this.input);
   }
 
-    //
-  // --- NPC follow helpers (add to ThirdPersonPlayer class) ---
-  //
-
-  /**
-   * Start following an NPC entry (the same object returned by initNPC and stored in npcAgents).
-   * npcEntry should be the object that contains both .agent and .model (the code in index.js uses that).
-   * options: { offsetBehind, heightOffset, smoothing }
-   */
-  // startFollowAgent(npcEntry, options = {}) {
-  //   if (!npcEntry || !npcEntry.agent) {
-  //     console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
-  //     return false;
-  //   }
-  //   this._follow = {
-  //     entry: npcEntry,
-  //     smoothing: options.smoothing ?? 0.12,   // lerp factor
-  //     offsetBehind: options.offsetBehind ?? 2.0,
-  //     heightOffset: options.heightOffset ?? 0.0,
-  //     mode: options.mode ?? 'behind'
-  //   };
-
-  //   this.followSide = options.followSide ?? this.followSide; // 'left' or 'right'
-
-  //   // snap tp model to initial follow pose (if both models exist)
-  //   if (this.model && npcEntry.model) {
-  //     const ap = this._resolveAgentPosition(npcEntry.agent);
-  //     if (ap) {
-  //       // compute an initial desired position behind the NPC
-  //       const forward = npcEntry.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
-  //       const footOffset = this.footOffset ?? (this.model.userData?.footOffset ?? 0);
-  //       const desired = new THREE.Vector3(ap.x, ap.y + footOffset + (this._follow.heightOffset || 0), ap.z).add(forward.clone().multiplyScalar(-this._follow.offsetBehind));
-  //       this.model.position.copy(desired);
-  //       this.model.quaternion.copy(npcEntry.model.quaternion);
-  //       this._updateCapsuleToModel();
-  //       this._cameraSnapped = false; // allow camera snapping on start
-  //     }
-  //   }
-  //   this._follow.verticalVelocity = 0;
-  //   return true;
-  // }
-
-
   // ThirdPersonPlayer.js — inside class ThirdPersonPlayer
-startFollowAgent(npcEntry, options = {}) {
-  if (!npcEntry || !npcEntry.agent) {
-    console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
-    return false;
-  }
-
-  // new options: offsetSide, followSide (string 'left'|'right'), mode ('side'|'behind')
-  this._follow = {
-    entry: npcEntry,
-    smoothing: options.smoothing ?? 0.12,
-    offsetBehind: options.offsetBehind ?? 1.0,
-    offsetSide: options.offsetSide ?? 0.7,
-    heightOffset: options.heightOffset ?? 0.0,
-    mode: options.mode ?? 'side'
-  };
-
-  // accept either 'left'/'right' or fallback to existing state
-  this.followSide = options.followSide ?? (this.followSide || 'right');
-
-  // snap tp model to an initial follow pose (prefer a side position when mode==='side')
-  if (this.model && npcEntry.model) {
-    const ap = this._resolveAgentPosition(npcEntry.agent);
-    if (ap) {
-      const forward = npcEntry.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
-      const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0) , forward).normalize();
-      const footOffset = this.footOffset ?? (this.model.userData?.footOffset ?? 0);
-
-      let desired = new THREE.Vector3(ap.x, ap.y + footOffset + (this._follow.heightOffset || 0), ap.z);
-
-      if (this._follow.mode === 'side') {
-        const sideMultiplier = (this.followSide === 'left') ? -1 : 1;
-        desired.add(right.clone().multiplyScalar((this._follow.offsetSide || 0.7) * sideMultiplier));
-        desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 0.12)));
-      } else {
-        // legacy behind behavior
-        desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 1.0)));
-      }
-
-      this.model.position.copy(desired);
-      this.model.quaternion.copy(npcEntry.model.quaternion);
-      this._updateCapsuleToModel();
-      this._cameraSnapped = false;
+  
+  startFollowAgent(npcEntry, options = {}) {
+    if (!npcEntry || !npcEntry.agent) {
+      console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
+      return false;
     }
-  }
 
-  this._follow.verticalVelocity = 0;
-  return true;
-}
+    // new options: offsetSide, followSide (string 'left'|'right'), mode ('side'|'behind')
+    this._follow = {
+      entry: npcEntry,
+      smoothing: options.smoothing ?? 0.12,
+      offsetBehind: options.offsetBehind ?? 1.0,
+      offsetSide: options.offsetSide ?? 0.7,
+      heightOffset: options.heightOffset ?? 0.0,
+      mode: options.mode ?? 'side'
+    };
+
+    // accept either 'left'/'right' or fallback to existing state
+    this.followSide = options.followSide ?? (this.followSide || 'right');
+
+    // snap tp model to an initial follow pose (prefer a side position when mode==='side')
+    if (this.model && npcEntry.model) {
+      const ap = this._resolveAgentPosition(npcEntry.agent);
+      if (ap) {
+        const forward = npcEntry.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+        const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0) , forward).normalize();
+        const footOffset = this.footOffset ?? (this.model.userData?.footOffset ?? 0);
+
+        let desired = new THREE.Vector3(ap.x, ap.y + footOffset + (this._follow.heightOffset || 0), ap.z);
+
+        if (this._follow.mode === 'side') {
+          const sideMultiplier = (this.followSide === 'left') ? -1 : 1;
+          desired.add(right.clone().multiplyScalar((this._follow.offsetSide || 0.7) * sideMultiplier));
+          desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 0.12)));
+        } else {
+          // legacy behind behavior
+          desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 1.0)));
+        }
+
+        this.model.position.copy(desired);
+        this.model.quaternion.copy(npcEntry.model.quaternion);
+        this._updateCapsuleToModel();
+        this._cameraSnapped = false;
+      }
+    }
+
+    this._follow.verticalVelocity = 0;
+    return true;
+  }
 
 
   stopFollowAgent() {
     this._follow = null;
+    this.isTouring = false;
   }
 
-  isFollowing() {
-    return !!this._follow;
+  isTouring() {
+    return this.isTouring;
   }
 
   // small helper: resolve agent position object -> {x,y,z}
@@ -528,65 +487,7 @@ startFollowAgent(npcEntry, options = {}) {
     this.playerCollider.end.set(this.model.position.x, bottomY + segLen, this.model.position.z);
     this._smoothedPlayerPosition.copy(this.playerCollider.end);
   }
-
-
-  // updateFollow(delta) {
-  //     if (!this.crowdAgent || !this.model || !this._follow) return;
-
-  //     // ... (position and velocity logic is unchanged and correct)
-  //     const agentPosData = this._resolveAgentPosition(this.crowdAgent);
-  //     if (!agentPosData) return;
-  //     const agentPos = new THREE.Vector3(agentPosData.x, agentPosData.y, agentPosData.z);
-  //     let vel;
-  //     try {
-  //         vel = this.crowdAgent.velocity ? this.crowdAgent.velocity() : null;
-  //     } catch (e) { vel = null; }
-  //     const vx = vel?.x ?? 0;
-  //     const vz = vel?.z ?? 0;
-  //     const speed = Math.hypot(vx, vz);
-  //     let targetPos = agentPos.clone();
-  //     if (this.bvhMeshes && this.bvhMeshes.length > 0) {
-  //         try {
-  //             const downRay = new THREE.Raycaster(
-  //                 new THREE.Vector3(agentPos.x, this.model.position.y + 2.0, agentPos.z),
-  //                 new THREE.Vector3(0, -1, 0)
-  //             );
-  //             const hits = downRay.intersectObjects(this.bvhMeshes, true);
-  //             if (hits.length > 0) targetPos.y = hits[0].point.y;
-  //         } catch (e) { /* ignore */ }
-  //     }
-  //     targetPos.y += this.footOffset;
-  //     const posLerpFactor = 1.0 - Math.exp(-15 * delta);
-  //     this.model.position.lerp(targetPos, posLerpFactor);
-  //     this._updateCapsuleToModel();
-
-  //     // --- HYBRID ROTATION LOGIC (The Fix) ---
-  //     const entry = this._follow.entry;
-  //     const isNpcIdleAtTourStop = entry?.state?.tourFacingQuat && speed <= 0;
-
-  //     if (isNpcIdleAtTourStop) {
-  //         // ✅ CORRECT: When stopped at a tour point, INSTANTLY copy the NPC's facing rotation.
-  //         const targetQuat = entry.state.tourFacingQuat;
-  //         targetQuat.normalize();
-  //         this.model.quaternion.copy(targetQuat);
-  //     } else if (speed > 0.1) {
-  //         // WHEN MOVING: Smoothly face the direction of your own movement. This keeps the camera straight.
-  //         const targetYaw = Math.atan2(vx, vz).toExponential(10);
-  //         const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
-  //         const rotSlerpFactor = 1.0 - Math.exp(-8 * delta);
-  //         this.model.quaternion.slerp(targetQuat, rotSlerpFactor);
-  //     }
-
-  //     // Keep the camera's smoothed quaternion in sync
-  //     if (this.tempQuaternion) {
-  //         // ✅ CHANGE THIS LINE: Smoothly interpolate the camera's temp quaternion
-  //         // instead of instantly copying it. This is the core fix for the drift.
-  //     }
-  //     // Update animation state
-  //     const isRunning = speed > 2.5;
-  //     this.updateAnimationState(speed, { run: isRunning });
-  // }
-
+  // Call this each frame if following an agent
   updateFollow(delta) {
         if (!this.crowdAgent || !this.model || !this._follow) return;
 
@@ -615,7 +516,7 @@ startFollowAgent(npcEntry, options = {}) {
         }
         targetPos.y += this.footOffset;
 
-        const posLerpFactor = 0.8;
+        const posLerpFactor = 0.12;
         this.model.position.lerp(targetPos, posLerpFactor);
         this._updateCapsuleToModel();
 
@@ -636,7 +537,7 @@ startFollowAgent(npcEntry, options = {}) {
         }
 
         if (this.tempQuaternion) {
-          const camSlerpFactor = 0.8; // Slower smoothing for camera
+          const camSlerpFactor = 0.12; // Slower smoothing for camera
           this.tempQuaternion.slerp(this.model.quaternion, camSlerpFactor);
         }
 
@@ -720,11 +621,5 @@ syncFromCrowd() {
   const isRunning = speed > (2.4 * 1.1); // A little higher than walk speed
   this.updateAnimationState(speed, { run: isRunning });
 }
-
-
-
-
-
-
-
 }
+

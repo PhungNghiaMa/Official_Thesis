@@ -471,13 +471,13 @@ function initNPC(scene, navQuery, bvhMeshes) {
   const agent = addAgent(
     npcModel.position,
     {
-      radius: 0.1,
+      radius: 0.05,
       height: 2.0,
       maxAcceleration: 14.0,
       maxSpeed: 10.0,
       separationWeight: 0.0,
       collisionQueryRange: 0.05,
-      pathOptimizationRange: 30,
+      pathOptimizationRange: 50,
     },
     { model: npcModel }
   );
@@ -1299,131 +1299,6 @@ function animate() {
     outlinePass.enabled = hasTargets;
   }
 
-  // ---------------- TP VIEW ----------------
-  if (physiscsReady && activePlayer === 'tp' && tpView) {
-    // --- Step 1: Update the Crowd Agent's Target (if touring) ---
-    if (tpView.isTouring && tpView.crowdAgent && npcAgents.length > 0) {
-      const npcEntry = npcAgents[0];
-      const atDest = !!(npcEntry?.state?.mode === 'idle' && npcEntry?.state?.atDestination);
-
-      if (npcEntry && npcEntry.model && tpView && tpView.crowdAgent) {
-        setPlayerFollowTarget(tpView.crowdAgent, npcEntry, navQuery);
-      }
-    }
-
-    // --- Step 2: Update the Player's Visual Model ---
-    if (tpView.isTouring) {
-      if (typeof tpView.updateFollow === 'function') {
-        tpView.updateFollow(frameDelta);
-      } else {
-        tpView.syncFromCrowd();
-      }
-    } else {
-      for (let i = 0; i < STEPS_PER_FRAME; i++) {
-        tpView.update(frameDelta);
-      }
-    }
-
-    // --- Step 3: Camera update ---
-    if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
-      const npcEntry = npcAgents[0];
-      
-      // The point the camera is interested in on the player (center mass)
-      const playerLookAtPoint = (tpView._smoothedPlayerPosition ?? tpView.playerCollider.end)
-        .clone().add(new THREE.Vector3(0, 0.5, 0));
-      
-      const isAtTourStop =  !tpView.isTouring && npcEntry && npcEntry.state?.atDestination && npcEntry.state.isViewingPicture;
-
-      if (isAtTourStop) {
-        // ====================================================================
-        // ✅ NEW LOGIC: When at a tour stop, keep the player in view but look at the picture.
-        // ====================================================================
-        try {
-          const pic = npcEntry.state.currentPictureMesh;
-          pic.updateMatrixWorld(true);
-
-          // 1. Get the picture's world position (the absolute thing we want to look at).
-          const pictureTarget = new THREE.Vector3();
-          pic.getWorldPosition(pictureTarget);
-
-          // 2. Position the camera BEHIND the PLAYER, facing the picture.
-          // This keeps the player in the frame.
-          const directionFromPicToPlayer = playerLookAtPoint.clone().sub(pictureTarget).normalize();
-          const cameraDistance = 3.0; // How far the camera should be from the player
-          
-          // Place the camera behind the player along the line from the picture.
-          const cameraTargetPosition = playerLookAtPoint.clone().add(directionFromPicToPlayer.multiplyScalar(cameraDistance));
-          cameraTargetPosition.y = playerLookAtPoint.y + 0.8; // Adjust height for a better view
-
-          // 3. Smoothly move the camera to the target position and look at the picture.
-          const lerpFactor = 0.05;
-          camera.position.lerp(cameraTargetPosition, lerpFactor);
-          
-          const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
-            new THREE.Matrix4().lookAt(camera.position, pictureTarget.normalize(), camera.up)
-          );
-          camera.quaternion.slerp(targetQuaternion, lerpFactor);
-
-        } catch (e) {
-          console.warn('Tour camera snap failed, falling back to normal follow.', e);
-        }
-
-      } 
-      else {
-        // ====================================================================
-        // ✅ STANDARD LOGIC: When moving, use the normal follow-cam.
-        // This logic is correct for following the player.
-        // ====================================================================
-        let cameraLookTarget = playerLookAtPoint.clone();
-
-        const idealOffset = new THREE.Vector3(0, 0, -3.0).applyQuaternion(tpView.model.quaternion);
-        const idealPos = playerLookAtPoint.clone().add(idealOffset);
-        let finalPos = idealPos.clone();
-
-        // Camera collision logic (unchanged)
-        const fovRadians = THREE.MathUtils.degToRad(camera.fov);
-        const near = camera.near;
-        const halfHeight = Math.tan(fovRadians * 0.5) * near;
-        const halfWidth = halfHeight * camera.aspect;
-        const camRadius = Math.sqrt(halfWidth * halfWidth + halfHeight * halfHeight);
-        const raycaster = new THREE.Raycaster(playerLookAtPoint, idealOffset.clone().normalize(), 1e-14, idealOffset.length());
-        const intersects = raycaster.intersectObjects(tpView.bvhMeshes, true);
-        if (intersects.length > 0) {
-          finalPos.copy(intersects[0].point).sub(raycaster.ray.direction.clone().multiplyScalar(camRadius + 0.05));
-        }
-        
-        if (tpView.isTouring && tpView.isViewingPicture){
-          tpView._cameraSnapped = false;
-          camera.position.copy(finalPos);
-          camera.lookAt(cameraLookTarget);
-          return;
-        }else{
-          // Smooth follow position
-          const lerp = 0.05;
-          if (!tpView._cameraSnapped) {
-            camera.position.copy(finalPos);
-            tpView._cameraSnapped = true;
-          } else {
-            camera.position.lerp(finalPos, lerp);
-          }
-
-          // Smooth follow orientation
-          const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
-            new THREE.Matrix4().lookAt(camera.position, cameraLookTarget, camera.up)
-          );
-          camera.quaternion.slerp(targetQuaternion, 0.05);
-          }
-      }
-    }
-  }
-
-  // ---------------- FP VIEW ----------------
-  if (physiscsReady && activePlayer === 'fp' && fpView) {
-    for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      fpView.update(frameDelta, camYaw, camPitch);
-    }
-  }
-
   // ---------------- CROWD UPDATE ----------------
   const FIXED_CROWD_DT = 1 / 60;
   const MAX_CROWD_SUBSTEPS = 10;
@@ -1575,6 +1450,180 @@ function animate() {
       }
     }
   }
+
+
+  // ---------------- TP VIEW ----------------
+  if (physiscsReady && activePlayer === 'tp' && tpView) {
+    // --- Step 1: Update the Crowd Agent's Target (if touring) ---
+    if (tpView.isTouring && tpView.crowdAgent && npcAgents.length > 0) {
+      const npcEntry = npcAgents[0];
+      const atDest = !!(npcEntry?.state?.mode === 'idle' && npcEntry?.state?.atDestination);
+
+      if (npcEntry && npcEntry.model && tpView && tpView.crowdAgent) {
+        setPlayerFollowTarget(tpView.crowdAgent, npcEntry, navQuery);
+      }
+    }
+
+    // --- Step 2: Update the Player's Visual Model ---
+    if (tpView.isTouring) {
+      if (typeof tpView.updateFollow === 'function') {
+        tpView.updateFollow(frameDelta);
+      } else {
+        tpView.syncFromCrowd();
+      }
+    } else {
+      for (let i = 0; i < STEPS_PER_FRAME; i++) {
+        tpView.update(frameDelta);
+      }
+    }
+
+    // --- Step 3: Camera update ---
+    if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
+      const npcEntry = npcAgents[0];
+      
+      // The point the camera is interested in on the player (center mass)
+      const playerLookAtPoint = (tpView._smoothedPlayerPosition ?? tpView.playerCollider.end)
+        .clone().add(new THREE.Vector3(0, 0.5, 0));
+      
+      const isAtTourStop =  !tpView.isTouring && npcEntry && npcEntry.state?.atDestination && npcEntry.state.isViewingPicture;
+
+      if (isAtTourStop) {
+        // ====================================================================
+        // ✅ NEW LOGIC: When at a tour stop, keep the player in view but look at the picture.
+        // ====================================================================
+        try {
+          const pic = npcEntry.state.currentPictureMesh;
+          pic.updateMatrixWorld(true);
+
+          // 1. Get the picture's world position (the absolute thing we want to look at).
+          const pictureTarget = new THREE.Vector3();
+          pic.getWorldPosition(pictureTarget);
+
+          // 2. Position the camera BEHIND the PLAYER, facing the picture.
+          // This keeps the player in the frame.
+          const directionFromPicToPlayer = playerLookAtPoint.clone().sub(pictureTarget).normalize();
+          const cameraDistance = 3.0; // How far the camera should be from the player
+          
+          // Place the camera behind the player along the line from the picture.
+          const cameraTargetPosition = playerLookAtPoint.clone().add(directionFromPicToPlayer.multiplyScalar(cameraDistance));
+          cameraTargetPosition.y = playerLookAtPoint.y + 0.8; // Adjust height for a better view
+
+          // 3. Smoothly move the camera to the target position and look at the picture.
+          const lerpFactor = 0.05;
+          camera.position.lerp(cameraTargetPosition, lerpFactor);
+          
+          const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+            new THREE.Matrix4().lookAt(camera.position, pictureTarget.normalize(), camera.up)
+          );
+          camera.quaternion.slerp(targetQuaternion, lerpFactor);
+
+        } catch (e) {
+          console.warn('Tour camera snap failed, falling back to normal follow.', e);
+        }
+
+      } 
+      else {
+        // ====================================================================
+        // ✅ STANDARD LOGIC: When moving, use the normal follow-cam.
+        // This logic is correct for following the player.
+        // ====================================================================
+        let cameraLookTarget = playerLookAtPoint.clone();
+
+        const idealOffset = new THREE.Vector3(0, 0, -3.0).applyQuaternion(tpView.model.quaternion);
+        const idealPos = playerLookAtPoint.clone().add(idealOffset);
+        let finalPos = idealPos.clone();
+
+        // Camera collision logic (unchanged)
+        const fovRadians = THREE.MathUtils.degToRad(camera.fov);
+        const near = camera.near;
+        const halfHeight = Math.tan(fovRadians * 0.5) * near;
+        const halfWidth = halfHeight * camera.aspect;
+        const camRadius = Math.sqrt(halfWidth * halfWidth + halfHeight * halfHeight);
+        const raycaster = new THREE.Raycaster(playerLookAtPoint, idealOffset.clone().normalize(), 1e-14, idealOffset.length());
+        const intersects = raycaster.intersectObjects(tpView.bvhMeshes, true);
+        if (intersects.length > 0) {
+          finalPos.copy(intersects[0].point).sub(raycaster.ray.direction.clone().multiplyScalar(camRadius + 0.05));
+        }
+        
+        if (tpView.isTouring && tpView.isViewingPicture){
+          tpView._cameraSnapped = false;
+          camera.position.copy(finalPos);
+          camera.lookAt(cameraLookTarget);
+          return;
+        }else{
+          // Smooth follow position
+          const lerp = 0.05;
+          if (!tpView._cameraSnapped) {
+            camera.position.copy(finalPos);
+            tpView._cameraSnapped = true;
+          } else {
+            camera.position.lerp(finalPos, lerp);
+          }
+
+          // Smooth follow orientation
+          const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+            new THREE.Matrix4().lookAt(camera.position, cameraLookTarget, camera.up)
+          );
+          camera.quaternion.slerp(targetQuaternion, 0.05);
+          }
+      }
+    }
+  }
+
+  // ---------------- FP VIEW ----------------
+  if (physiscsReady && activePlayer === 'fp' && fpView) {
+    for (let i = 0; i < STEPS_PER_FRAME; i++) {
+      fpView.update(frameDelta, camYaw, camPitch);
+    }
+    if (fpView.isTouring && fpView.followAgent) {
+      const npcEntry = fpView.followAgent;
+      // Prefer the agent's interpolated position when available (most accurate)
+      let npcPosVec = null;
+      if (npcEntry.agent) {
+        try {
+          const apos = (typeof npcEntry.agent.interpolatedPosition === 'function')
+            ? npcEntry.agent.interpolatedPosition()
+            : (typeof npcEntry.agent.position === 'function' ? npcEntry.agent.position() : npcEntry.agent.position);
+          npcPosVec = new THREE.Vector3(apos.x ?? apos[0], apos.y ?? apos[1], apos.z ?? apos[2]);
+        } catch (e) { npcPosVec = null; }
+      }
+      if (!npcPosVec && npcEntry.model) {
+        npcPosVec = new THREE.Vector3();
+        npcEntry.model.getWorldPosition(npcPosVec);
+      }
+
+      if (npcPosVec) {
+        const forward = new THREE.Vector3();
+        if (npcEntry.model) {
+          npcEntry.model.getWorldDirection(forward);
+          forward.y = 0;
+          if (forward.lengthSq() < 1e-6) forward.set(0,0,1);
+          forward.normalize();
+        } else if (npcEntry.agent) {
+          try {
+            const vel = (typeof npcEntry.agent.velocity === 'function') ? npcEntry.agent.velocity() : npcEntry.agent.velocity;
+            forward.set((vel?.x ?? vel?.[0]) ?? 0, 0, (vel?.z ?? vel?.[2]) ?? 0);
+            if (forward.lengthSq() < 1e-6) forward.set(0,0,1);
+            else forward.normalize();
+          } catch (e) { forward.set(0,0,1); }
+        } else {
+          forward.set(0,0,1);
+        }
+
+        const camPos = npcPosVec.clone()
+          .add(new THREE.Vector3(0, 1.6, 0)) // eye height
+          .add(forward.clone().multiplyScalar(-2.0)); // 2m behind
+
+        fpView.camera.position.lerp(camPos, 0.12);
+        fpView.camera.lookAt(npcPosVec.clone().add(new THREE.Vector3(0, 1.6, 0)));
+      }
+    }
+  }
+
+
+
+
+  
 
   // ---------------- MIXERS ----------------
   if (mixer) mixer.update(frameDelta);
@@ -1770,154 +1819,7 @@ export function initializeGame(targetContainerId = 'model-container') {
             activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
         }
 
-        // Toogle automatic agent room tour
-        // if (event.code === 'KeyI') {
-        //   const navQ = getNavQuery() ?? navQuery;
-        //   if (!navQ) {
-        //     console.warn('Cannot start tour: navQuery not ready');
-        //   } else if (!npcAgents || npcAgents.length === 0) {
-        //     console.warn('No NPCs available to tour with');
-        //   } else {
-        //     const npc = npcAgents[0];
-        //     if (!npc) return;
-
-        //     if (npc.state?.touring) {
-        //       // --- STOP TOUR ---
-        //       stopAgentTour(npc);
-        //       npc.state.touring = false;
-        //       tpView.isTouring = false;
-
-        //       // stop TP crowd agent & visual following
-        //       if (tpView) {
-        //         try {
-        //           if (typeof tpView.stopFollowAgent === 'function'){
-        //             tpView.stopFollowAgent();
-        //             tpView.isTouring = false;
-        //             npc.state.touring = false;
-        //           }
-        //         } catch (e) {
-        //           console.warn('Error while stopping TP follow agent:', e);
-        //         }
-
-        //         try {
-        //           if (tpView.crowdAgent) {
-        //             // prefer using CrowdManager.removeAgent if available, otherwise call crowd.removeAgent
-        //             if (typeof removeAgent === 'function') {
-        //               removeAgent(tpView.crowdAgent);
-        //             } else if (crowd && typeof crowd.removeAgent === 'function') {
-        //               crowd.removeAgent(tpView.crowdAgent);
-        //             }
-        //           }
-        //         } catch (e) {
-        //           console.warn('Failed to remove TP crowd agent cleanly:', e);
-        //         }
-        //         tpView.crowdAgent = null;
-        //       }
-        //       console.info('Stopped museum tour for NPC + TP');
-        //     } else {
-        //       // --- START TOUR ---
-        //       startAgentTour(npc, pictureFramesArray, navQ, {
-        //         loop: false,
-        //         holdTime: 3.0,
-        //         desiredDistance: 2.0,
-        //         gait: 'walk',
-        //         targetsMap: tourTargetsMap
-        //       });
-        //       npc.state = npc.state || {};
-        //       npc.state.touring = true;
-        //       tpView.isTouring = true;
-        //       console.info('Started museum tour for NPC (I pressed)');
-
-        //       // --- FORCE RESET POSITIONS ---
-        //       const npcStartPos = npc.model?.position.clone();
-        //       if (npcStartPos) {
-        //         // Snap NPC model
-        //         npc.model.position.copy(npcStartPos);
-
-        //         // Snap TP agent + model exactly to NPC start
-        //         if (tpView) {
-        //           if (tpView.crowdAgent) {
-        //             try {
-        //               if (typeof tpView.crowdAgent.teleport === 'function') {
-        //                 tpView.crowdAgent.teleport({ x: npcStartPos.x, y: npcStartPos.y, z: npcStartPos.z });
-        //               } else if (crowd && typeof crowd.teleportAgent === 'function') {
-        //                 crowd.teleportAgent(tpView.crowdAgent, { x: npcStartPos.x, y: npcStartPos.y, z: npcStartPos.z });
-        //               }
-        //             } catch (e) {
-        //               console.warn('Teleport failed, fallback manual sync', e);
-        //               tpView.crowdAgent.position = { x: npcStartPos.x, y: npcStartPos.y, z: npcStartPos.z };
-        //             }
-        //           }
-
-        //           tpView.model?.position.copy(npcStartPos);
-        //           tpView._updateCapsuleToModel?.();
-        //         }
-        //       }
-
-        //       // --- ADD TP TO CROWD ---
-        //       if (tpView && crowd) {
-        //         activateThirdPerson();
-        //         const followSide = Math.random() < 0.5 ? -1 : 1; // random left/right
-        //         console.log(`TP will follow on the ${followSide === -1 ? 'left' : 'right'} side of NPC`);
-
-        //         if (!tpView.crowdAgent) {
-        //           // addThirdPersonToCrowd should set tpView.crowdAgent to a resolved agent object when possible
-        //           const agentResult = addThirdPersonToCrowd(scene, crowd, tpView);
-        //           console.log('TP crowd agent creation returned:', agentResult);
-
-        //           // If addThirdPersonToCrowd returned a numeric id and tpView.crowdAgent is still falsy,
-        //           // try resolving the agent object from the crowd API so tpView.syncFromCrowd/updateFollow can call .position()
-        //           if (!tpView.crowdAgent && typeof agentResult === 'number' && crowd && typeof crowd.getAgent === 'function') {
-        //             try {
-        //               const resolved = crowd.getAgent(agentResult);
-        //               if (resolved) {
-        //                 tpView.setCrowdAgent(resolved);
-        //                 console.log('Resolved TP crowd agent object from numeric id:', resolved);
-        //               } else {
-        //                 console.warn('Could not resolve TP crowd agent object from id:', agentResult);
-        //               }
-        //             } catch (e) {
-        //               console.warn('Error resolving TP crowd agent from id:', e);
-        //             }
-        //           }
-        //         }
-                
-
-        //         // make TP share the same target as NPC (initial)
-        //         try {
-        //           if (tpView.crowdAgent && npc.model && navQ && typeof setAgentTarget === 'function') {
-        //             const npcPos = npc.model.position;
-        //             setAgentTarget(tpView.crowdAgent, { x: npcPos.x, y: npcPos.y, z: npcPos.z }, navQ, { entry: null, requestedGait: 'walk' });
-        //           } else {
-        //             // fallback: attempt crowd.requestMoveTarget if no setAgentTarget helper
-        //             if (tpView.crowdAgent && npc.model && crowd && typeof crowd.requestMoveTarget === 'function') {
-        //               try {
-        //                 const npcPos = npc.model.position;
-        //                 crowd.requestMoveTarget(tpView.crowdAgent, { x: npcPos.x, y: npcPos.y, z: npcPos.z });
-        //               } catch (e) {
-        //                 console.warn('Fallback crowd.requestMoveTarget failed:', e);
-        //               }
-        //             }
-        //           }
-        //         } catch (e) {
-        //           console.warn('Failed to set initial TP agent target:', e);
-        //         }
-
-        //         // start the TP visual follow (so the visible model & camera follow the agent)
-        //         try {
-        //           if (typeof tpView.startFollowAgent === 'function') {
-        //             tpView.startFollowAgent(npc, { offsetBehind: 1, smoothing: 0.12, heightOffset: 0.0, side: followSide });
-        //           } else {
-        //             console.warn('tpView.startFollowAgent not available');
-        //           }
-        //         } catch (e) {
-        //           console.warn('Error calling tpView.startFollowAgent:', e);
-        //         }
-        //       }
-        //     }
-        //   }
-        // }
-
+        // 'I' key to start/stop tour with first NPC
         if (event.code === 'KeyI') {
           const navQ = getNavQuery() ?? navQuery;
           if (!navQ) {
@@ -1928,184 +1830,258 @@ export function initializeGame(targetContainerId = 'model-container') {
             const npc = npcAgents[0];
             if (!npc) return;
 
+            // if (npc.state?.touring) {
+            //   // --- STOP TOUR ---
+            //   stopAgentTour(npc);
+            //   npc.state.touring = false;
+            //   tpView.isTouring = false;
+            //   tpView.isViewingPicture = false;
+            //   fpView.isTouring = false;
+
+
+            //   if (tpView) {
+            //     try {
+            //       if (typeof tpView.stopFollowAgent === 'function') {
+            //         tpView.stopFollowAgent();
+            //         npc.state.touring = false;
+            //       }
+            //     } catch (e) {
+            //       console.warn('Error while stopping TP follow agent:', e);
+            //     }
+
+            //     try {
+            //       if (tpView.crowdAgent) {
+            //         if (typeof removeAgent === 'function') {
+            //           removeAgent(tpView.crowdAgent);
+            //         } else if (crowd && typeof crowd.removeAgent === 'function') {
+            //           crowd.removeAgent(tpView.crowdAgent);
+            //         }
+            //       }
+            //     } catch (e) {
+            //       console.warn('Failed to remove TP crowd agent cleanly:', e);
+            //     }
+            //     tpView.crowdAgent = null;
+            //   } else if (fpView) {
+            //     typeof fpView.stopFollowAgent === 'function' ? fpView.stopFollowAgent() : fpView.isTouring = false;
+            //     fpView.followAgent = null;
+            //   }
+            // } else {
+            //     // --- START TOUR ---
+            //     if (tpView && activePlayer === 'tp') {
+            //       startAgentTour(npc, pictureFramesArray, navQ, {
+            //           loop: false,
+            //           holdTime: 3.0,
+            //           desiredDistance: 2.0,
+            //           gait: 'walk',
+            //           targetsMap: tourTargetsMap
+            //         });
+            //         tpView.isTouring = true;
+            //     } else if (fpView && activePlayer === 'fp') {
+            //       startAgentTour(npc, pictureFramesArray, navQ, {
+            //           loop: false,
+            //           holdTime: 3.0,
+            //           desiredDistance: 2.0,
+            //           gait: 'walk',
+            //           targetsMap: tourTargetsMap
+            //         });
+            //       fpView.isTouring = true;
+            //     }
+              
+            //     npc.state = npc.state || {};
+            //     npc.state.touring = true;
+            //     console.info('Started museum tour for NPC (I pressed)');
+
+            //   // --- TELEPORT TP TO NPC START POSITION ---
+            //   const npcStartPos = npc.model?.position.clone();
+            //   if (npcStartPos && tpView) {
+            //     // Always snap TP model to NPC base position first
+            //     tpView.model?.position.copy(npcStartPos);
+            //     tpView._updateCapsuleToModel?.();
+
+            //     // === Compute left & right offsets relative to NPC ===
+            //     const forward = new THREE.Vector3();
+            //     npc.model.getWorldDirection(forward);
+            //     forward.y = 0;
+            //     forward.normalize();
+
+            //     const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+            //     const sideDist = 1.2;   // meters to the side
+            //     const behindDist = 0.5; // slight behind offset
+
+            //     const basePos = npcStartPos.clone().add(forward.clone().multiplyScalar(-behindDist));
+
+            //     const rightPos = basePos.clone().add(right.clone().multiplyScalar(sideDist));
+            //     const leftPos  = basePos.clone().add(right.clone().multiplyScalar(-sideDist));
+
+            //     // === Clearance check using raycast to floor ===
+            //     function checkClear(pos, npcPos) {
+            //       const meshes = tpView.bvhMeshes ?? bvhMeshList ?? [];
+
+            //       // 1. Floor check (raycast downward)
+            //       const origin = pos.clone().add(new THREE.Vector3(0, 2, 0));
+            //       const downRay = new THREE.Raycaster(origin, new THREE.Vector3(0, -1, 0), 0, 5);
+            //       const floorHits = downRay.intersectObjects(meshes, true);
+            //       if (floorHits.length === 0) return -Infinity; // invalid, no ground
+
+            //       // 2. Side clearance check (raycast from NPC to candidate pos)
+            //       const dir = pos.clone().sub(npcPos).setY(0).normalize();
+            //       const sideRay = new THREE.Raycaster(npcPos.clone().add(new THREE.Vector3(0, 1, 0)), dir, 0, pos.distanceTo(npcPos));
+            //       const sideHits = sideRay.intersectObjects(meshes, true);
+
+            //       // If blocked by obstacle before reaching candidate → mark as bad
+            //       if (sideHits.length > 0 && sideHits[0].distance < pos.distanceTo(npcPos) - 0.3) {
+            //         return -Infinity;
+            //       }
+
+            //       // Return floor height diff (smaller = flatter = better)
+            //       const floorY = floorHits[0].point.y;
+            //       return -Math.abs(floorY - pos.y);
+            //     }
+            //     // Score left/right positions
+            //     const rightClear = checkClear(rightPos, npcStartPos);
+            //     const leftClear = checkClear(leftPos, npcStartPos);
+
+            //     let chosenPos, chosenSide;
+            //     if (rightClear > leftClear) {
+            //       chosenPos = rightPos;
+            //       chosenSide = 1;
+            //     } else if (leftClear > rightClear) {
+            //       chosenPos = leftPos;
+            //       chosenSide = -1;
+            //     } else {
+            //       if (Math.random() < 0.5) {
+            //         chosenPos = rightPos;
+            //         chosenSide = 1;
+            //       } else {
+            //         chosenPos = leftPos;
+            //         chosenSide = -1;
+            //       }
+            //     }
+
+            //     // Teleport TP model to chosen side
+            //     tpView.model?.position.copy(chosenPos);
+            //     tpView._updateCapsuleToModel?.();
+
+            //     if (tpView.crowdAgent) {
+            //       try {
+            //         const targetPos = { x: chosenPos.x, y: chosenPos.y, z: chosenPos.z };
+            //         if (typeof tpView.crowdAgent.teleport === 'function') {
+            //           tpView.crowdAgent.teleport(targetPos);
+            //         } else if (crowd && typeof crowd.teleportAgent === 'function') {
+            //           crowd.teleportAgent(tpView.crowdAgent, targetPos);
+            //         } else {
+            //           tpView.crowdAgent.position = targetPos;
+            //         }
+            //       } catch (e) {
+            //         console.warn('Teleport failed, fallback manual sync', e);
+            //       }
+            //     }
+
+            //     // --- ADD TP TO CROWD ---
+            //     if (tpView && crowd) {
+            //       activateThirdPerson();
+
+            //       if (!tpView.crowdAgent) {
+            //         const agentResult = addThirdPersonToCrowd(scene, crowd, tpView);
+            //         if (!tpView.crowdAgent && typeof agentResult === 'number' && crowd?.getAgent) {
+            //           const resolved = crowd.getAgent(agentResult);
+            //           if (resolved) tpView.setCrowdAgent(resolved);
+            //         }
+            //       }
+
+            //       // Make TP share NPC’s target
+            //       try {
+            //         if (tpView.crowdAgent && npc.model && navQ && typeof setAgentTarget === 'function') {
+            //           const npcPos = npc.model.position;
+            //           setAgentTarget(tpView.crowdAgent, { x: npcPos.x, y: npcPos.y, z: npcPos.z }, navQ, {
+            //             entry: null,
+            //             requestedGait: 'walk'
+            //           });
+            //         }
+            //       } catch (e) {
+            //         console.warn('Failed to set initial TP agent target:', e);
+            //       }
+
+            //       // Start TP visual follow
+            //       try {
+            //         if (typeof tpView.startFollowAgent === 'function') {
+            //           tpView.startFollowAgent(npc, {
+            //             offsetBehind: behindDist,
+            //             smoothing: 0.12,
+            //             heightOffset: 0.0,
+            //             side: chosenSide
+            //           });
+            //         }
+            //       } catch (e) {
+            //         console.warn('Error calling tpView.startFollowAgent:', e);
+            //       }
+            //     }else if (fpView && crowd ){
+            //       activateFirstPerson();
+            //     }
+            //   } else if (npcStartPos && fpView) {
+            //     activateFirstPerson();
+            //     fpView.setFollowAgent(npc);
+            //     fpView.isTouring = true;
+            //     camYaw = 0;
+            //     camPitch = 0;
+            //   }
+            // }
+
             if (npc.state?.touring) {
-              // --- STOP TOUR ---
-              stopAgentTour(npc);
-              npc.state.touring = false;
-              tpView.isTouring = false;
+            // --- STOP TOUR ---
+            console.log("Stopping tour...");
+            stopAgentTour(npc); // This function in CrowdManager handles resetting NPC state
+            npc.state.touring = false;
+            
+            if (tpView) tpView.isTouring = false;
+            if (fpView) fpView.isTouring = false;
 
-              if (tpView) {
-                try {
-                  if (typeof tpView.stopFollowAgent === 'function') {
+            if (activePlayer === 'tp' && tpView) {
+                if (typeof tpView.stopFollowAgent === 'function') {
                     tpView.stopFollowAgent();
-                    tpView.isTouring = false;
-                    npc.state.touring = false;
-                  }
-                } catch (e) {
-                  console.warn('Error while stopping TP follow agent:', e);
                 }
-
-                try {
-                  if (tpView.crowdAgent) {
-                    if (typeof removeAgent === 'function') {
-                      removeAgent(tpView.crowdAgent);
-                    } else if (crowd && typeof crowd.removeAgent === 'function') {
-                      crowd.removeAgent(tpView.crowdAgent);
-                    }
-                  }
-                } catch (e) {
-                  console.warn('Failed to remove TP crowd agent cleanly:', e);
+                // Removing the crowd agent is optional, but if you do, it should be done correctly
+                // For now, let's just stop the follow behavior.
+            } else if (activePlayer === 'fp' && fpView) {
+                // ✅ CORRECTED LOGIC: Properly call stopFollowAgent for fpView.
+                if (typeof fpView.stopFollowAgent === 'function') {
+                    fpView.stopFollowAgent();
                 }
-                tpView.crowdAgent = null;
-              }
-              console.info('Stopped museum tour for NPC + TP');
-            } else {
-              // --- START TOUR ---
-              startAgentTour(npc, pictureFramesArray, navQ, {
+            }
+        } else {
+            // --- START TOUR ---
+            console.log("Starting tour...");
+            npc.state = npc.state || {};
+            npc.state.touring = true;
+            
+            startAgentTour(npc, pictureFramesArray, navQ, {
                 loop: false,
                 holdTime: 3.0,
                 desiredDistance: 2.0,
                 gait: 'walk',
                 targetsMap: tourTargetsMap
-              });
-              npc.state = npc.state || {};
-              npc.state.touring = true;
-              tpView.isTouring = true;
-              console.info('Started museum tour for NPC (I pressed)');
+            });
 
-              // --- TELEPORT TP TO NPC START POSITION ---
-              const npcStartPos = npc.model?.position.clone();
-              if (npcStartPos && tpView) {
-                // Always snap TP model to NPC base position first
-                tpView.model?.position.copy(npcStartPos);
-                tpView._updateCapsuleToModel?.();
-
-                // === Compute left & right offsets relative to NPC ===
-                const forward = new THREE.Vector3();
-                npc.model.getWorldDirection(forward);
-                forward.y = 0;
-                forward.normalize();
-
-                const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-                const sideDist = 1.2;   // meters to the side
-                const behindDist = 0.5; // slight behind offset
-
-                const basePos = npcStartPos.clone().add(forward.clone().multiplyScalar(-behindDist));
-
-                const rightPos = basePos.clone().add(right.clone().multiplyScalar(sideDist));
-                const leftPos  = basePos.clone().add(right.clone().multiplyScalar(-sideDist));
-
-                // === Clearance check using raycast to floor ===
-                function checkClear(pos, npcPos) {
-                  const meshes = tpView.bvhMeshes ?? bvhMeshList ?? [];
-
-                  // 1. Floor check (raycast downward)
-                  const origin = pos.clone().add(new THREE.Vector3(0, 2, 0));
-                  const downRay = new THREE.Raycaster(origin, new THREE.Vector3(0, -1, 0), 0, 5);
-                  const floorHits = downRay.intersectObjects(meshes, true);
-                  if (floorHits.length === 0) return -Infinity; // invalid, no ground
-
-                  // 2. Side clearance check (raycast from NPC to candidate pos)
-                  const dir = pos.clone().sub(npcPos).setY(0).normalize();
-                  const sideRay = new THREE.Raycaster(npcPos.clone().add(new THREE.Vector3(0, 1, 0)), dir, 0, pos.distanceTo(npcPos));
-                  const sideHits = sideRay.intersectObjects(meshes, true);
-
-                  // If blocked by obstacle before reaching candidate → mark as bad
-                  if (sideHits.length > 0 && sideHits[0].distance < pos.distanceTo(npcPos) - 0.3) {
-                    return -Infinity;
-                  }
-
-                  // Return floor height diff (smaller = flatter = better)
-                  const floorY = floorHits[0].point.y;
-                  return -Math.abs(floorY - pos.y);
+            if (activePlayer === 'tp' && tpView) {
+                tpView.isTouring = true;
+                // The logic to add TP agent to crowd should also happen here if not already present
+                if (!tpView.crowdAgent) {
+                  addThirdPersonToCrowd(scene, crowd, tpView);
                 }
-
-
-                const rightClear = checkClear(rightPos, npcStartPos);
-                const leftClear = checkClear(leftPos, npcStartPos);
-
-                let chosenPos, chosenSide;
-                if (rightClear > leftClear) {
-                  chosenPos = rightPos;
-                  chosenSide = 1;
-                } else if (leftClear > rightClear) {
-                  chosenPos = leftPos;
-                  chosenSide = -1;
-                } else {
-                  if (Math.random() < 0.5) {
-                    chosenPos = rightPos;
-                    chosenSide = 1;
-                  } else {
-                    chosenPos = leftPos;
-                    chosenSide = -1;
-                  }
+                if (typeof tpView.startFollowAgent === 'function') {
+                    tpView.startFollowAgent(npc);
                 }
-
-                // Teleport TP model to chosen side
-                tpView.model?.position.copy(chosenPos);
-                tpView._updateCapsuleToModel?.();
-
-                if (tpView.crowdAgent) {
-                  try {
-                    const targetPos = { x: chosenPos.x, y: chosenPos.y, z: chosenPos.z };
-                    if (typeof tpView.crowdAgent.teleport === 'function') {
-                      tpView.crowdAgent.teleport(targetPos);
-                    } else if (crowd && typeof crowd.teleportAgent === 'function') {
-                      crowd.teleportAgent(tpView.crowdAgent, targetPos);
-                    } else {
-                      tpView.crowdAgent.position = targetPos;
-                    }
-                  } catch (e) {
-                    console.warn('Teleport failed, fallback manual sync', e);
-                  }
+            } else if (activePlayer === 'fp' && fpView) {
+                // ✅ CORRECTED LOGIC: Properly call setFollowAgent for fpView.
+                fpView.isTouring = true;
+                if (typeof fpView.setFollowAgent === 'function') {
+                    fpView.setFollowAgent(npc);
                 }
-
-                // --- ADD TP TO CROWD ---
-                if (tpView && crowd) {
-                  activateThirdPerson();
-
-                  if (!tpView.crowdAgent) {
-                    const agentResult = addThirdPersonToCrowd(scene, crowd, tpView);
-                    if (!tpView.crowdAgent && typeof agentResult === 'number' && crowd?.getAgent) {
-                      const resolved = crowd.getAgent(agentResult);
-                      if (resolved) tpView.setCrowdAgent(resolved);
-                    }
-                  }
-
-                  // Make TP share NPC’s target
-                  try {
-                    if (tpView.crowdAgent && npc.model && navQ && typeof setAgentTarget === 'function') {
-                      const npcPos = npc.model.position;
-                      setAgentTarget(tpView.crowdAgent, { x: npcPos.x, y: npcPos.y, z: npcPos.z }, navQ, {
-                        entry: null,
-                        requestedGait: 'walk'
-                      });
-                    }
-                  } catch (e) {
-                    console.warn('Failed to set initial TP agent target:', e);
-                  }
-
-                  // Start TP visual follow
-                  try {
-                    if (typeof tpView.startFollowAgent === 'function') {
-                      tpView.startFollowAgent(npc, {
-                        offsetBehind: behindDist,
-                        smoothing: 0.12,
-                        heightOffset: 0.0,
-                        side: chosenSide
-                      });
-                    }
-                  } catch (e) {
-                    console.warn('Error calling tpView.startFollowAgent:', e);
-                  }
-                }
-              }
             }
+        }
           }
         }
-
-
 
         if (activePlayer === 'fp' && fpView) {
             fpView.onKeyDown(event);
