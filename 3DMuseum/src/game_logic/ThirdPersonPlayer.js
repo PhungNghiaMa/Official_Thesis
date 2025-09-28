@@ -188,11 +188,29 @@ export default class ThirdPersonPlayer {
   }
 
   // Attach model. Optionally pass the GLTF so animations are prepared immediately.
-  attachModel(model, characterGLTF = null){
-    this.model = model;
-    if (characterGLTF) {
-      this.handleAnimation(model, characterGLTF);
-    }
+  attachModel(model, characterGLTF = null) {
+  this.model = model;
+  if (characterGLTF) {
+  this.handleAnimation(model, characterGLTF);
+  }
+
+  // keep smoothing aligned so there is no visual jump
+  if (this.playerCollider) this._smoothedPlayerPosition.copy(this.playerCollider.end);
+  if (this.tempQuaternion && this.model) this.tempQuaternion.copy(this.model.quaternion);
+
+  // If we already have a crowd agent (created earlier), align/teleport it to the model now
+  if (this.crowdAgent && this.model) {
+  try {
+  const p = this.model.position;
+  if (typeof this.crowdAgent.teleport === 'function') {
+  this.crowdAgent.teleport({ x: p.x, y: p.y, z: p.z });
+  } else if (this.crowdAgent.position) {
+  this.crowdAgent.position = { x: p.x, y: p.y, z: p.z };
+  }
+  } catch (e) {
+  console.warn("attachModel: failed to align crowdAgent to model", e);
+  }
+  }
   }
 
   setInitialRotationFromYaw(yaw) {
