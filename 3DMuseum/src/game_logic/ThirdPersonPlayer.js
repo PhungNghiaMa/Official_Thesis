@@ -26,6 +26,9 @@ export default class ThirdPersonPlayer {
     this._tmpMin = new THREE.Vector3();
     this._tmpMax = new THREE.Vector3();
 
+    this.isRoomTourActive = false;
+    this.crowdAgent = null;
+
     // Start position inside building (adjust as needed)
     const start = new THREE.Vector3(0, 2, 0);
     this.playerCollider = playerCollider ?? new Capsule(
@@ -50,7 +53,11 @@ export default class ThirdPersonPlayer {
     this.footOffset = 0;
 
     this.input = { forward: false, backward: false, left: false, right: false, run:false };
-    this.tempQuaternion = new THREE.Quaternion();
+    this.tempQuaternion = new THREE.Quaternion();    
+    this.isTouring = false;
+    this.followSide = 'right'; // 'left' or 'right';
+    this.isViewingPicture = false;
+
 
     // helpers
     this.tempBox = new THREE.Box3();
@@ -181,11 +188,29 @@ export default class ThirdPersonPlayer {
   }
 
   // Attach model. Optionally pass the GLTF so animations are prepared immediately.
-  attachModel(model, characterGLTF = null){
-    this.model = model;
-    if (characterGLTF) {
-      this.handleAnimation(model, characterGLTF);
-    }
+  attachModel(model, characterGLTF = null) {
+  this.model = model;
+  if (characterGLTF) {
+  this.handleAnimation(model, characterGLTF);
+  }
+
+  // keep smoothing aligned so there is no visual jump
+  if (this.playerCollider) this._smoothedPlayerPosition.copy(this.playerCollider.end);
+  if (this.tempQuaternion && this.model) this.tempQuaternion.copy(this.model.quaternion);
+
+  // If we already have a crowd agent (created earlier), align/teleport it to the model now
+  if (this.crowdAgent && this.model) {
+  try {
+  const p = this.model.position;
+  if (typeof this.crowdAgent.teleport === 'function') {
+  this.crowdAgent.teleport({ x: p.x, y: p.y, z: p.z });
+  } else if (this.crowdAgent.position) {
+  this.crowdAgent.position = { x: p.x, y: p.y, z: p.z };
+  }
+  } catch (e) {
+  console.warn("attachModel: failed to align crowdAgent to model", e);
+  }
+  }
   }
 
   setInitialRotationFromYaw(yaw) {
@@ -396,4 +421,223 @@ export default class ThirdPersonPlayer {
     this.updateAnimationState(speed, this.input);
   }
 
+  // ThirdPersonPlayer.js — inside class ThirdPersonPlayer
+  
+  startFollowAgent(npcEntry, options = {}) {
+    if (!npcEntry || !npcEntry.agent) {
+      console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
+      return false;
+    }
+
+    // new options: offsetSide, followSide (string 'left'|'right'), mode ('side'|'behind')
+    this._follow = {
+      entry: npcEntry,
+      smoothing: options.smoothing ?? 0.12,
+      offsetBehind: options.offsetBehind ?? 1.0,
+      offsetSide: options.offsetSide ?? 0.7,
+      heightOffset: options.heightOffset ?? 0.0,
+      mode: options.mode ?? 'side'
+    };
+
+    // accept either 'left'/'right' or fallback to existing state
+    this.followSide = options.followSide ?? (this.followSide || 'right');
+
+    // snap tp model to an initial follow pose (prefer a side position when mode==='side')
+    if (this.model && npcEntry.model) {
+      const ap = this._resolveAgentPosition(npcEntry.agent);
+      if (ap) {
+        const forward = npcEntry.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+        const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0) , forward).normalize();
+        const footOffset = this.footOffset ?? (this.model.userData?.footOffset ?? 0);
+
+        let desired = new THREE.Vector3(ap.x, ap.y + footOffset + (this._follow.heightOffset || 0), ap.z);
+
+        if (this._follow.mode === 'side') {
+          const sideMultiplier = (this.followSide === 'left') ? -1 : 1;
+          desired.add(right.clone().multiplyScalar((this._follow.offsetSide || 0.7) * sideMultiplier));
+          desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 0.12)));
+        } else {
+          // legacy behind behavior
+          desired.add(forward.clone().multiplyScalar(- (this._follow.offsetBehind || 1.0)));
+        }
+
+        this.model.position.copy(desired);
+        this.model.quaternion.copy(npcEntry.model.quaternion);
+        this._updateCapsuleToModel();
+        this._cameraSnapped = false;
+      }
+    }
+
+    this._follow.verticalVelocity = 0;
+    return true;
+  }
+
+
+  stopFollowAgent() {
+    this._follow = null;
+    this.isTouring = false;
+  }
+
+  isTouring() {
+    return this.isTouring;
+  }
+
+  // small helper: resolve agent position object -> {x,y,z}
+  _resolveAgentPosition(agent) {
+    if (!agent) return null;
+    try {
+      const p = (typeof agent.interpolatedPosition === 'function')
+                ? agent.interpolatedPosition()
+                : (typeof agent.position === 'function' ? agent.position() : agent.position);
+      if (!p) return null;
+      return { x: p.x ?? p[0], y: p.y ?? p[1], z: p.z ?? p[2] };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // keep the player capsule aligned to the model position
+  _updateCapsuleToModel() {
+    if (!this.playerCollider || !this.model) return;
+    const segLen = this.playerCollider.end.y - this.playerCollider.start.y;
+    const bottomY = this.model.position.y + this.playerCollider.radius + 0.02;
+    this.playerCollider.start.set(this.model.position.x, bottomY, this.model.position.z);
+    this.playerCollider.end.set(this.model.position.x, bottomY + segLen, this.model.position.z);
+    this._smoothedPlayerPosition.copy(this.playerCollider.end);
+  }
+  // Call this each frame if following an agent
+  updateFollow(delta) {
+        if (!this.crowdAgent || !this.model || !this._follow) return;
+
+        const agentPosData = this._resolveAgentPosition(this.crowdAgent);
+        if (!agentPosData) return;
+        const agentPos = new THREE.Vector3(agentPosData.x, agentPosData.y, agentPosData.z);
+
+        let vel;
+        try {
+            vel = this.crowdAgent.velocity ? this.crowdAgent.velocity() : null;
+        } catch (e) { vel = null; }
+        const vx = vel?.x ?? 0;
+        const vz = vel?.z ?? 0;
+        const speed = Math.hypot(vx, vz);
+
+        let targetPos = agentPos.clone();
+        if (this.bvhMeshes && this.bvhMeshes.length > 0) {
+            try {
+                const downRay = new THREE.Raycaster(
+                    new THREE.Vector3(agentPos.x, this.model.position.y + 2.0, agentPos.z),
+                    new THREE.Vector3(0, -1, 0)
+                );
+                const hits = downRay.intersectObjects(this.bvhMeshes, true);
+                if (hits.length > 0) targetPos.y = hits[0].point.y;
+            } catch (e) { /* ignore */ }
+        }
+        targetPos.y += this.footOffset;
+
+        const posLerpFactor = 0.12;
+        this.model.position.lerp(targetPos, posLerpFactor);
+        this._updateCapsuleToModel();
+
+        // --- HYBRID ROTATION LOGIC (The Fix) ---
+        const entry = this._follow.entry;
+        const isNpcIdleAtTourStop = entry?.state?.tourFacingQuat && speed < 0.1;
+
+        if (isNpcIdleAtTourStop) {
+            // This is the key change: when stopped, snap to the target rotation.
+            const targetQuat = entry.state.tourFacingQuat;
+            this.model.quaternion.copy(targetQuat);
+        } else if (speed > 0.1) {
+            // When moving, continue to smoothly rotate.
+            const targetYaw = Math.atan2(vx, vz); // slight left offset for better side-follow
+            const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0))
+            const rotSlerpFactor = 0.12;
+            this.model.quaternion.slerp(targetQuat, rotSlerpFactor);
+        }
+
+        if (this.tempQuaternion) {
+          const camSlerpFactor = 0.12; // Slower smoothing for camera
+          this.tempQuaternion.slerp(this.model.quaternion, camSlerpFactor);
+        }
+
+        const isRunning = speed > 2.5;
+        this.updateAnimationState(speed, { run: isRunning });
+    }
+
+  setCrowdAgent(agent) {
+    this.crowdAgent = agent;
+  }
+
+syncFromCrowd() {
+  if (!this.crowdAgent || !this.model) return;
+
+  // --- 1. Get Agent's Position ---
+  let agentPosData;
+  try {
+    // Use the smoother interpolated position if available
+    agentPosData = this.crowdAgent.interpolatedPosition ?? this.crowdAgent.position();
+  } catch (e) {
+    agentPosData = this.crowdAgent.position();
+  }
+  if (!agentPosData) return;
+
+  const agentPos = new THREE.Vector3(agentPosData.x, agentPosData.y, agentPosData.z);
+
+  // --- 2. Snap Vertically to the Visual Floor ---
+  // This is crucial to prevent floating. It's the same logic used for NPCs.
+  let targetPos = agentPos.clone();
+  let snappedToBVH = false;
+
+  if (this.bvhMeshes && this.bvhMeshes.length > 0) {
+    try {
+      const downOrigin = new THREE.Vector3(agentPos.x, agentPos.y + 2.0, agentPos.z);
+      const downRay = new THREE.Raycaster(downOrigin, new THREE.Vector3(0, -1, 0));
+      const hits = downRay.intersectObjects(this.bvhMeshes, true);
+      if (hits && hits.length > 0) {
+        targetPos.y = hits[0].point.y;
+        snappedToBVH = true;
+      }
+    } catch (e) { /* Ignore raycast errors */ }
+  }
+
+  // If we couldn't snap to a mesh, use the agent's navmesh height as a fallback.
+  if (!snappedToBVH) {
+    targetPos.y = agentPos.y;
+  }
+  // Apply the foot offset to place the model's feet on the ground.
+  targetPos.y += this.footOffset;
+
+
+  // --- 3. Smoothly Apply Position to the Model ---
+  // A high lerp factor makes the player feel responsive to the agent's movement.
+  const posLerpFactor = 0.8;
+  this.model.position.x = targetPos.x;
+  this.model.position.z = targetPos.z;
+  this.model.position.y = THREE.MathUtils.lerp(this.model.position.y, targetPos.y, posLerpFactor);
+
+  // --- 4. Get Agent's Velocity for Rotation and Animation ---
+  let vel;
+  try {
+    vel = this.crowdAgent.velocity();
+  } catch (e) {
+    vel = null;
+  }
+  const vx = vel?.x ?? 0;
+  const vz = vel?.z ?? 0;
+  const speed = Math.sqrt(vx * vx + vz * vz);
+
+  // --- 5. Apply Rotation ---
+  // Make the model face the direction it's moving.
+  if (speed > 1e-3) {
+    const targetYaw = Math.atan2(vx, vz);
+    const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+    // Slerp for smooth turning.
+    this.model.quaternion.slerp(targetQuat, 0.15);
+  }
+
+  // --- 6. Update Animation ---
+  // Use the agent's speed to decide whether to play the walk or run animation.
+  const isRunning = speed > (2.4 * 1.1); // A little higher than walk speed
+  this.updateAnimationState(speed, { run: isRunning });
 }
+}
+

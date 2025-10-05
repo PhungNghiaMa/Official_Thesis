@@ -49,57 +49,6 @@ export function addAgent(position, agentParams = {}, userData = {}) {
   return agent;
 }
 
-// CrowdManager.js — replace / update setAgentTarget
-// CrowdManager.js
-// export function setAgentTarget(agentId, targetPosition, navQuery, options = {}) {
-//   if (!crowd || !navQuery || !agentId || !targetPosition) return;
-//   const { entry = null, requestedGait = null, pathLength = null } = options;
-
-//   // snap to navmesh
-//   const closest = navQuery.findClosestPoint(targetPosition);
-//   if (!closest?.point) {
-//     console.warn('setAgentTarget: clicked point not on navmesh', targetPosition);
-//     return;
-//   }
-
-//   try {
-//     // resolve agent handle
-//     let agentHandle = null;
-//     if (typeof agentId === 'number') agentHandle = crowd.getAgent(agentId);
-//     else agentHandle = agentId; // assume agent object
-
-//     if (!agentHandle) {
-//       const stored = Array.from(agents.values()).find(a => a.agent === agentId || a.model === agentId);
-//       if (stored) agentHandle = stored.agent;
-//     }
-//     if (!agentHandle) {
-//       console.warn('setAgentTarget: agent handle not found for', agentId);
-//       return;
-//     }
-
-//     // request move
-//     if (typeof agentHandle.requestMoveTarget === 'function') {
-//       agentHandle.requestMoveTarget(closest.point);
-//     } else if (typeof agentId === 'number') {
-//       const a = crowd.getAgent(agentId);
-//       if (a && typeof a.requestMoveTarget === 'function') a.requestMoveTarget(closest.point);
-//     }
-
-//     // record gait state
-//     if (entry) {
-//       entry.state = entry.state || {};
-//       if (requestedGait) {
-//         entry.state.requestedGait = requestedGait;
-//       } else if (pathLength != null) {
-//         entry.state.requestedGait = pathLength >= 4.0 ? 'run' : 'walk';
-//       }
-//     }
-
-//     console.log('🎯 Agent target set to', closest.point);
-//   } catch (e) {
-//     console.warn('setAgentTarget failed:', e);
-//   }
-// }
 
 export function setAgentTarget(agentId, targetPosition, navQuery, options = {}) {
   if (!crowd || !navQuery || !agentId || !targetPosition) return;
@@ -211,94 +160,6 @@ function resolveEntry(agentEntry){
 }
 
 
-function findNavPointNearPictureMesh(PictureMesh, navQuery, opts = {}, agentOrPos = null) {
-  const { desiredDistance = TOUR_DEFAULT.desiredDistance, fanSteps = TOUR_DEFAULT.fanSteps, step = 0.25, maxSearch = 4.0, maxSnapDist = 2.0 } = opts;
-  if (!PictureMesh || !navQuery) return null;
-
-  // compute bounding box center in world-space (more reliable than mesh.position)
-  let meshFaceWorld = new THREE.Vector3();
-  try {
-    const bbox = new THREE.Box3().setFromObject(PictureMesh);
-    meshFaceWorld.copy(bbox.getCenter(new THREE.Vector3()));
-  } catch (e) {
-    PictureMesh.getWorldPosition(meshFaceWorld);
-  }
-
-  // compute a robust probe Y (navmesh Y)
-  let probeY = null;
-  try {
-    const sample = navQuery.findClosestPoint({ x: meshFaceWorld.x, y: meshFaceWorld.y + 5.0, z: meshFaceWorld.z });
-    if (sample?.point && typeof sample.point.y === 'number') probeY = sample.point.y;
-  } catch (e) {}
-  if (probeY == null) probeY = meshFaceWorld.y ?? 1.5;
-
-  // compute a reasonable forward vector (world)
-  const localForward = new THREE.Vector3();
-  try {
-    PictureMesh.getWorldDirection(localForward);
-    localForward.y = 0;
-    if (localForward.lengthSq() < 1e-6) localForward.set(0, 0, 1);
-    localForward.normalize();
-  } catch (e) {
-    localForward.set(0, 0, 1);
-  }
-
-  // candidate directly in front of picture
-  const directCandidate = {
-    x: meshFaceWorld.x - localForward.x * desiredDistance,
-    y: probeY,
-    z: meshFaceWorld.z - localForward.z * desiredDistance
-  };
-
-  // helper to probe candidate by returning navQuery.findClosestPoint(candidate)
-  function probeCandidate(candidate) {
-    try {
-      const res = navQuery.findClosestPoint(candidate);
-      if (!res || !res.point) return null;
-      // quick snap guard (avoid huge snaps)
-      const candVec = new THREE.Vector3(candidate.x, candidate.y, candidate.z);
-      const navVec = new THREE.Vector3(res.point.x, res.point.y, res.point.z);
-      if (navVec.distanceTo(candVec) > maxSnapDist) return null;
-      // quick path check: see if there is a path from a start (we use sample under mesh)
-      const startRes = navQuery.findClosestPoint({ x: meshFaceWorld.x, y: probeY, z: meshFaceWorld.z });
-      const startPoint = startRes?.point ?? { x: meshFaceWorld.x, y: probeY, z: meshFaceWorld.z };
-      const pathRes = navQuery.computePath(startPoint, res.point);
-      if (pathRes && pathRes.success) return res;
-      return null;
-    } catch (e) { return null; }
-  }
-
-  // try direct candidate first
-  let ok = probeCandidate(directCandidate);
-  if (ok) return ok;
-
-  // outward fan search (increasing radius around meshFaceWorld)
-  for (let d = desiredDistance + step; d <= maxSearch; d += step) {
-    for (let i = 0; i < fanSteps; i++) {
-      const angle = (i / fanSteps) * Math.PI * 2;
-      const cand = { x: meshFaceWorld.x + Math.cos(angle) * d, y: probeY, z: meshFaceWorld.z + Math.sin(angle) * d };
-      ok = probeCandidate(cand);
-      if (ok) return ok;
-    }
-  }
-
-  // final fallback: just try the closest point directly beneath the picture center
-  try {
-    const low = navQuery.findClosestPoint({ x: meshFaceWorld.x, y: probeY, z: meshFaceWorld.z });
-    if (low?.point) return low;
-  } catch (e) {}
-
-  // nothing found
-  console.warn('findNavPointNearPictureMesh: none found for', PictureMesh.name);
-  return null;
-}
-
-
-
-
-
-
-
 /**
  * Start a tour for agent/entry.
  * - agentEntry: the object returned by initNPC (recommended) OR the raw agent handle.
@@ -390,10 +251,6 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
     return true;
 }
 
-
-
-
-
 export function stopAgentTour(agentEntry) {
   const entry = resolveEntry(agentEntry);
   if (!entry || !entry.agent) return false;
@@ -404,6 +261,11 @@ export function stopAgentTour(agentEntry) {
   if (entry.state) {
     entry.state.preventRotationUntil = null;
     entry.state.tourFacingQuat = null;
+    entry.state.currentPictureMesh = null;
+    entry.state.mode = 'idle';
+    entry.state.requestedGait = null;
+    entry.state.isOnTour = false;
+    entry.state.atDestination = false;
   }
   return true;
 }
@@ -421,6 +283,10 @@ export function updateAgentTours(navQuery) {
 
       const entry = tour.entry ?? null;
       const model = entry?.model ?? (entry?.userData?.model ?? null);
+
+      if (entry && entry.state){
+        entry.state.mode = tour.status;
+      }
 
       // --- agent position (interpolated if available) ---
       let agentPosition;
@@ -459,13 +325,43 @@ export function updateAgentTours(navQuery) {
       if (tour.status === 'moving') {
         // arrival test
         const arrivalDist = (tour.arrivalDist ?? TOUR_DEFAULT.arrivalDist);
+        if (entry && entry.state) {
+          entry.state.currentPictureMesh = null;
+          entry.state.isOnTour = true;
+          entry.state.atDestination = false;
+          entry.state.isViewingPicture = false;
+        }
         if (dist <= arrivalDist) {
           console.warn('updateAgentTours: arrived at index', tour.index, 'for', current.pictureMesh?.name ?? '(unknown)', 'dist', dist.toFixed(3));
+          if (entry && entry.state){
+            entry.state.atDestination = true;
+            entry.state.currentPictureMesh = current.pictureMesh;
+            entry.state.isViewingPicture = true;
 
-          // clear any move target on the agent
+          }
+
+          // clear any move target on the agent (stop it immediately)
           try {
-            if (typeof agentHandle.resetMoveTarget === 'function') agentHandle.resetMoveTarget();
-            else if (typeof agentHandle.requestMoveTarget === 'function') agentHandle.requestMoveTarget(agentPos);
+            if (typeof agentHandle.resetMoveTarget === 'function') {
+              agentHandle.resetMoveTarget();
+            } else if (typeof agentHandle.requestMoveTarget === 'function') {
+              // requestMoveTarget to its current position is another way to stop it
+              agentHandle.requestMoveTarget(agentPos);
+            }
+
+            // ALSO make agent physically unable to continue by clamping speed/accel.
+            // Many crowd runtimes expose updateParameters/updateAgent params — try that.
+            try {
+              if (typeof agentHandle.updateParameters === 'function') {
+                agentHandle.updateParameters({
+                  maxSpeed: 0.0,
+                  maxAcceleration: 0.0
+                });
+              } else if (crowd && typeof crowd.requestMoveTarget === 'function') {
+                // As a fallback, requestMoveTarget to the current position via crowd API
+                try { crowd.requestMoveTarget(agentHandle, { x: agentPos.x, y: agentPos.y, z: agentPos.z }); } catch (e2) {}
+              }
+            } catch (eParams) { /* ignore parameter set failures */ }
           } catch (e) { /* ignore */ }
 
           // snap model vertically (if present)
@@ -480,7 +376,7 @@ export function updateAgentTours(navQuery) {
           const dir = new THREE.Vector3(faceW.x - agentPos.x, 0, faceW.z - agentPos.z);
           if (dir.lengthSq() > 1e-6 && model) {
             const yaw = Math.atan2(dir.x, dir.z);
-            const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
+            const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw - 0.8, 0));
             model.quaternion.copy(tq);
             if (!entry.state) entry.state = {};
             entry.state.tourFacingQuat = tq.clone();
@@ -501,6 +397,10 @@ export function updateAgentTours(navQuery) {
             entry.state.requestedGait = null;
           }
 
+          // Safety: also ensure the underlying crowd agent remains stopped for the
+          // duration of the hold so small pathing jitter doesn't re-trigger motion.
+          // (We already set updateParameters above to 0; schedule a restore later when we move.)
+
           continue; // done for this agent this frame
         }
 
@@ -508,7 +408,6 @@ export function updateAgentTours(navQuery) {
       } else if (tour.status === 'waiting') {
         // waiting for hold time to finish before moving to next target
         if (now >= (tour.nextActionTime ?? 0)) {
-          const prevIndex = tour.index;
           let nextIndex = tour.index + 1;
           if (nextIndex >= tour.queue.length) {
             if (tour.loop) nextIndex = 0;
@@ -519,6 +418,10 @@ export function updateAgentTours(navQuery) {
               if (entry && entry.state) {
                 entry.state.preventRotationUntil = null;
                 entry.state.tourFacingQuat = null;
+                entry.state.atDestination = false;
+                entry.state.isOnTour = false;
+                entry.state.currentPictureMesh = null;
+                entry.state.isViewingPicture = false;
               }
               continue;
             }
@@ -563,6 +466,69 @@ export function updateAgentTours(navQuery) {
       console.error('updateAgentTours: exception for agent:', ex);
     }
   } // end for
+}
+
+
+export function addThirdPersonToCrowd(scene, crowd, tpView) {
+if (!tpView) return null;
+
+// Prefer model position if available, else fall back to smoothed position or collider end.
+// We build a plain {x,y,z} because crowd API can accept both Vector3 or plain object.
+let posVec = null;
+if (tpView.model && tpView.model.position) posVec = tpView.model.position;
+else if (tpView._smoothedPlayerPosition) posVec = tpView._smoothedPlayerPosition;
+else if (tpView.playerCollider && tpView.playerCollider.end) posVec = tpView.playerCollider.end;
+else posVec = { x: 0, y: 1, z: 0 };
+
+const startPos = { x: posVec.x ?? posVec[0] ?? 0, y: posVec.y ?? posVec[1] ?? 1, z: posVec.z ?? posVec[2] ?? 0 };
+
+const agent = addAgent(startPos, {
+radius: 0.25,
+height: 1.8,
+maxSpeed: 2.4,
+maxAcceleration: 6.0,
+collisionQueryRange: 0.25,
+pathOptimizationRange: 50,
+separationWeight: 0.05,
+});
+
+if (!agent) {
+console.error("addThirdPersonToCrowd: Failed to add agent");
+return null;
+}
+
+// Resolve numeric id -> agent object when necessary
+let agentHandle = agent;
+if (typeof agent === 'number' && crowd && typeof crowd.getAgent === 'function') {
+try {
+const resolved = crowd.getAgent(agent);
+if (resolved) agentHandle = resolved;
+} catch (e) { /* ignore */ }
+}
+
+// Store onto tpView so updateFollow can use it.
+if (typeof tpView.setCrowdAgent === 'function') {
+tpView.setCrowdAgent(agentHandle);
+} else {
+tpView.crowdAgent = agentHandle;
+}
+
+// If the model already exists, align the crowd agent to avoid an initial desync.
+try {
+if (tpView.model && tpView.crowdAgent) {
+const tgt = tpView.model.position;
+if (typeof tpView.crowdAgent.teleport === 'function') {
+tpView.crowdAgent.teleport({ x: tgt.x, y: tgt.y, z: tgt.z });
+} else if (tpView.crowdAgent.position) {
+tpView.crowdAgent.position = { x: tgt.x, y: tgt.y, z: tgt.z };
+}
+}
+} catch (e) {
+console.warn("addThirdPersonToCrowd: failed to align tpView.crowdAgent to model", e);
+}
+
+console.log("addThirdPersonToCrowd: created TP crowd agent", agentHandle);
+return agentHandle;
 }
 
 
