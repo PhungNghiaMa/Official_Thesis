@@ -471,12 +471,12 @@ function initNPC(scene, navQuery, bvhMeshes) {
   const agent = addAgent(
     npcModel.position,
     {
-      radius: 0.05,
+      radius: 0.1,
       height: 2.0,
       maxAcceleration: 14.0,
       maxSpeed: 10.0,
       separationWeight: 0.0,
-      collisionQueryRange: 0.05,
+      collisionQueryRange: 0.25,
       pathOptimizationRange: 50,
     },
     { model: npcModel }
@@ -1620,11 +1620,6 @@ function animate() {
     }
   }
 
-
-
-
-  
-
   // ---------------- MIXERS ----------------
   if (mixer) mixer.update(frameDelta);
   if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.9);
@@ -1634,21 +1629,178 @@ function animate() {
 }
 
 
-// ------------------------
-// activateThirdPerson
-// ------------------------
-function activateThirdPerson() {
+// function activateThirdPerson() {
+//   activePlayer = 'tp';
+
+//   // Build / attach tpView if it was delayed previously
+//   if (tpViewLoadLate) {
+//     console.log("TP VIEW IS LOAD LATE")
+//     if (!tpViewExisted && character) {
+//       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
+//       tpView.buildBVHFromMeshes(bvhMeshList);
+//       tpView.handleAnimation(character.model, character.gltf);
+
+//       // snap smoothing state immediately
+//       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+//       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
+//       tpView._cameraSnapped = false;
+
+//       scene.add(tpView.model);
+//       tpViewExisted = true;
+//       tpViewLoadLate = false;
+//     } else if (tpViewExisted && character) {
+//       // reattach model if needed
+//       if (!tpView.model) tpView.attachModel(character.model);
+//       tpView.handleAnimation(character.model, character.gltf);
+
+//       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+//       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
+//       tpView._cameraSnapped = false;
+
+//       scene.add(tpView.model);
+//       tpViewLoadLate = false;
+//     } else {
+//       console.info("Not finished loading Character Model yet; retrying activateThirdPerson shortly...");
+//       setTimeout(activateThirdPerson, 1000);
+//       tpViewExisted = false;
+//       tpViewLoadLate = false;
+//     }
+//     return;
+//   }
+
+//   // Normal re-activation path
+//   if (!tpViewLoadLate && tpViewExisted) {
+//     // Reset movement/input so no auto-walk carries over
+//     tpView.resetControls();
+
+//     // Align facing with current FP yaw (keep camera continuity)
+//     tpView.faceYaw(camYaw);
+
+//     // Snap smoothing state so model + camera align immediately
+//     if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+//     if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
+//     tpView._cameraSnapped = false;
+
+//     scene.add(tpView.model);
+//     tpView.model.visible = true;
+//   }
+
+//   if (tpView && tpView.model && !tpView.crowdAgent && crowd) {
+//     addThirdPersonToCrowd(scene, crowd, tpView);
+//   }
+
+//   // --- If a tour is currently active, ensure TP will follow the NPC ---
+//   try {
+//     const tourNpc = (npcAgents && npcAgents.length) ? npcAgents[0] : null;
+//     if (tourNpc && tourNpc.state?.touring) {
+//       // Optionally align the TP agent to the TP model immediately so there is no jump
+//       if (tpView && tpView.crowdAgent && tpView.model) {
+//         try {
+//           const tgt = { x: tourNpc.model.position.x, y: tourNpc.model.position.y, z: tourNpc.model.position.z };
+//           if (typeof tpView.crowdAgent.teleport === 'function') {
+//             tpView.crowdAgent.teleport(tgt);
+//           } else {
+//             // fallback for different crowd API shapes
+//             tpView.crowdAgent.position = tgt;
+//           }
+//         } catch (e) {
+//           // non-fatal
+//           console.debug('activateThirdPerson: teleport/copy tpView.crowdAgent failed', e);
+//         }
+//       }
+
+//       // Start visual follow on TP view
+//       if (typeof tpView.startFollowAgent === 'function') {
+//         try {
+//           // Use conservative defaults; adjust offsetBehind/side per your UX tuning
+//           tpView.startFollowAgent(tourNpc, {
+//             offsetBehind: 0.5,
+//             smoothing: 0.12,
+//             heightOffset: 0.0,
+//             side: 1
+//           });
+//           tpView.isTouring = true;
+//         } catch (e) {
+//           console.warn('activateThirdPerson: startFollowAgent failed', e);
+//         }
+//       }
+
+//       // Stop FP follow (if any) so only the active view follows
+//       if (fpView && typeof fpView.stopFollowAgent === 'function') {
+//         try { fpView.stopFollowAgent(); } catch (e) {}
+//       }
+//     }
+//   } catch (ex) {
+//     console.error('activateThirdPerson: error handling tour follow state', ex);
+//   }
+// }
+
+
+// // ------------------------
+// // activateFirstPerson
+// // ------------------------
+// function activateFirstPerson() {
+//   if (tpView && tpView.model) {
+//     const e = new THREE.Euler().setFromQuaternion(tpView.model.quaternion, 'YXZ');
+//     camYaw = e.y;
+//     camPitch = 0;
+//     if (fpView) {
+//       fpView.resetControls();      // stop stale movement
+//       if (fpView._smoothedPlayerPosition && fpView.playerCollider) {
+//         fpView._smoothedPlayerPosition.copy(fpView.playerCollider.end);
+//       }
+//       if (typeof fpView.tempQuaternion !== 'undefined' && fpView.model) {
+//         fpView.tempQuaternion.copy(fpView.model.quaternion || new THREE.Quaternion());
+//       }
+//       fpView.setYaw(camYaw);
+//       fpView.setPitch(camPitch);
+//       fpView._cameraSnapped = false; // snap camera next frame
+//     }
+//   }
+
+//   activePlayer = 'fp';
+
+//   if (tpView?.model) {
+//     scene.remove(tpView.model);
+//     tpView.model.visible = false;
+//   }
+
+//   // --- If a tour is currently active, ensure FP will follow the NPC ---
+//   try {
+//     const tourNpc = (npcAgents && npcAgents.length) ? npcAgents[0] : null;
+//     if (tourNpc && tourNpc.state?.touring) {
+//       // stop TP follow first (if any)
+//       if (tpView && typeof tpView.stopFollowAgent === 'function') {
+//         try { tpView.stopFollowAgent(); } catch (e) {}
+//         tpView.isTouring = false;
+//       }
+
+//       // Start FP follow - pass playerCollider if your FP follow impl expects it
+//       if (fpView && typeof fpView.setFollowAgent === 'function') {
+//         try {
+//           fpView.setFollowAgent(tourNpc, playerCollider);
+//           fpView.isTouring = true;
+//         } catch (e) {
+//           console.warn('activateFirstPerson: setFollowAgent failed', e);
+//         }
+//       }
+//     }
+//   } catch (ex) {
+//     console.error('activateFirstPerson: error handling tour follow state', ex);
+//   }
+// }
+
+async function activateThirdPerson() {
   activePlayer = 'tp';
 
-
-  // Build / attach tpView if it was delayed previously
+  // --- Late-load initialization ---
   if (tpViewLoadLate) {
+    console.log("TP VIEW IS LOAD LATE");
+
     if (!tpViewExisted && character) {
       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
       tpView.buildBVHFromMeshes(bvhMeshList);
       tpView.handleAnimation(character.model, character.gltf);
-
-      // snap smoothing state immediately
       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
       tpView._cameraSnapped = false;
@@ -1657,10 +1809,8 @@ function activateThirdPerson() {
       tpViewExisted = true;
       tpViewLoadLate = false;
     } else if (tpViewExisted && character) {
-      // reattach model if needed
       if (!tpView.model) tpView.attachModel(character.model);
       tpView.handleAnimation(character.model, character.gltf);
-
       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
       tpView._cameraSnapped = false;
@@ -1668,134 +1818,124 @@ function activateThirdPerson() {
       scene.add(tpView.model);
       tpViewLoadLate = false;
     } else {
-      console.info("Not finished loading Character Model yet; retrying activateThirdPerson shortly...");
+      console.info("Character not loaded yet — retrying...");
       setTimeout(activateThirdPerson, 1000);
-      tpViewExisted = false;
-      tpViewLoadLate = false;
+      return;
     }
-    return;
   }
 
-  // Normal re-activation path
-  if (!tpViewLoadLate && tpViewExisted) {
-    // Reset movement/input so no auto-walk carries over
+  // --- Normal reactivation ---
+  if (tpViewExisted && tpView) {
     tpView.resetControls();
-
-    // Align facing with current FP yaw (keep camera continuity)
     tpView.faceYaw(camYaw);
-
-    // Snap smoothing state so model + camera align immediately
     if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
     if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
     tpView._cameraSnapped = false;
-
     scene.add(tpView.model);
     tpView.model.visible = true;
   }
 
-  if (tpView && !tpView.crowdAgent && crowd) {
-    addThirdPersonToCrowd(scene, crowd, tpView);
+  // --- Create or ensure TP agent exists ---
+  if (tpView && tpView.model && !tpView.crowdAgent && crowd) {
+    await addThirdPersonToCrowdAsync(scene, crowd, tpView);
   }
 
-  // --- If a tour is currently active, ensure TP will follow the NPC ---
-  try {
-    const tourNpc = (npcAgents && npcAgents.length) ? npcAgents[0] : null;
-    if (tourNpc && tourNpc.state?.touring) {
-      // Optionally align the TP agent to the TP model immediately so there is no jump
-      if (tpView && tpView.crowdAgent && tpView.model) {
-        try {
-          const tgt = { x: tourNpc.model.position.x, y: tourNpc.model.position.y, z: tourNpc.model.position.z };
-          if (typeof tpView.crowdAgent.teleport === 'function') {
-            tpView.crowdAgent.teleport(tgt);
-          } else {
-            // fallback for different crowd API shapes
-            tpView.crowdAgent.position = tgt;
-          }
-        } catch (e) {
-          // non-fatal
-          console.debug('activateThirdPerson: teleport/copy tpView.crowdAgent failed', e);
-        }
-      }
+  // --- If NPC is touring, start follow ---
+  const tourNpc = npcAgents?.[0];
+  if (tourNpc?.state?.touring) {
+    const nq = getNavQuery() ?? navQuery;
 
-      // Start visual follow on TP view
-      if (typeof tpView.startFollowAgent === 'function') {
-        try {
-          // Use conservative defaults; adjust offsetBehind/side per your UX tuning
-          tpView.startFollowAgent(tourNpc, {
-            offsetBehind: 0.5,
-            smoothing: 0.12,
-            heightOffset: 0.0,
-            side: 1
-          });
-          tpView.isTouring = true;
-        } catch (e) {
-          console.warn('activateThirdPerson: startFollowAgent failed', e);
-        }
-      }
-
-      // Stop FP follow (if any) so only the active view follows
-      if (fpView && typeof fpView.stopFollowAgent === 'function') {
-        try { fpView.stopFollowAgent(); } catch (e) {}
-      }
+    // align the TP agent to NPC immediately to avoid snapping
+    try {
+      const tgt = {
+        x: tourNpc.model.position.x,
+        y: tourNpc.model.position.y,
+        z: tourNpc.model.position.z,
+      };
+      if (tpView?.crowdAgent?.teleport) tpView.crowdAgent.teleport(tgt);
+      else if (tpView?.crowdAgent) tpView.crowdAgent.position = tgt;
+    } catch (e) {
+      console.debug("teleport failed", e);
     }
-  } catch (ex) {
-    console.error('activateThirdPerson: error handling tour follow state', ex);
+
+    // Start TP follow behavior
+    if (tpView && typeof tpView.startFollowAgent === "function") {
+      tpView.startFollowAgent(tourNpc, {
+        offsetBehind: 0.5,
+        smoothing: 0.12,
+        heightOffset: 0.0,
+        side: 1,
+      });
+      tpView.isTouring = true;
+    }
+
+    // Ensure crowd movement begins
+    if (tpView?.crowdAgent && nq && typeof setPlayerFollowTarget === "function") {
+      setPlayerFollowTarget(tpView.crowdAgent, tourNpc, nq);
+    }
+
+    // Stop FP follow (if any)
+    if (fpView && typeof fpView.stopFollowAgent === "function") {
+      try { fpView.stopFollowAgent(); } catch {}
+    }
+
+    console.debug("✅ Third-person follow started successfully (with async crowd registration).");
   }
 }
 
 
-// ------------------------
-// activateFirstPerson
-// ------------------------
 function activateFirstPerson() {
+  activePlayer = 'fp';
+
+  // Capture yaw from TP model for smooth rotation continuity
   if (tpView && tpView.model) {
     const e = new THREE.Euler().setFromQuaternion(tpView.model.quaternion, 'YXZ');
     camYaw = e.y;
     camPitch = 0;
-    if (fpView) {
-      fpView.resetControls();      // stop stale movement
-      if (fpView._smoothedPlayerPosition && fpView.playerCollider) {
-        fpView._smoothedPlayerPosition.copy(fpView.playerCollider.end);
-      }
-      if (typeof fpView.tempQuaternion !== 'undefined' && fpView.model) {
-        fpView.tempQuaternion.copy(fpView.model.quaternion || new THREE.Quaternion());
-      }
-      fpView.setYaw(camYaw);
-      fpView.setPitch(camPitch);
-      fpView._cameraSnapped = false; // snap camera next frame
-    }
   }
 
-  activePlayer = 'fp';
-
-  if (tpView?.model) {
+  // Deactivate TP view
+  if (tpView && tpView.model) {
     scene.remove(tpView.model);
     tpView.model.visible = false;
-  }
-
-  // --- If a tour is currently active, ensure FP will follow the NPC ---
-  try {
-    const tourNpc = (npcAgents && npcAgents.length) ? npcAgents[0] : null;
-    if (tourNpc && tourNpc.state?.touring) {
-      // stop TP follow first (if any)
-      if (tpView && typeof tpView.stopFollowAgent === 'function') {
-        try { tpView.stopFollowAgent(); } catch (e) {}
-        tpView.isTouring = false;
-      }
-
-      // Start FP follow - pass playerCollider if your FP follow impl expects it
-      if (fpView && typeof fpView.setFollowAgent === 'function') {
-        try {
-          fpView.setFollowAgent(tourNpc, playerCollider);
-          fpView.isTouring = true;
-        } catch (e) {
-          console.warn('activateFirstPerson: setFollowAgent failed', e);
-        }
-      }
+    tpView.isTouring = false;
+    if (typeof tpView.stopFollowAgent === 'function') {
+      try { tpView.stopFollowAgent(); } catch {}
     }
-  } catch (ex) {
-    console.error('activateFirstPerson: error handling tour follow state', ex);
   }
+
+  // Reset FP view
+  if (fpView) {
+    fpView.resetControls();
+    if (fpView._smoothedPlayerPosition && fpView.playerCollider)
+      fpView._smoothedPlayerPosition.copy(fpView.playerCollider.end);
+
+    if (typeof fpView.tempQuaternion !== 'undefined' && fpView.model) {
+      fpView.tempQuaternion.copy(fpView.model.quaternion || new THREE.Quaternion());
+    }
+
+    fpView.setYaw(camYaw);
+    fpView.setPitch(camPitch);
+    fpView._cameraSnapped = false;
+  }
+
+  // Resume NPC follow if touring
+  const tourNpc = npcAgents?.[0];
+  if (tourNpc?.state?.touring && fpView) {
+    try {
+      if (typeof fpView.setFollowAgent === 'function') {
+        fpView.setFollowAgent(tourNpc, playerCollider);
+      } else if (typeof fpView.startFollowAgent === 'function') {
+        fpView.startFollowAgent(tourNpc, { offsetBehind: 0, smoothing: 0.1, heightOffset: 0 });
+      }
+      fpView.isTouring = true;
+      console.debug('✅ First-person follow resumed.');
+    } catch (e) {
+      console.warn('activateFirstPerson: follow re-init failed', e);
+    }
+  }
+
+  console.debug('Switched to First-person view.');
 }
 
 
@@ -1884,6 +2024,7 @@ export function initializeGame(targetContainerId = 'model-container') {
         if (event.code === 'KeyV'){
             // active toogle to switch between first and third view
             activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
+            
         }
 
         // 'I' key to start/stop tour with first NPC
