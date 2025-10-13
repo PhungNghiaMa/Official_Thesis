@@ -65,3 +65,91 @@ export const UploadItem = async (file, mesh_name , title, vietnamese_description
         throw error
     }
 }
+
+// WEBSOCKET
+let _ws = null 
+const _subscribed = new Set()
+let _reconnectTimer = null 
+
+function wsURL(){
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${protocol}://${BACKEND_URL}/ws`;
+}
+
+export function StartWebSocket(){
+    if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return _ws;
+    _ws = new WebSocket(wsURL())
+
+    // Open ws connection 
+    _ws.onopen = () => {
+        console.info("[WS] CONNECTED")
+        // re-subcribed previously requested channels
+        for (const channel of Array.from(_subscribed)){
+            try {_ws.send(JSON.stringify({action: "subsribe", channel: channel}));}
+            catch (e){console.error("ERROR IN SUBSRIBE TO CHANNEL: ",e)}
+        }
+    };
+
+    _ws.onmessage = (evt) =>{
+        try {
+            const message = JSON.parse(evt.data)
+            // re-dispatch as a CustomeEvent for app to listen to 
+            window.dispatchEvent(new CustomeEvent("ws:progress", {detail: message}));
+            // auto subscribe to asset channel when we have asset__cid
+            if (message && message.asset_cid){
+                const assetChannel = `asset:${message.asset_cid}`;
+                // set up so program not spam the subsribe if we already have it 
+                if (!_subscribed.has(assetChannel)) SubscribeChannel(assetChannel)
+            }
+        }catch (e){
+            console.error("[WS] INVALIDE MESSAGE: ",e)
+        }
+    }
+
+    _ws.onclose = () => {
+        console.log("[WS] DISCONNECTED")
+        _ws = null ;
+        // try to reconnect with the backoff
+        if (_reconnectTimer == null){
+            _reconnectTimer = setTimeout(() => {
+                _reconnectTimer = null ;
+                StartWebSocket();
+            } , 2000)
+        }
+    }
+
+    _ws.onerror = (e) => {
+        console.error("[WS] ERROR: ",e)
+    }
+
+    return _ws;
+}
+
+export function  SubscribeChannel(channel){
+    StartWebSocket();
+    if (!channel) return;
+    if (_subscribed.has(channel)) return;
+    // Push channel want to subcribe to the _subscribe set 
+    _subscribed.add(channel);
+    try{
+        _ws.send(JSON.stringify({action:"subscribe", channel}))
+    }catch(e){
+        console.error("[WS] FAIL TO SUBSRIBE TO CHANNLE: ", e)
+    }
+}
+
+export function unsubscribeChannel(channel) {
+  if (!_ws) return;
+  _subscribed.delete(channel);
+  try {
+    _ws.send(JSON.stringify({ action: "unsubscribe", channel }));
+  } catch (e) {}
+}
+
+export function closeWebSocket() {
+  if (_ws) _ws.close();
+  _ws = null;
+  _subscribed.clear();
+}
+
+

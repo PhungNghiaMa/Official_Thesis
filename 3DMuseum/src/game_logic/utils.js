@@ -1,4 +1,4 @@
-import { UploadItem } from "./services";
+import { UploadItem , StartWebSocket , SubscribeChannel} from "./services";
 import * as THREE from "three";
 
 const uploadModal = document.getElementById("upload-modal");
@@ -48,6 +48,15 @@ export function displayUploadModal(_aspectRatio, uploadProps) {
     uploadModal.style.display = "block";
     uploadProperties = uploadProps;
     console.log("upload properties: ", uploadProps);
+
+    // Ensure websocket running and subscribe to room channel so we receive progress updates 
+    StartWebSocket();
+    // Subscribe the room asset is the 
+    if (uploadProps?.roomID) {
+        const roomCh = `room:${uploadProps.roomID}`;
+        SubscribeChannel(roomCh);
+    }
+
 }
 
 export function initUploadModal() {
@@ -72,10 +81,17 @@ export function initUploadModal() {
 
         const { roomID , asset_mesh_name } = uploadProperties;
 
+
         UploadItem(file, asset_mesh_name , uploadTitle.value, uploadVietDes.value, uploadEnDes.value, roomID)
             .then((res) => {
                 uploadSpinner.style.display = 'none';
                 uploadSubmit.disabled = false;
+
+                // if server returns asset_cid, auto-subscribe to detailed asset channel
+                if (res && res.asset_cid) {
+                    SubscribeChannel(`asset:${res.asset_cid}`);
+                }
+
                 const uploadEvent = new CustomEvent("uploadevent", {
                     detail: {
                         ...uploadProperties,
@@ -131,7 +147,7 @@ function handleFile(file) {
         };
         reader.readAsDataURL(file);
     } else {
-        alert('Please upload a PNG or JPG image.');
+        alert('Please upload a PNG / JPG / WebP image.');
     }
 }
 

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"main/business"
 	"main/model"
 	"net/http"
 	"strconv"
@@ -13,12 +12,11 @@ import (
 )
 
 type Handler struct {
-	ImageService  Service
-	PinataService *business.PinataService
+	AssetService Service
 }
 
-func NewHandler(ImageService Service, PinataService *business.PinataService) *Handler {
-	return &Handler{ImageService: ImageService, PinataService: PinataService}
+func NewHandler(AssetService Service) *Handler {
+	return &Handler{AssetService: AssetService}
 }
 
 func (Handler *Handler) UploadAsset(context *gin.Context) {
@@ -53,36 +51,37 @@ func (Handler *Handler) UploadAsset(context *gin.Context) {
 	// Read the file content into a byte buffer to populate your struct's FileBuffer
 	buffer, err := io.ReadAll(file)
 	if err != nil {
-		context.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to read file content: " + err.Error() , "success": false})
+		context.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to read file content: " + err.Error(), "success": false})
 		return
 	}
 	input.FileBuffer = buffer
 
-
 	// Now the 'input' struct is fully populated and can be passed to the service layer.
-	if err := Handler.ImageService.UploadAsset(context.Request.Context(), input, Handler.PinataService); err != nil {
-		if errors.Is(err, ErrorAssetExist){
+	response, err := Handler.AssetService.UploadAsset(context.Request.Context(), input)
+	if err != nil {
+		if errors.Is(err, ErrorAssetExist) {
 			context.JSON(http.StatusConflict, gin.H{"error": err.Error(), "success": false})
-			return	
+			return
 		}
 		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "success": false})
 		return
 	}
 
-	context.JSON(http.StatusOK, gin.H{"message": "Upload asset successfully !", "success": true})
+	context.JSON(http.StatusOK, response)
 }
 
 func (Handler *Handler) GetAsset(context *gin.Context) {
 	var assetList []model.ResponseMetadataInfor
 	roomIDStr := context.Param("roomID")
 	roomID, err := strconv.ParseInt(roomIDStr, 10, 32)
+	
 	fmt.Println("RoomID: ", roomID)
 	if err != nil {
 		context.JSON(http.StatusBadRequest, gin.H{"error": "Invalid roomID"})
 		return
 	}
 
-	assetList, err = Handler.ImageService.GetAsset(context.Request.Context(), int(roomID))
+	assetList, err = Handler.AssetService.GetAsset(context.Request.Context(), int(roomID))
 	if err != nil {
 		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -97,6 +96,6 @@ func (Handler *Handler) GetAsset(context *gin.Context) {
 }
 
 // THIS IS USED TO TEST WHETHER ROUTE WORK OR NOT ( BASE CASE OF API TEST )
-func (Handler *Handler) Hello(context *gin.Context){
+func (Handler *Handler) Hello(context *gin.Context) {
 	context.JSON(http.StatusOK, gin.H{"message": "Hello"})
 }

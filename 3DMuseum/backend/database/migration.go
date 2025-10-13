@@ -13,7 +13,8 @@ func Migrate(db *gorm.DB) error {
 	var modelsToMigrate = []interface{}{
 		&model.Room{},    
 		&model.Category{}, 
-		&model.Asset{},    
+		&model.Asset{},
+		&model.Audio{},    
 	}
 
 	for _, m := range modelsToMigrate {
