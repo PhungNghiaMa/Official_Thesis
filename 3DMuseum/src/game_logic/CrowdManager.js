@@ -469,66 +469,118 @@ export function updateAgentTours(navQuery) {
 }
 
 
+// export function addThirdPersonToCrowd(scene, crowd, tpView) {
+// if (!tpView) return null;
+
+// // Prefer model position if available, else fall back to smoothed position or collider end.
+// // We build a plain {x,y,z} because crowd API can accept both Vector3 or plain object.
+// let posVec = null;
+// if (tpView.model && tpView.model.position) posVec = tpView.model.position;
+// else if (tpView._smoothedPlayerPosition) posVec = tpView._smoothedPlayerPosition;
+// else if (tpView.playerCollider && tpView.playerCollider.end) posVec = tpView.playerCollider.end;
+// else posVec = { x: 0, y: 1, z: 0 };
+
+// const startPos = { x: posVec.x ?? posVec[0] ?? 0, y: posVec.y ?? posVec[1] ?? 1, z: posVec.z ?? posVec[2] ?? 0 };
+
+// const agent = addAgent(startPos, {
+// radius: 0.25,
+// height: 1.8,
+// maxSpeed: 2.4,
+// maxAcceleration: 6.0,
+// collisionQueryRange: 0.25,
+// pathOptimizationRange: 50,
+// separationWeight: 0.05,
+// });
+
+// if (!agent) {
+// console.error("addThirdPersonToCrowd: Failed to add agent");
+// return null;
+// }
+
+// // Resolve numeric id -> agent object when necessary
+// let agentHandle = agent;
+// if (typeof agent === 'number' && crowd && typeof crowd.getAgent === 'function') {
+// try {
+// const resolved = crowd.getAgent(agent);
+// if (resolved) agentHandle = resolved;
+// } catch (e) { /* ignore */ }
+// }
+
+// // Store onto tpView so updateFollow can use it.
+// if (typeof tpView.setCrowdAgent === 'function') {
+// tpView.setCrowdAgent(agentHandle);
+// } else {
+// tpView.crowdAgent = agentHandle;
+// }
+
+// // If the model already exists, align the crowd agent to avoid an initial desync.
+// try {
+// if (tpView.model && tpView.crowdAgent) {
+// const tgt = tpView.model.position;
+// if (typeof tpView.crowdAgent.teleport === 'function') {
+// tpView.crowdAgent.teleport({ x: tgt.x, y: tgt.y, z: tgt.z });
+// } else if (tpView.crowdAgent.position) {
+// tpView.crowdAgent.position = { x: tgt.x, y: tgt.y, z: tgt.z };
+// }
+// }
+// } catch (e) {
+// console.warn("addThirdPersonToCrowd: failed to align tpView.crowdAgent to model", e);
+// }
+
+// console.log("addThirdPersonToCrowd: created TP crowd agent", agentHandle);
+// return agentHandle;
+// }
+
 export function addThirdPersonToCrowd(scene, crowd, tpView) {
-if (!tpView) return null;
+  return new Promise((resolve, reject) => {
+    if (!tpView) return reject("tpView missing");
 
-// Prefer model position if available, else fall back to smoothed position or collider end.
-// We build a plain {x,y,z} because crowd API can accept both Vector3 or plain object.
-let posVec = null;
-if (tpView.model && tpView.model.position) posVec = tpView.model.position;
-else if (tpView._smoothedPlayerPosition) posVec = tpView._smoothedPlayerPosition;
-else if (tpView.playerCollider && tpView.playerCollider.end) posVec = tpView.playerCollider.end;
-else posVec = { x: 0, y: 1, z: 0 };
+    let posVec = tpView.model?.position || tpView._smoothedPlayerPosition ||
+                 tpView.playerCollider?.end || { x: 0, y: 1, z: 0 };
+    const startPos = { x: posVec.x ?? 0, y: posVec.y ?? 1, z: posVec.z ?? 0 };
 
-const startPos = { x: posVec.x ?? posVec[0] ?? 0, y: posVec.y ?? posVec[1] ?? 1, z: posVec.z ?? posVec[2] ?? 0 };
+    const agent = addAgent(startPos, {
+      radius: 0.25,
+      height: 1.8,
+      maxSpeed: 2.4,
+      maxAcceleration: 6.0,
+      collisionQueryRange: 0.25,
+      pathOptimizationRange: 50,
+      separationWeight: 0.05,
+    });
 
-const agent = addAgent(startPos, {
-radius: 0.25,
-height: 1.8,
-maxSpeed: 2.4,
-maxAcceleration: 6.0,
-collisionQueryRange: 0.25,
-pathOptimizationRange: 50,
-separationWeight: 0.05,
-});
+    if (!agent) {
+      console.error("addThirdPersonToCrowdAsync: failed to add agent");
+      return reject("agent create failed");
+    }
 
-if (!agent) {
-console.error("addThirdPersonToCrowd: Failed to add agent");
-return null;
+    let agentHandle = agent;
+    if (typeof agent === "number" && crowd?.getAgent) {
+      try {
+        const resolved = crowd.getAgent(agent);
+        if (resolved) agentHandle = resolved;
+      } catch {}
+    }
+
+    if (tpView.setCrowdAgent) tpView.setCrowdAgent(agentHandle);
+    else tpView.crowdAgent = agentHandle;
+
+    // Align immediately to tpView model position
+    try {
+      if (tpView.model && agentHandle) {
+        const tgt = tpView.model.position;
+        if (agentHandle.teleport) agentHandle.teleport({ x: tgt.x, y: tgt.y, z: tgt.z });
+        else agentHandle.position = { x: tgt.x, y: tgt.y, z: tgt.z };
+      }
+    } catch (e) {
+      console.warn("align tpView.crowdAgent failed", e);
+    }
+
+    // ✅ Wait one frame so crowd.update() runs once
+    requestAnimationFrame(() => {
+      console.log("addThirdPersonToCrowdAsync: TP crowd agent ready", agentHandle);
+      resolve(agentHandle);
+    });
+  });
 }
-
-// Resolve numeric id -> agent object when necessary
-let agentHandle = agent;
-if (typeof agent === 'number' && crowd && typeof crowd.getAgent === 'function') {
-try {
-const resolved = crowd.getAgent(agent);
-if (resolved) agentHandle = resolved;
-} catch (e) { /* ignore */ }
-}
-
-// Store onto tpView so updateFollow can use it.
-if (typeof tpView.setCrowdAgent === 'function') {
-tpView.setCrowdAgent(agentHandle);
-} else {
-tpView.crowdAgent = agentHandle;
-}
-
-// If the model already exists, align the crowd agent to avoid an initial desync.
-try {
-if (tpView.model && tpView.crowdAgent) {
-const tgt = tpView.model.position;
-if (typeof tpView.crowdAgent.teleport === 'function') {
-tpView.crowdAgent.teleport({ x: tgt.x, y: tgt.y, z: tgt.z });
-} else if (tpView.crowdAgent.position) {
-tpView.crowdAgent.position = { x: tgt.x, y: tgt.y, z: tgt.z };
-}
-}
-} catch (e) {
-console.warn("addThirdPersonToCrowd: failed to align tpView.crowdAgent to model", e);
-}
-
-console.log("addThirdPersonToCrowd: created TP crowd agent", agentHandle);
-return agentHandle;
-}
-
 
