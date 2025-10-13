@@ -16,7 +16,7 @@ import (
 
 func Connect() *gorm.DB {
 	dsn := os.Getenv("DATABASE_URL")
-	dsnFallback := os.Getenv("DATABASE_URL_1")
+	dsnFallback := os.Getenv("DATABASE_URL_IPv4")
 	if dsn == "" {
 		log.Fatal("DATABASE_URL environment variable is not set.")
 	}
@@ -145,4 +145,3 @@ func tryConnect(dsn string, logMode logger.Interface) (*gorm.DB, error) {
 
 	return db, nil
 }
-

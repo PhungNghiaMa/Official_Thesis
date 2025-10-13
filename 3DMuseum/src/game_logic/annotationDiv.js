@@ -10,11 +10,11 @@ export default class AnnotationDiv{
         this.title;
         this.vietnamese_description;
         this.english_description;
+        this.vietnamese_audio;
+        this.english_audio;
 
         this.expandedDiv = document.createElement('div');
         this.expandedDiv.className = 'expanded-annotation';
-        this.vietnamese_description;
-        this.english_description;
         this.title;
 
         const uploadBtn = document.createElement("button")
@@ -52,16 +52,20 @@ export default class AnnotationDiv{
     }
 
     // SET INFROMATION DISPLAY WHEN HOVER THE PICTURE
-    setAnnotationDetails(title, vietnamese_description, english_description){
+    setAnnotationDetails(title, vietnamese_description, english_description , vietnamese_audio , english_audio){
         this.title = title;
         this.vietnamese_description = vietnamese_description;
         this.english_description = english_description;
+        this.vietnamese_audio = vietnamese_audio;
+        this.english_audio = english_audio;
         const systemLanguage = localStorage.getItem("language")
-        let descriptionToShow
+        let descriptionToShow , audioToPlay
         if (systemLanguage === 'vi'){
-            descriptionToShow = vietnamese_description
+            descriptionToShow = vietnamese_description;
+            audioToPlay = vietnamese_audio;
         }else{
-            descriptionToShow = english_description
+            descriptionToShow = english_description;
+            audioToPlay = english_audio;
         }
         this.expandedDiv.innerHTML = `
                 <p class="art-title">${title}</p>

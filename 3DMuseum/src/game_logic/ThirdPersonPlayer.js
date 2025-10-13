@@ -28,6 +28,7 @@ export default class ThirdPersonPlayer {
 
     this.isRoomTourActive = false;
     this.crowdAgent = null;
+    this.isNPC = false;
 
     // Start position inside building (adjust as needed)
     const start = new THREE.Vector3(0, 2, 0);
@@ -79,6 +80,10 @@ export default class ThirdPersonPlayer {
       this.bvhMeshes.push(child);
     });
     this.bvhReady = true;
+  }
+
+  setIsNPC(){
+    this.isNPC = true;
   }
 
 
@@ -628,7 +633,10 @@ syncFromCrowd() {
   // --- 5. Apply Rotation ---
   // Make the model face the direction it's moving.
   if (speed > 1e-3) {
-    const targetYaw = Math.atan2(vx, vz);
+    let targetYaw = Math.atan2(vx, vz);
+    if (this.isNPC){
+      targetYaw -= Math.PI/2
+    }
     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
     // Slerp for smooth turning.
     this.model.quaternion.slerp(targetQuat, 0.15);

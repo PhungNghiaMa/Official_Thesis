@@ -175,6 +175,7 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
 
     const entry = agentEntry;
     const targetsMap = options.targetsMap || new Map();
+    const role = options.role || "";
     const queue = [];
     const tempWorldPos = new THREE.Vector3();
 
@@ -227,6 +228,7 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
     const now = performance.now() / 1000;
     agentTours.set(entry.agent, {
         agent: entry.agent,
+        role,
         entry,
         queue,
         index: 0,
@@ -283,6 +285,7 @@ export function updateAgentTours(navQuery) {
 
       const entry = tour.entry ?? null;
       const model = entry?.model ?? (entry?.userData?.model ?? null);
+      const role = entry.role ?? ""
 
       if (entry && entry.state){
         entry.state.mode = tour.status;
@@ -370,22 +373,82 @@ export function updateAgentTours(navQuery) {
             model.position.set(agentPos.x, agentPos.y + footOffset, agentPos.z);
           }
 
-          // compute facing quaternion so agent faces picture mesh
-          const faceW = current.faceWorldPos?.clone()
-            ?? new THREE.Vector3(targetPt.x, model ? model.position.y : agentPos.y, targetPt.z);
-          const dir = new THREE.Vector3(faceW.x - agentPos.x, 0, faceW.z - agentPos.z);
-          if (dir.lengthSq() > 1e-6 && model) {
-            const yaw = Math.atan2(dir.x, dir.z);
-            const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw - 0.8, 0));
-            model.quaternion.copy(tq);
-            if (!entry.state) entry.state = {};
-            entry.state.tourFacingQuat = tq.clone();
-            // freeze rotations until holdTime elapses
-            entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
-            console.warn('updateAgentTours: freeze rotation until', entry.state.preventRotationUntil.toFixed(3));
-          } else {
-            if (entry && entry.state) entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
+          // --- Robust facing toward picture plane (replacement) ---
+          if (model) {
+            // world-space picture center
+            const faceW = current.faceWorldPos?.clone()
+              ?? new THREE.Vector3(targetPt.x, model.position.y, targetPt.z);
+
+            // Attempt to compute the picture's front normal in world space
+            // Strategy: prefer mesh.getWorldDirection (returns the object's -Z forward in world),
+            // else fallback to a default world-forward (0,0,1).
+            let planeNormal = new THREE.Vector3(0, 0, 1);
+            try {
+              if (current.pictureMesh && typeof current.pictureMesh.getWorldDirection === 'function') {
+                // getWorldDirection returns the object's local -Z direction in world coords
+                planeNormal.copy(current.pictureMesh.getWorldDirection(new THREE.Vector3()));
+                // If length is tiny, fallback
+                if (planeNormal.lengthSq() < 1e-6) planeNormal.set(0, 0, 1);
+              }
+            } catch (e) {
+              planeNormal.set(0, 0, 1);
+            }
+
+            // Decide which side of the plane faces the agent: compute vector from picture to agent (horizontal)
+            const toAgent = new THREE.Vector3(agentPos.x - faceW.x, 0, agentPos.z - faceW.z);
+            if (toAgent.lengthSq() < 1e-6) {
+              // agent is nearly exactly at picture center — choose default
+              toAgent.set(0, 0, 1);
+            } else {
+              toAgent.normalize();
+            }
+
+            // Ensure planeNormal is oriented *toward* the agent (so we offset on the visible/front side)
+            if (planeNormal.dot(toAgent) < 0) {
+              planeNormal.negate();
+            }
+
+            // Build a look-at point a little in front of the picture (keep at model's Y height)
+            const frontOffset = 0.5; // tweak: how far the agent should face from the picture
+            const lookAtPoint = faceW.clone().addScaledVector(planeNormal, frontOffset);
+            lookAtPoint.y = model.position.y; // only rotate around Y
+
+            // Horizontal direction from agent to lookAt
+            const dirH = new THREE.Vector3(lookAtPoint.x - agentPos.x, 0, lookAtPoint.z - agentPos.z);
+            if (dirH.lengthSq() > 1e-6) {
+              dirH.normalize();
+              // yaw: atan2(dx, dz) (consistent with your existing code)
+              let yaw = Math.atan2(dirH.x, dirH.z);
+              if (yaw < 0){
+                yaw += Math.PI/2
+              }else if (yaw > 0){
+                yaw -= Math.PI/2
+              }
+
+
+              // If the character model's forward axis isn't world +Z, optionally apply a per-model correction
+              // Set model.userData.forwardCorrection = radians to fix authoring mismatch (e.g. Math.PI/2)
+              const correction = (model.userData && typeof model.userData.forwardCorrection === 'number')
+                ? model.userData.forwardCorrection
+                : 0;
+
+              const desiredQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw + correction, 0));
+
+              // Set orientation instantly (reliable) — you can slerp instead for smoothness:
+              model.quaternion.copy(desiredQuat);
+
+              // store freeze state same as before
+              if (!entry.state) entry.state = {};
+              entry.state.tourFacingQuat = desiredQuat.clone();
+              entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
+
+            } else {
+              // tiny / degenerate direction — still freeze to avoid jitter
+              if (!entry.state) entry.state = {};
+              entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
+            }
           }
+
 
           // go to waiting state
           tour.status = 'waiting';
@@ -467,69 +530,6 @@ export function updateAgentTours(navQuery) {
     }
   } // end for
 }
-
-
-// export function addThirdPersonToCrowd(scene, crowd, tpView) {
-// if (!tpView) return null;
-
-// // Prefer model position if available, else fall back to smoothed position or collider end.
-// // We build a plain {x,y,z} because crowd API can accept both Vector3 or plain object.
-// let posVec = null;
-// if (tpView.model && tpView.model.position) posVec = tpView.model.position;
-// else if (tpView._smoothedPlayerPosition) posVec = tpView._smoothedPlayerPosition;
-// else if (tpView.playerCollider && tpView.playerCollider.end) posVec = tpView.playerCollider.end;
-// else posVec = { x: 0, y: 1, z: 0 };
-
-// const startPos = { x: posVec.x ?? posVec[0] ?? 0, y: posVec.y ?? posVec[1] ?? 1, z: posVec.z ?? posVec[2] ?? 0 };
-
-// const agent = addAgent(startPos, {
-// radius: 0.25,
-// height: 1.8,
-// maxSpeed: 2.4,
-// maxAcceleration: 6.0,
-// collisionQueryRange: 0.25,
-// pathOptimizationRange: 50,
-// separationWeight: 0.05,
-// });
-
-// if (!agent) {
-// console.error("addThirdPersonToCrowd: Failed to add agent");
-// return null;
-// }
-
-// // Resolve numeric id -> agent object when necessary
-// let agentHandle = agent;
-// if (typeof agent === 'number' && crowd && typeof crowd.getAgent === 'function') {
-// try {
-// const resolved = crowd.getAgent(agent);
-// if (resolved) agentHandle = resolved;
-// } catch (e) { /* ignore */ }
-// }
-
-// // Store onto tpView so updateFollow can use it.
-// if (typeof tpView.setCrowdAgent === 'function') {
-// tpView.setCrowdAgent(agentHandle);
-// } else {
-// tpView.crowdAgent = agentHandle;
-// }
-
-// // If the model already exists, align the crowd agent to avoid an initial desync.
-// try {
-// if (tpView.model && tpView.crowdAgent) {
-// const tgt = tpView.model.position;
-// if (typeof tpView.crowdAgent.teleport === 'function') {
-// tpView.crowdAgent.teleport({ x: tgt.x, y: tgt.y, z: tgt.z });
-// } else if (tpView.crowdAgent.position) {
-// tpView.crowdAgent.position = { x: tgt.x, y: tgt.y, z: tgt.z };
-// }
-// }
-// } catch (e) {
-// console.warn("addThirdPersonToCrowd: failed to align tpView.crowdAgent to model", e);
-// }
-
-// console.log("addThirdPersonToCrowd: created TP crowd agent", agentHandle);
-// return agentHandle;
-// }
 
 export function addThirdPersonToCrowd(scene, crowd, tpView) {
   return new Promise((resolve, reject) => {
