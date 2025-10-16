@@ -155,7 +155,7 @@
       import landingPageHTML from './template/landingpage_template.js';
 
       document.getElementById('landingpage').innerHTML = landingPageHTML;
-
+      
       // Lazy i18n loader
       const lazyI18n = () =>
         import('./src/i18next.js').then(({ initI18next, updateContent, changeLanguage }) => {

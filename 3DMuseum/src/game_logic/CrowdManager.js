@@ -1,5 +1,6 @@
 import { Crowd } from 'recast-navigation';
 import * as THREE from 'three';
+import { prefetchAudio , playAudio , AssetDataMap , FrameToImageMeshMap} from './index.js';
 
 let crowd = null;
 const agents = new Map();
@@ -18,6 +19,8 @@ export function initCrowd(navMesh, maxAgents = 16, maxAgentRadius = 1.0) {
     return null;
   }
 }
+
+
 
 export function addAgent(position, agentParams = {}, userData = {}) {
   if (!crowd) {
@@ -107,8 +110,6 @@ export function setAgentTarget(agentId, targetPosition, navQuery, options = {}) 
     console.warn('setAgentTarget failed:', e);
   }
 }
-
-
 
 // CrowdManager.js - replace existing updateCrowd
 export function updateCrowd(dt, timeSinceLastFrame = undefined, maxSubSteps = undefined) {
@@ -215,7 +216,6 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
             faceWorldPos: facePos,  // look at the picture
             targetWorldPos: tempWorldPos.clone()
         });
-
         console.warn("Queued tour target:", pictureMesh.name, "=> TourTarget worldPos", tempWorldPos);
     }
 
@@ -223,6 +223,8 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
         console.warn("startAgentTour: no valid nav points");
         return false;
     }
+
+
 
     // Create tour state
     const now = performance.now() / 1000;
@@ -272,8 +274,9 @@ export function stopAgentTour(agentEntry) {
   return true;
 }
 
-export function updateAgentTours(navQuery) {
+export async function updateAgentTours(navQuery) {
   if (!navQuery) return;
+
   const now = (typeof performance !== 'undefined') ? performance.now() / 1000 : Date.now() / 1000;
 
   for (const [agentHandle, tour] of agentTours.entries()) {
@@ -283,24 +286,27 @@ export function updateAgentTours(navQuery) {
         continue;
       }
 
+      // Ensure per-tour helper flags exist (non-persistent across reloads)
+      if (typeof tour._arrived === 'undefined') tour._arrived = false;
+      if (typeof tour._prefetchCID === 'undefined') tour._prefetchCID = null;
+      if (typeof tour._restoreParamsScheduled === 'undefined') tour._restoreParamsScheduled = false;
+
       const entry = tour.entry ?? null;
       const model = entry?.model ?? (entry?.userData?.model ?? null);
-      const role = entry.role ?? ""
+      if (entry && entry.state) entry.state.mode = tour.status;
 
-      if (entry && entry.state){
-        entry.state.mode = tour.status;
-      }
-
-      // --- agent position (interpolated if available) ---
+      // get agent position (interpolated if available)
       let agentPosition;
       try {
-        agentPosition = (typeof agentHandle.interpolatedPosition === 'function')
-          ? agentHandle.interpolatedPosition()
-          : (typeof agentHandle.position === 'function' ? agentHandle.position() : agentHandle.position);
-      } catch (e) {
+        agentPosition =
+          (typeof agentHandle.interpolatedPosition === "function")
+            ? agentHandle.interpolatedPosition()
+            : (typeof agentHandle.position === "function" ? agentHandle.position() : agentHandle.position);
+      } catch {
         agentPosition = agentHandle.position ?? null;
       }
       if (!agentPosition) continue;
+
       const agentPos = new THREE.Vector3(
         agentPosition.x ?? agentPosition[0],
         agentPosition.y ?? agentPosition[1],
@@ -308,174 +314,192 @@ export function updateAgentTours(navQuery) {
       );
 
       const current = tour.queue[tour.index];
-      if (!current || !current.navPt || !current.navPt.point) {
-        console.warn('updateAgentTours: skipping invalid queue item at index', tour.index);
-        // try to advance to next item to avoid endless loop
+      const next = tour.queue[tour.index + 1];
+
+      if (!current || !current.navPt?.point) {
         tour.index = Math.min(tour.index + 1, tour.queue.length - 1);
         continue;
       }
 
-      // compute horizontal distance to the target nav point
       const targetPt = current.navPt.point;
-      const targetXZ = new THREE.Vector3(targetPt.x, 0, targetPt.z);
-      const dx = agentPos.x - targetXZ.x;
-      const dz = agentPos.z - targetXZ.z;
-      const dist = Math.sqrt(dx*dx + dz*dz);
+      const dx = agentPos.x - targetPt.x;
+      const dz = agentPos.z - targetPt.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
 
-      // DEBUG: show where we are for this tour occasionally
-      // console.debug(`tour idx=${tour.index}/${tour.queue.length-1} status=${tour.status} dist=${dist.toFixed(3)} target=${targetPt.x.toFixed(2)},${targetPt.z.toFixed(2)}`);
+      // === parameters for hysteresis to avoid oscillation ===
+      const arrivalDist = (tour.arrivalDist ?? TOUR_DEFAULT.arrivalDist);
+      const hysteresisDist = Math.max(arrivalDist * 0.5, 0.25); // if it moves farther than this, clear arrived
 
+      // --------------------------
+      // MOVING state (main)
+      // --------------------------
       if (tour.status === 'moving') {
-        // arrival test
-        const arrivalDist = (tour.arrivalDist ?? TOUR_DEFAULT.arrivalDist);
+        // mark tour state
         if (entry && entry.state) {
           entry.state.currentPictureMesh = null;
           entry.state.isOnTour = true;
           entry.state.atDestination = false;
           entry.state.isViewingPicture = false;
         }
-        if (dist <= arrivalDist) {
-          console.warn('updateAgentTours: arrived at index', tour.index, 'for', current.pictureMesh?.name ?? '(unknown)', 'dist', dist.toFixed(3));
-          if (entry && entry.state){
-            entry.state.atDestination = true;
-            entry.state.currentPictureMesh = current.pictureMesh;
-            entry.state.isViewingPicture = true;
 
-          }
+        // --- PREFETCH (DEFERRED & DEBOUNCED) ---
+        // build next audio CID (but do not decode/fetch here synchronously)
+        if (next && AssetDataMap.size > 0 && typeof prefetchAudio === 'function') {
+          const nextPictureMesh = next.pictureMesh?.name;
+          const nextImageMesh = FrameToImageMeshMap[nextPictureMesh];
+          const fetchItem = AssetDataMap.get(nextImageMesh);
+          if (fetchItem) {
+            const language = localStorage.getItem("language") || "en";
+            const nextAudioCID = (language === "vi") ? fetchItem.viet_audio_cid : fetchItem.eng_audio_cid;
 
-          // clear any move target on the agent (stop it immediately)
-          try {
-            if (typeof agentHandle.resetMoveTarget === 'function') {
-              agentHandle.resetMoveTarget();
-            } else if (typeof agentHandle.requestMoveTarget === 'function') {
-              // requestMoveTarget to its current position is another way to stop it
-              agentHandle.requestMoveTarget(agentPos);
-            }
-
-            // ALSO make agent physically unable to continue by clamping speed/accel.
-            // Many crowd runtimes expose updateParameters/updateAgent params — try that.
-            try {
-              if (typeof agentHandle.updateParameters === 'function') {
-                agentHandle.updateParameters({
-                  maxSpeed: 0.0,
-                  maxAcceleration: 0.0
-                });
-              } else if (crowd && typeof crowd.requestMoveTarget === 'function') {
-                // As a fallback, requestMoveTarget to the current position via crowd API
-                try { crowd.requestMoveTarget(agentHandle, { x: agentPos.x, y: agentPos.y, z: agentPos.z }); } catch (e2) {}
+            // schedule prefetch only once per unique CID per tour
+            if (nextAudioCID && nextAudioCID !== tour._prefetchCID) {
+              tour._prefetchCID = nextAudioCID;
+              // defer actual network/decoding to idle time — no awaits in update loop
+              if (typeof requestIdleCallback !== 'undefined') {
+                requestIdleCallback(() => {
+                  try { prefetchAudio(nextAudioCID); } catch (e) { console.warn('prefetchAudio failed', e); }
+                }, { timeout: 1000 });
+              } else {
+                setTimeout(() => { try { prefetchAudio(nextAudioCID); } catch (e) { console.warn('prefetchAudio failed', e); } }, 0);
               }
-            } catch (eParams) { /* ignore parameter set failures */ }
-          } catch (e) { /* ignore */ }
-
-          // snap model vertically (if present)
-          if (model) {
-            const footOffset = (typeof model.userData?.footOffset === 'number') ? model.userData.footOffset : 0;
-            model.position.set(agentPos.x, agentPos.y + footOffset, agentPos.z);
-          }
-
-          // --- Robust facing toward picture plane (replacement) ---
-          if (model) {
-            // world-space picture center
-            const faceW = current.faceWorldPos?.clone()
-              ?? new THREE.Vector3(targetPt.x, model.position.y, targetPt.z);
-
-            // Attempt to compute the picture's front normal in world space
-            // Strategy: prefer mesh.getWorldDirection (returns the object's -Z forward in world),
-            // else fallback to a default world-forward (0,0,1).
-            let planeNormal = new THREE.Vector3(0, 0, 1);
-            try {
-              if (current.pictureMesh && typeof current.pictureMesh.getWorldDirection === 'function') {
-                // getWorldDirection returns the object's local -Z direction in world coords
-                planeNormal.copy(current.pictureMesh.getWorldDirection(new THREE.Vector3()));
-                // If length is tiny, fallback
-                if (planeNormal.lengthSq() < 1e-6) planeNormal.set(0, 0, 1);
-              }
-            } catch (e) {
-              planeNormal.set(0, 0, 1);
-            }
-
-            // Decide which side of the plane faces the agent: compute vector from picture to agent (horizontal)
-            const toAgent = new THREE.Vector3(agentPos.x - faceW.x, 0, agentPos.z - faceW.z);
-            if (toAgent.lengthSq() < 1e-6) {
-              // agent is nearly exactly at picture center — choose default
-              toAgent.set(0, 0, 1);
-            } else {
-              toAgent.normalize();
-            }
-
-            // Ensure planeNormal is oriented *toward* the agent (so we offset on the visible/front side)
-            if (planeNormal.dot(toAgent) < 0) {
-              planeNormal.negate();
-            }
-
-            // Build a look-at point a little in front of the picture (keep at model's Y height)
-            const frontOffset = 0.5; // tweak: how far the agent should face from the picture
-            const lookAtPoint = faceW.clone().addScaledVector(planeNormal, frontOffset);
-            lookAtPoint.y = model.position.y; // only rotate around Y
-
-            // Horizontal direction from agent to lookAt
-            const dirH = new THREE.Vector3(lookAtPoint.x - agentPos.x, 0, lookAtPoint.z - agentPos.z);
-            if (dirH.lengthSq() > 1e-6) {
-              dirH.normalize();
-              // yaw: atan2(dx, dz) (consistent with your existing code)
-              let yaw = Math.atan2(dirH.x, dirH.z);
-              if (yaw < 0){
-                yaw += Math.PI/2
-              }else if (yaw > 0){
-                yaw -= Math.PI/2
-              }
-
-
-              // If the character model's forward axis isn't world +Z, optionally apply a per-model correction
-              // Set model.userData.forwardCorrection = radians to fix authoring mismatch (e.g. Math.PI/2)
-              const correction = (model.userData && typeof model.userData.forwardCorrection === 'number')
-                ? model.userData.forwardCorrection
-                : 0;
-
-              const desiredQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw + correction, 0));
-
-              // Set orientation instantly (reliable) — you can slerp instead for smoothness:
-              model.quaternion.copy(desiredQuat);
-
-              // store freeze state same as before
-              if (!entry.state) entry.state = {};
-              entry.state.tourFacingQuat = desiredQuat.clone();
-              entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
-
-            } else {
-              // tiny / degenerate direction — still freeze to avoid jitter
-              if (!entry.state) entry.state = {};
-              entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
             }
           }
-
-
-          // go to waiting state
-          tour.status = 'waiting';
-          tour.nextActionTime = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
-
-          // set model/entry to idle state so animation system plays idle
-          if (entry && entry.state) {
-            entry.state.mode = 'idle';
-            entry.state.requestedGait = null;
-          }
-
-          // Safety: also ensure the underlying crowd agent remains stopped for the
-          // duration of the hold so small pathing jitter doesn't re-trigger motion.
-          // (We already set updateParameters above to 0; schedule a restore later when we move.)
-
-          continue; // done for this agent this frame
         }
 
-        // still moving: no other action in this branch
-      } else if (tour.status === 'waiting') {
-        // waiting for hold time to finish before moving to next target
+        // --- ARRIVAL DETECTION (with single-fire) ---
+        if (dist <= arrivalDist) {
+          // if not already handled as arrived -> handle arrival once
+          if (!tour._arrived) {
+            tour._arrived = true;             // mark arrived to avoid repeated handling
+            tour._prefetchCID = null;        // allow next leg to prefetch later
+
+            // play audio (deferred slightly so it doesn't block)
+            const pictureMeshName = current.pictureMesh?.name;
+            const imageMeshName = FrameToImageMeshMap[pictureMeshName];
+            if (pictureMeshName && AssetDataMap.size > 0 && typeof playAudio === 'function') {
+              const assetData = AssetDataMap.get(imageMeshName);
+              if (assetData) {
+                const language = localStorage.getItem('language') || 'en';
+                const audioCID = (language === 'vi') ? assetData.viet_audio_cid : assetData.eng_audio_cid;
+                if (audioCID) {
+                  if (entry && entry.state) entry.state.audioLoading = true;
+                  // small non-blocking defer
+                  setTimeout(() => {
+                    try { playAudio(audioCID); } catch (e) { console.warn('playAudio failed', e); }
+                    if (entry && entry.state) {
+                      entry.state.audioLoading = false;
+                      entry.state.isPlayingAudio = true;
+                    }
+                  }, 60);
+                }
+              }
+            }
+
+            // STOP AGENT (once) - use resetMoveTarget or requestMoveTarget once
+            try {
+              if (typeof agentHandle.resetMoveTarget === 'function') {
+                agentHandle.resetMoveTarget();
+              } else if (typeof agentHandle.requestMoveTarget === 'function') {
+                agentHandle.requestMoveTarget(agentPos);
+              }
+
+              // set movement params to 0 to hold in place — only once
+              if (typeof agentHandle.updateParameters === 'function') {
+                const params = {
+                  maxSpeed: 3.5,
+                  maxAcceleration: 8.0
+                };
+                // gradually fade to stop over 300ms
+                let steps = 6;
+                const stepDelay = 50;
+                for (let i = 1; i <= steps; i++) {
+                  const factor = 1 - i / steps;
+                  setTimeout(() => {
+                    agentHandle.updateParameters({
+                      maxSpeed: params.maxSpeed * factor,
+                      maxAcceleration: params.maxAcceleration * factor
+                    });
+                  }, i * stepDelay);
+                }
+              } else if (crowd && typeof crowd.requestMoveTarget === 'function') {
+                crowd.requestMoveTarget(agentHandle, { x: agentPos.x, y: agentPos.y, z: agentPos.z });
+
+              }
+            } catch (e) { /* ignore errors */ }
+
+            // align model to agent pos (snap when arrived)
+            // if (model) {
+            //   const footOffset = (typeof model.userData?.footOffset === 'number') ? model.userData.footOffset : 0;
+            //   model.position.set(agentPos.x, agentPos.y + footOffset, agentPos.z);
+            // }
+
+            // face picture (same as before)
+            if (model) {
+              const faceW = current.faceWorldPos?.clone() ?? new THREE.Vector3(targetPt.x, model.position.y, targetPt.z);
+              let planeNormal = new THREE.Vector3(0, 0, 1);
+              try {
+                if (current.pictureMesh && typeof current.pictureMesh.getWorldDirection === 'function') {
+                  planeNormal.copy(current.pictureMesh.getWorldDirection(new THREE.Vector3()));
+                  if (planeNormal.lengthSq() < 1e-6) planeNormal.set(0, 0, 1);
+                }
+              } catch (e) { planeNormal.set(0, 0, 1); }
+
+              const toAgent = new THREE.Vector3(agentPos.x - faceW.x, 0, agentPos.z - faceW.z);
+              if (toAgent.lengthSq() < 1e-6) toAgent.set(0, 0, 1);
+              else toAgent.normalize();
+              if (planeNormal.dot(toAgent) < 0) planeNormal.negate();
+
+              const lookAtPoint = faceW.clone().addScaledVector(planeNormal, 0.5);
+              lookAtPoint.y = model.position.y;
+
+              const dirH = new THREE.Vector3(lookAtPoint.x - agentPos.x, 0, lookAtPoint.z - agentPos.z);
+              if (dirH.lengthSq() > 1e-6) {
+                dirH.normalize();
+                let yaw = Math.atan2(dirH.x, dirH.z);
+                const correction = (model.userData && typeof model.userData.forwardCorrection === 'number') ? model.userData.forwardCorrection : 0;
+                const desiredQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw + correction, 0));
+                model.quaternion.copy(desiredQuat);
+                if (!entry.state) entry.state = {};
+                entry.state.tourFacingQuat = desiredQuat.clone();
+                entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
+              }
+            }
+
+            // set waiting state and flags
+            tour.status = 'waiting';
+            tour.nextActionTime = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
+            if (entry && entry.state) {
+              entry.state.mode = 'idle';
+              entry.state.requestedGait = null;
+              entry.state.atDestination = true;
+              entry.state.isViewingPicture = true;
+            }
+            continue; // next agent
+          }
+        } else {
+          // if we had previously marked arrived but agent wandered outside small hysteresis radius, clear arrived flag
+          if (tour._arrived && dist > (arrivalDist + hysteresisDist)) {
+            tour._arrived = false;
+          }
+        }
+
+        // skip rotation while preventRotationUntil holds
+        if (entry?.state?.preventRotationUntil && now < entry.state.preventRotationUntil) {
+          continue;
+        }
+      } // end moving
+
+      // --------------------------
+      // WAITING state: move to next target when hold expires
+      // --------------------------
+      else if (tour.status === 'waiting') {
         if (now >= (tour.nextActionTime ?? 0)) {
           let nextIndex = tour.index + 1;
           if (nextIndex >= tour.queue.length) {
             if (tour.loop) nextIndex = 0;
             else {
-              // finish the tour
+              // finish tour
               console.warn('updateAgentTours: tour finished for agent', agentHandle);
               agentTours.delete(agentHandle);
               if (entry && entry.state) {
@@ -489,47 +513,53 @@ export function updateAgentTours(navQuery) {
               continue;
             }
           }
+          // advance index
           tour.index = nextIndex;
 
-          // before requesting move, compute a debug path check
+          // restore movement parameters if we previously zeroed them
           try {
-            const startRes = navQuery.findClosestPoint({ x: agentPos.x, y: agentPos.y + 1.0, z: agentPos.z });
-            const startPoint = startRes?.point ?? { x: agentPos.x, y: agentPos.y, z: agentPos.z };
-            const nextNavPt = tour.queue[tour.index].navPt;
-            const pathRes = navQuery.computePath(startPoint, nextNavPt.point);
-            console.warn('updateAgentTours -> attempting move to', tour.queue[tour.index].pictureMesh?.name, 'index', tour.index,
-                         'navPt', nextNavPt.point, 'pathOK?', !!pathRes?.success);
-          } catch (e) {
-            console.warn('updateAgentTours -> path check failed', e);
-          }
+            if (tour._restoreParamsScheduled) {
+              if (typeof agentHandle.updateParameters === 'function') {
+                // restore sensible defaults (tune to your agent defaults)
+                agentHandle.updateParameters({
+                  maxSpeed: tour.gait?.maxSpeed ?? 2.0,
+                  maxAcceleration: tour.gait?.maxAcceleration ?? 6.0
+                });
+              }
+              tour._restoreParamsScheduled = false;
+            }
+          } catch (err) { /* ignore */ }
 
-          // request move to new target (use the navQuery object directly)
           try {
-            console.warn('updateAgentTours setting target (from waiting):', tour.queue[tour.index].pictureMesh?.name,
-                         '->', tour.queue[tour.index].navPt.point);
             setAgentTarget(agentHandle, tour.queue[tour.index].navPt, navQuery, { entry, requestedGait: tour.gait ?? null });
           } catch (e) {
-            console.warn('updateAgentTours: setAgentTarget failed', e);
+            console.warn("updateAgentTours: setAgentTarget failed", e);
           }
 
           tour.status = 'moving';
         }
-      } else if (tour.status === 'starting') {
-        // initial bootstrap: set first move
+      }
+
+      // --------------------------
+      // STARTING state
+      // --------------------------
+      else if (tour.status === 'starting') {
         try {
           const nextNav = current.navPt;
-          console.warn('updateAgentTours (starting) set target:', current.pictureMesh?.name, '->', nextNav.point);
           setAgentTarget(agentHandle, nextNav, navQuery, { entry, requestedGait: tour.gait ?? null });
         } catch (e) {
-          console.warn('updateAgentTours: starting setAgentTarget failed', e);
+          console.warn("updateAgentTours: starting setAgentTarget failed", e);
         }
         tour.status = 'moving';
       }
+
     } catch (ex) {
       console.error('updateAgentTours: exception for agent:', ex);
     }
   } // end for
 }
+
+
 
 export function addThirdPersonToCrowd(scene, crowd, tpView) {
   return new Promise((resolve, reject) => {

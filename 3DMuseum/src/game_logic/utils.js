@@ -1,3 +1,4 @@
+import { ThreeMFLoader } from "three/examples/jsm/Addons.js";
 import { UploadItem , StartWebSocket , SubscribeChannel} from "./services";
 import * as THREE from "three";
 
@@ -48,6 +49,7 @@ export function displayUploadModal(_aspectRatio, uploadProps) {
     uploadModal.style.display = "block";
     uploadProperties = uploadProps;
     console.log("upload properties: ", uploadProps);
+
 
     // Ensure websocket running and subscribe to room channel so we receive progress updates 
     StartWebSocket();
@@ -151,35 +153,82 @@ function handleFile(file) {
     }
 }
 
-export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap , pictureFramesArray, imageMeshesArray){
-    let imageMeshes = imageMeshesArray; // GET ALL THE ImageMesh from the annotationMesh map
-    // console.log("ImageMesh Array: ", imageMeshesArray)
-    // console.log("PictureFrame Array: ", pictureFramesArray)
-    let position = new THREE.Vector3();
-    for (const frame of pictureFramesArray){
-        let closest = null;
-        let minDistance = Infinity;
+// utils.js
 
-        // Get the position of the frame
-        frame.getWorldPosition(position);
+// Replace your current Mapping_PictureFrame_ImageMesh with this version.
+export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray) {
+  // Defensive copy of image meshes we can assign
+  let availableImageMeshes = [...imageMeshesArray];
 
-        for (const imgMesh of imageMeshes){
+  // Temporary vectors to avoid allocations in loops
+  const framePos = new THREE.Vector3();
+  const imgPos = new THREE.Vector3();
 
-            // Get the position of the image mesh
-            imgMesh.getWorldPosition(position)
+  // Debug: print arrays BEFORE mapping so you can inspect exporter order
+  console.warn('--- Mapping debug: BEFORE mapping ---');
+  for (const f of pictureFramesArray) {
+    f.getWorldPosition(framePos);
+    console.warn(`Frame: ${f.name} worldPos: ${framePos.x.toFixed(3)}, ${framePos.y.toFixed(3)}, ${framePos.z.toFixed(3)}`);
+  }
+  for (const m of imageMeshesArray) {
+    m.getWorldPosition(imgPos);
+    console.warn(`ImageMesh: ${m.name} worldPos: ${imgPos.x.toFixed(3)}, ${imgPos.y.toFixed(3)}, ${imgPos.z.toFixed(3)}`);
+  }
+  console.warn('--- End debug ---');
 
-            const distance = position.distanceTo(position);
-            if(distance < minDistance){
-                closest = imgMesh;
-                minDistance = distance;
-            }
-        }
+  // Sort frames left -> right by world X (if your gallery layout is horizontal).
+  // If your layout runs on Z-axis instead, change to comparing .z instead.
+  pictureFramesArray.sort((a, b) => {
+    a.getWorldPosition(framePos);
+    b.getWorldPosition(imgPos); // reuse imgPos as temp
+    return framePos.x - imgPos.x;
+  });
 
-        if(closest){
-            FrameToImageMeshMap[frame.name] = closest.name;
-        }
+  // Also sort available images left -> right to give consistent baseline (not required
+  // for the nearest-neighbour but makes behavior deterministic).
+  availableImageMeshes.sort((a,b) => {
+    a.getWorldPosition(framePos);
+    b.getWorldPosition(imgPos);
+    return framePos.x - imgPos.x;
+  });
+
+  for (const frame of pictureFramesArray) {
+    frame.getWorldPosition(framePos);
+
+    let closest = null;
+    let closestIndex = -1;
+    let minDistance = Infinity;
+
+    // find nearest unassigned image mesh (one-to-one)
+    for (let i = 0; i < availableImageMeshes.length; i++) {
+      const img = availableImageMeshes[i];
+      img.getWorldPosition(imgPos);
+      const d = framePos.distanceTo(imgPos);
+      if (d < minDistance) {
+        minDistance = d;
+        closest = img;
+        closestIndex = i;
+      }
     }
+
+    if (closest) {
+      FrameToImageMeshMap[frame.name] = closest.name;
+      // remove assigned image so it won't be chosen again
+      availableImageMeshes.splice(closestIndex, 1);
+
+      // log mapping and positions for verification
+      closest.getWorldPosition(imgPos);
+      console.warn(`Picture Frame: ${frame.name} (${framePos.x.toFixed(3)}, ${framePos.z.toFixed(3)}) -> ImageMesh: ${closest.name} (${imgPos.x.toFixed(3)}, ${imgPos.z.toFixed(3)}) dist=${minDistance.toFixed(3)}`);
+    } else {
+      FrameToImageMeshMap[frame.name] = null;
+      console.warn(`Picture Frame: ${frame.name} -> (NO MATCH)`);
+    }
+  }
+
+  // Final mapping log
+  console.warn('Final FrameToImageMeshMap:', JSON.stringify(FrameToImageMeshMap, null, 2));
 }
+
 
 export function DisplayImageOnDiv(imageURL, title, vietnamese_description, english_description) {
     if (!FirstIMGCol || !TitleContainer || !BottomContainer || !ImageShowContainer) {

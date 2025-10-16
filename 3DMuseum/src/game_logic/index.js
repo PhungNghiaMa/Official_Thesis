@@ -85,8 +85,9 @@ let camPitch = 0;
 // NPC instance 
 let museumNPC = null;
 
-// TESTING NAVMESH OBJECT
-let Wall001 = null;
+
+// AssetDataMap to store and quickly extract data for each image mesh to use in room tour mode
+export const AssetDataMap = new Map()
 
 // Instance of navmesh building 
 let navQuery = null;
@@ -102,7 +103,8 @@ let  pictureFramesArray = [];
 // PINATA URL 
 const PINATA_URL = import.meta.env.MODE === "production"
     ? import.meta.env.VITE_PINATA_PRIVATE_GATEWAY // Use VITE_ prefix
-    : import.meta.env.VITE_PINATA_PUBLIC_GATEWAY;     // Use VITE_ prefix
+    : import.meta.env.VITE_PINATA_PRIVATE_GATEWAY;     // Use VITE_ prefix
+
 
 // Container instance 
 let loadingManager = document.getElementById('loading-container');
@@ -142,10 +144,10 @@ const doorState = {
     Door002: false
 }
 let interactedDoor;
-const FrameToImageMeshMap = {};
+export const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_15.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_18.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -188,46 +190,121 @@ function showAnnotations() {
     });
 }
 
+// Audio instance 
+export const audioCache = new Map();
+export const audioRawCache = new Map();       // CID -> ArrayBuffer (raw)
+let audioContext = null;
+let currentSourceNode = null; // Keep track of the currently playing source for potential stopping
 
-function setImageToMesh(scene,meshName, imgUrl) {
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load(imgUrl,
-        (loadedTexture) => {
-            loadedTexture.flipY = false;
-            loadedTexture.colorSpace = THREE.SRGBColorSpace;
-            loadedTexture.minFilter = THREE.LinearMipMapLinearFilter; // Use mipmaps for better quality
-            loadedTexture.magFilter = THREE.LinearMipmapLinearFilter;
-            loadedTexture.generateMipmaps = true;
-            loadedTexture.wrapS = THREE.ClampToEdgeWrapping;
-            loadedTexture.wrapT = THREE.ClampToEdgeWrapping;
-            loadedTexture.needsUpdate = true;
-            loadedTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+function getAudioContext() {
+    if (audioContext === null) {
+        // 1. Get the correct constructor: use the standard one, 
+        //    or the vendor-prefixed one for older Safari/Chrome.
+        const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
 
-            const material = new THREE.MeshStandardMaterial({
-                map: loadedTexture,
-                side: THREE.DoubleSide,
-                roughness: 0.5,  // adjust to taste
-                metalness: 0.0,  // usually 0 for paintings/paper
-            });
-
-
-            let mesh = scene.getObjectByName(meshName)
-            if (mesh && mesh.isMesh){
-                mesh.material = material;
-                mesh.material.needsUpdate = true;
-                if (mesh.geometry?.attributes.uv) {
-                    mesh.geometry.attributes.uv.needsUpdate = true;
-                }
-            }else{
-                console.warn(`Cannot find mesh for ${meshName}`)
-            }
-        },
-        undefined,
-        (error) => {
-            console.error('Error loading texture:', error);
+        if (!AudioContextConstructor) {
+            console.error("Web Audio API is not supported in this browser.");
+            return null;
         }
-    );
+        // 2. Instantiate the context using the constructor
+        audioContext = new AudioContextConstructor();
+        console.log("✅ AudioContext initialized.");
+    }
+    return audioContext;
 }
+
+export async function prefetchAudio(audioCID) {
+  if (!audioCID) return null;
+  if (audioCache.has(audioCID) || audioRawCache.has(audioCID)) return; // already cached
+
+  try {
+    const url = `https://${PINATA_URL}${audioCID}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+
+    const arrayBuf = await response.arrayBuffer();
+    audioRawCache.set(audioCID, arrayBuf);
+
+    // Schedule lazy decode (off the main loop)
+    requestIdleCallback(async () => {
+      try {
+        const context = getAudioContext();
+        if (!context || audioCache.has(audioCID)) return;
+        const buffer = await context.decodeAudioData(arrayBuf.slice(0)); // copy for safety
+        audioCache.set(audioCID, buffer);
+        audioRawCache.delete(audioCID); // free raw buffer
+        console.log(`🎧 Audio pre-decoded for ${audioCID}`);
+      } catch (err) {
+        console.warn(`decodeAudioData failed for ${audioCID}`, err);
+      }
+    });
+
+  } catch (error) {
+    console.error(`❌ Error prefetching ${audioCID}:`, error);
+  }
+}
+
+export async function playAudio(audioCID) {
+  const context = getAudioContext();
+  if (!context) return;
+
+  if (currentSourceNode) {
+    try { currentSourceNode.stop(); } catch {}
+    currentSourceNode = null;
+  }
+
+  let buffer = audioCache.get(audioCID);
+  if (!buffer) {
+    const raw = audioRawCache.get(audioCID);
+    if (raw) {
+      try {
+        buffer = await context.decodeAudioData(raw.slice(0));
+        audioCache.set(audioCID, buffer);
+        audioRawCache.delete(audioCID);
+      } catch (err) {
+        console.error(`decodeAudioData failed for ${audioCID}`, err);
+        return;
+      }
+    } else {
+      console.warn(`Audio for CID ${audioCID} not prefetched.`);
+      prefetchAudio(audioCID); // fallback fetch
+      return;
+    }
+  }
+
+  if (context.state !== "running") {
+    await context.resume().catch(() => {});
+  }
+
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  source.onended = () => {
+    source.disconnect();
+    if (currentSourceNode === source) currentSourceNode = null;
+  };
+  source.start(0);
+  currentSourceNode = source;
+}
+
+export function stopAudio() {
+    if (currentSourceNode) {
+        currentSourceNode.stop();
+        currentSourceNode = null;
+        console.log("Audio stopped.");
+    }
+}
+
+document.addEventListener("click", () => {
+    const context = getAudioContext();
+    if (context && context.state !== 'running') {
+        context.resume().then(() => {
+            console.log("AudioContext resumed on user interaction.");
+        }).catch(e => console.error("Error resuming AudioContext:", e));
+    }
+}, { once: true });
+
+
 
 
 // NOTE: Make sure ktx2Loader and renderer are defined and accessible in the scope.
@@ -271,6 +348,8 @@ function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgU
         }
     );
 }
+
+
 
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
@@ -518,13 +597,13 @@ function initNPC(scene, navQuery, bvhMeshes) {
   const agent = addAgent(
     npcModel.position,
     {
-      radius: 0.1,
+      radius: 0.25,
       height: 2.0,
-      maxAcceleration: 14.0,
-      maxSpeed: 10.0,
+      maxAcceleration: 20.0,
+      maxSpeed: 20.0,
       separationWeight: 0.0,
       collisionQueryRange: 0.25,
-      pathOptimizationRange: 50,
+      pathOptimizationRange: 20,
     },
     { model: npcModel }
   );
@@ -536,7 +615,7 @@ function initNPC(scene, navQuery, bvhMeshes) {
 
   console.info("initNPC: NPC initialized as crowd agent", agent, "at", npcModel.position);
 
-  return { model: npcModel, agent, walkSpeed: 2.4, runSpeed: 6.0, state: { mode: 'idle' }, requestedGait: null };
+  return { model: npcModel, agent, walkSpeed: 2.6, runSpeed: 6.0, state: { mode: 'idle' }, requestedGait: null };
 }
 
 // index.js — replace setPlayerFollowTarget with the version below
@@ -679,8 +758,6 @@ function animateProgress() {
   }
 }
 
-
-
 // --------- helper: compute nav path length (meters) ----------
 function computeNavPathLength(navQuery, startPoint, endPoint) {
   if (!navQuery || !startPoint || !endPoint) return 0;
@@ -697,6 +774,7 @@ function computeNavPathLength(navQuery, startPoint, endPoint) {
     return 0;
   }
 }
+
 
 // src/game_logic/index.js
 async function loadModel() {
@@ -794,6 +872,7 @@ async function loadModel() {
         const getAssetsPromise =  GetRoomAsset(currentMuseumId);
 
 
+
         // 3. Load third view character
         const loadModelCharacterPromise = characterLoader.loadAsync('optimizedModel/ANIMATED_1.glb');
         // Try to load the characterModel in background, but don't block scene loading on it.
@@ -820,6 +899,18 @@ async function loadModel() {
         // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
         const [gltf] = await Promise.all([loadModelPromise]);
 
+        // // Clear map before use 
+        // AssetDataMap.clear()
+        // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
+        // // image mesh name
+        // for (const item of items){
+        //   AssetDataMap.set(item.asset_mesh_name , item)
+        // }
+
+        // let URL = "QmV55VNUfsGpCqv18Ak2B2VMHRxpaeupFedBMBJQVZ61zq"
+        // await prefetchAudio(URL)
+        // playAudio(URL)
+
 
         // --- SCENE SETUP (executes after all assets are downloaded) ---
         scene.add(gltf.scene);
@@ -845,17 +936,18 @@ async function loadModel() {
         gltf.scene.traverse((child) => {
           // if(!child.isMesh) return;
           if (child.name.endsWith('_NPC_Target')) {
+            // console.warn(child.name);
             let frameName = child.name.replace('_NPC_Target', '');
-            console.warn("Initial frame name: ", frameName)
+            // console.warn("Initial frame name: ", frameName)
             // Use a specific regex to handle the CubeXXX001 case
-            const match = frameName.match(/^(Cube)(\d{3})$/);
+            const match = frameName.match(/^(PictureFrame)(\d{3})$/);
             // If a match is found, reformat the name
             if (match) {
-                console.log(`frameName: ${frameName} - Match: ${!!match}`)
+                // console.log(`frameName: ${frameName} - Match: ${!!match}`)
                 console.log(`${match[1]} - ${match[2]}`)
                 const base = match[1]; // 'Cube'
-                const num = parseInt(match[2], 10); // 1
-                frameName = `${base}046_${num}`;
+                const num = match[2]; // 1
+                frameName = `${base}${num}`;
             }
             tourTargetsMap.set(frameName, child);
             // debug: print so we know the empties were found
@@ -916,16 +1008,6 @@ async function loadModel() {
                     fallbackZ = pos.z;
                 }
 
-                if (child.name === "Wall001"){
-                    child.receiveShadow = true;
-                    Wall001 = child;
-                    Wall001.material = new THREE.MeshStandardMaterial({ color: 0x00ff00 , wireframe: false });
-                    console.log("Wall001 position is: ", Wall001.position)
-                }
-
-                if (/^Picture_Frame\d+$/.test(child.name)) {
-                    pictureFramesArray.push(child);
-                }
 
                 if (child.name.toLowerCase().includes("floor")) {
                     child.receiveShadow = true;
@@ -949,7 +1031,17 @@ async function loadModel() {
                 //     child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
                 // }
 
+                if (child.name.toLowerCase().includes("pictureframe")){
+                  if (child.name === "PictureFrame001"){
+                    child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
+                  }
+                  pictureFramesArray.push(child);
+                }
+
                 if (/^ImageMesh\d+$/.test(child.name)) {
+                  if (child.name === "ImageMesh002"){
+                    child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
+                  }
                     imageMeshesArray.push(child);
                     const imagePlane = child;
                     if (imagePlane.geometry?.attributes.uv) imagePlane.geometry.attributes.uv.needsUpdate = true;
@@ -965,14 +1057,20 @@ async function loadModel() {
                     annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
                 }
 
-                if (child.name.includes('Cube046')) {
-                    pictureFramesArray.push(child);
-                }
             }
         });
+        // DEBUG PRINT PICTURE FRAME OBJECTS
+        // pictureFramesArray.forEach(child =>{
+        //   console.warn("PICTURE FRAME: ", child.name)
+        // })
+
+        // imageMeshesArray.forEach(child =>{
+        //   console.warn("IMAGE MESH: ", child.name);
+        // })
 
         // initialize recast (WASM) if needed
         await initRecastIfNeeded();
+
 
         console.log("START LOADING EXTERNAL NAVMESH")
         const ExternalNavMeshURL = './assets/navmesh/new_nav_mesh.bin'
@@ -1021,7 +1119,6 @@ async function loadModel() {
         RADIUS
         );
 
-
         // INIT FIRST VIEW PLAYER
         activateFirstPerson();
         fpView = new FirstPersonPlayer(camera, scene, playerCollider);
@@ -1054,11 +1151,13 @@ async function loadModel() {
 
         // --- POPULATE SCENE WITH DATA ---
         (Array.isArray(items) ? items : []).forEach(item => {
+            console.warn(item)
             if (!item) return;
             const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid  } = item;
             if (annotationMesh[asset_mesh_name]) {
                 annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
-                setImageToMesh(currentScene, asset_mesh_name, `https://${PINATA_URL}/${asset_cid}`);
+
+                setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
             }
         });
 
@@ -1154,7 +1253,7 @@ function animate() {
   // ---------------- CROWD UPDATE ----------------
   const FIXED_CROWD_DT = 1 / 60;
   const MAX_CROWD_SUBSTEPS = 10;
-  updateCrowd(FIXED_CROWD_DT, frameDelta, MAX_CROWD_SUBSTEPS);
+  updateCrowd(FIXED_CROWD_DT, frameDelta, 2);
   updateAgentTours(navQuery ?? getNavQuery());
 
   // ---------------- NPC SYNC ----------------
@@ -1172,7 +1271,7 @@ function animate() {
 
     const anim = model.userData?.animCtrl ?? model.userData?.animationCtrl;
     if (anim && anim.mixer && camera.position.distanceTo(model.position) < NPC_MIXER_DISTANCE) {
-      anim.mixer.update(frameDelta * 0.9);
+      anim.mixer.update(frameDelta );
     }
 
     // --- agent position ---
@@ -1189,6 +1288,19 @@ function animate() {
 
     let targetPos = new THREE.Vector3(agentPos.x, agentPos.y, agentPos.z);
     let snappedToBVH = false;
+
+    // DEBUG: log positions for first NPC only (turn on/off quickly)
+    if (typeof window.DEBUG_NPC_POSITIONS === 'undefined') window.DEBUG_NPC_POSITIONS = false;
+    if (window.DEBUG_NPC_POSITIONS && npcAgents.indexOf(entry) === 0) {
+      let rawPos = null;
+      try { rawPos = (typeof agent.position === 'function' ? agent.position() : agent.position); } catch (e) {}
+      let interp = null;
+      try { interp = (typeof agent.interpolatedPosition === 'function' ? agent.interpolatedPosition() : agent.interpolatedPosition); } catch(e){}
+      console.log('[NPC DEBUG] modelPos=', model.position.toArray().map(n=>n.toFixed(3)),
+                  ' interp=', interp ? [interp.x ?? interp[0], interp.y ?? interp[1], interp.z ?? interp[2]].map(n=>n.toFixed(3)) : 'null',
+                  ' raw=', rawPos ? [rawPos.x ?? rawPos[0], rawPos.y ?? rawPos[1], rawPos.z ?? rawPos[2]].map(n=>n.toFixed(3)) : 'null');
+    }
+
 
     if (bvhMeshList && bvhMeshList.length) {
       try {
@@ -1207,9 +1319,14 @@ function animate() {
     }
     targetPos.y += footOffset;
 
-    model.position.x = targetPos.x;
-    model.position.z = targetPos.z;
-    model.position.y = THREE.MathUtils.lerp(model.position.y, targetPos.y, NPC_VERTICAL_SMOOTH);
+    const responsiveness = 10.0; // bigger = snappier, smaller = smoother
+    const alpha = 1 - Math.exp(-responsiveness * frameDelta);
+
+    // Smooth X/Z instead of snapping: gives smooth motion regardless of frame jitter
+    model.position.x += (targetPos.x - model.position.x) * alpha;
+    model.position.z += (targetPos.z - model.position.z) * alpha;
+    // Smooth Y as well (ensures no vertical popping)
+    model.position.y += (targetPos.y - model.position.y) * alpha;
 
     // --- arrival handling ---
     let targetObj = null;
@@ -1228,11 +1345,11 @@ function animate() {
 
       if (anim && anim.idleAction) {
         if (anim.currentAction && anim.currentAction !== anim.idleAction) {
-          anim.currentAction.crossFadeTo(anim.idleAction, 0.5, false);
+          anim.currentAction.crossFadeTo(anim.idleAction, 1, true);
         }
         anim.idleAction.reset().play();
         anim.currentAction = anim.idleAction;
-        anim.currentAction.timeScale = 1.0;
+        anim.currentAction.timeScale = 0.8;
       }
 
       if (tpView && tpView.isTouring){
@@ -1247,13 +1364,13 @@ function animate() {
     const gaitWanted = entry.state.requestedGait ?? entry.state.mode;
     const desiredGaitSpeed = (gaitWanted === 'run')
       ? (entry.runSpeed ?? 6.0)
-      : (entry.walkSpeed ?? 1.6);
+      : (entry.walkSpeed ?? 2);
 
     try {
       if (typeof agent.updateParameters === 'function') {
         agent.updateParameters({
           maxSpeed: desiredGaitSpeed,
-          maxAcceleration: 30.0,
+          maxAcceleration: 10.0,
         });
       }
     } catch (e) {}
@@ -1288,17 +1405,15 @@ function animate() {
 
       if (nextAction && anim.currentAction !== nextAction) {
         if (anim.currentAction) {
-          anim.currentAction.crossFadeTo(nextAction, 0.5, true);
+          anim.currentAction.crossFadeTo(nextAction, 1, true);
         }
         nextAction.reset().play();
         anim.currentAction = nextAction;
       }
 
       if (anim.currentAction) {
-        const denom = desiredGaitSpeed;
-        const targetTimeScale = speed / denom;
-        const clamped = THREE.MathUtils.clamp(targetTimeScale, 0.6, 1.4);
-        anim.currentAction.timeScale = THREE.MathUtils.lerp(anim.currentAction.timeScale ?? 1.0, clamped, 0.25);
+        const targetScale = THREE.MathUtils.clamp(speed / desiredGaitSpeed, 1, 2);
+        anim.currentAction.timeScale = THREE.MathUtils.lerp(anim.currentAction.timeScale ?? targetScale, targetScale, 0.1);
       }
     }
   }
@@ -1436,6 +1551,9 @@ function animate() {
           const apos = (typeof npcEntry.agent.interpolatedPosition === 'function')
             ? npcEntry.agent.interpolatedPosition()
             : (typeof npcEntry.agent.position === 'function' ? npcEntry.agent.position() : npcEntry.agent.position);
+          if (apos && model) {
+            model.position.set(apos.x ?? apos[0], apos.y ?? apos[1], apos.z ?? apos[2]);
+          }
           npcPosVec = new THREE.Vector3(apos.x ?? apos[0], apos.y ?? apos[1], apos.z ?? apos[2]);
         } catch (e) { npcPosVec = null; }
       }
@@ -1474,7 +1592,7 @@ function animate() {
 
   // ---------------- MIXERS ----------------
   if (mixer) mixer.update(frameDelta);
-  if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.9);
+  if (tpView?.mixer) tpView.mixer.update(frameDelta);
 
   checkPlayerPosition();
   composer.render();
@@ -1708,95 +1826,103 @@ export function initializeGame(targetContainerId = 'model-container') {
         if (!document.pointerLockElement) clearAllInputs();
     });
 
+
     window.addEventListener('keydown', (event) => {
-        if (event.code === 'KeyV'){
-            // active toogle to switch between first and third view
-            activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
-            
-        }
+      // If modal is open and the user is NOT typing into a form control, block these game keys
+      // NEW CHECK: Ignore event if an input element is focused ***
+      const isInput = event.target.closest('input, textarea, select, [contenteditable="true"]');
+      if (isInput) {
+          return; // Exit the handler immediately if typing in a form field
+      }
 
-        // 'I' key to start/stop tour with first NPC
-        if (event.code === 'KeyI') {
-          const navQ = getNavQuery() ?? navQuery;
-          if (!navQ) {
-            console.warn('Cannot start tour: navQuery not ready');
-          } else if (!npcAgents || npcAgents.length === 0) {
-            console.warn('No NPCs available to tour with');
+      if (event.code === 'KeyV'){
+          // active toogle to switch between first and third view
+          activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
+          
+      }
+
+      // 'I' key to start/stop tour with first NPC
+      if (event.code === 'KeyI') {
+        const navQ = getNavQuery() ?? navQuery;
+        if (!navQ) {
+          console.warn('Cannot start tour: navQuery not ready');
+        } else if (!npcAgents || npcAgents.length === 0) {
+          console.warn('No NPCs available to tour with');
+        } else {
+          const npc = npcAgents[0];
+          if (!npc) return;
+
+          if (npc.state?.touring) {
+            // --- STOP TOUR ---
+            console.log("Stopping tour...");
+            stopAgentTour(npc);
+            npc.state.touring = false;
+
+            if (activePlayer === 'tp' && tpView && tpView.isTouring) {
+              tpView.isTouring = false;
+              if (typeof tpView.stopFollowAgent === 'function') {
+                tpView.stopFollowAgent();
+              }
+            } else if (activePlayer === 'fp' && fpView && fpView.isTouring) {
+              fpView.isTouring = false;
+              if (typeof fpView.stopFollowAgent === 'function') {
+                fpView.stopFollowAgent();
+              }
+            }
           } else {
-            const npc = npcAgents[0];
-            if (!npc) return;
+              // --- START TOUR ---
+              console.log("Starting tour...");
+              npc.state = npc.state || {};
+              npc.state.touring = true;
 
-            if (npc.state?.touring) {
-              // --- STOP TOUR ---
-              console.log("Stopping tour...");
-              stopAgentTour(npc);
-              npc.state.touring = false;
+              startAgentTour(npc, pictureFramesArray, navQ, {
+                loop: false,
+                holdTime: 3.0,
+                desiredDistance: 2.0,
+                gait: 'walk',
+                targetsMap: tourTargetsMap
+              });
 
-              if (activePlayer === 'tp' && tpView && tpView.isTouring) {
-                tpView.isTouring = false;
-                if (typeof tpView.stopFollowAgent === 'function') {
-                  tpView.stopFollowAgent();
+              // --- Always prepare TP agent, even if not active now ---
+              if (tpView && tpView.model) {
+                if (crowd && !tpView.crowdAgent) {
+                  addThirdPersonToCrowd(scene, crowd, tpView);
                 }
-              } else if (activePlayer === 'fp' && fpView && fpView.isTouring) {
-                fpView.isTouring = false;
-                if (typeof fpView.stopFollowAgent === 'function') {
-                  fpView.stopFollowAgent();
-                }
-              }
-            } else {
-                // --- START TOUR ---
-                console.log("Starting tour...");
-                npc.state = npc.state || {};
-                npc.state.touring = true;
-
-                startAgentTour(npc, pictureFramesArray, navQ, {
-                  loop: false,
-                  holdTime: 3.0,
-                  desiredDistance: 2.0,
-                  gait: 'walk',
-                  targetsMap: tourTargetsMap
-                });
-
-                // --- Always prepare TP agent, even if not active now ---
-                if (tpView && tpView.model) {
-                  if (crowd && !tpView.crowdAgent) {
-                    addThirdPersonToCrowd(scene, crowd, tpView);
-                  }
-                  // Sync position so that when switching to TP later, it's aligned
-                  if (tpView.crowdAgent && npc.model) {
-                    const npcPos = npc.model.position;
-                    try {
-                      if (typeof tpView.crowdAgent.teleport === 'function') {
-                        tpView.crowdAgent.teleport({ x: npcPos.x, y: npcPos.y, z: npcPos.z });
-                      } else {
-                        tpView.crowdAgent.position = { x: npcPos.x, y: npcPos.y, z: npcPos.z };
-                      }
-                    } catch (e) {
-                      console.warn("Failed to sync TP agent start:", e);
+                // Sync position so that when switching to TP later, it's aligned
+                if (tpView.crowdAgent && npc.model) {
+                  const npcPos = npc.model.position;
+                  try {
+                    if (typeof tpView.crowdAgent.teleport === 'function') {
+                      tpView.crowdAgent.teleport({ x: npcPos.x, y: npcPos.y, z: npcPos.z });
+                    } else {
+                      tpView.crowdAgent.position = { x: npcPos.x, y: npcPos.y, z: npcPos.z };
                     }
-                  }
-                }
-
-                if (activePlayer === 'tp' && tpView) {
-                  tpView.isTouring = true;
-                  if (typeof tpView.startFollowAgent === 'function') {
-                    tpView.startFollowAgent(npc);
-                  }
-                } else if (activePlayer === 'fp' && fpView) {
-                  fpView.isTouring = true;
-                  if (typeof fpView.setFollowAgent === 'function') {
-                    fpView.setFollowAgent(npc);
+                  } catch (e) {
+                    console.warn("Failed to sync TP agent start:", e);
                   }
                 }
               }
+
+              if (activePlayer === 'tp' && tpView) {
+                tpView.isTouring = true;
+                if (typeof tpView.startFollowAgent === 'function') {
+                  tpView.startFollowAgent(npc);
+                }
+              } else if (activePlayer === 'fp' && fpView) {
+                fpView.isTouring = true;
+                if (typeof fpView.setFollowAgent === 'function') {
+                  fpView.setFollowAgent(npc);
+                }
+              }
             }
-        }
-          if (activePlayer === 'fp' && fpView) {
-            fpView.onKeyDown(event);
-          } else if (activePlayer === 'tp' && tpView) {
-              tpView.onKeyDown(event);
-            }
-          });
+          }
+      }
+        if (activePlayer === 'fp' && fpView) {
+          fpView.onKeyDown(event);
+        } else if (activePlayer === 'tp' && tpView) {
+            tpView.onKeyDown(event);
+          }
+        });
 
       window.addEventListener('keyup', (event) => {
           if (activePlayer === 'fp' && fpView) {
@@ -1886,7 +2012,7 @@ export function initializeGame(targetContainerId = 'model-container') {
             const endPoint = closest.point;
 
             const pathLength = computeNavPathLength(navQuery, startPoint, endPoint);
-            const RUN_DISTANCE_THRESHOLD = 10.0; // tweak this threshold
+            const RUN_DISTANCE_THRESHOLD = 6.0; // tweak this threshold
 
             npcEntry.state = npcEntry.state || {};
             npcEntry.state.requestedGait = (pathLength >= RUN_DISTANCE_THRESHOLD) ? 'run' : 'walk';
