@@ -8,7 +8,7 @@ import { createAnimController } from './createAnimationController';
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-const GRAVITY = 30;
+const GRAVITY = 50;
 
 export default class ThirdPersonPlayer {
   constructor(camera, scene, playerCollider, characterModel) {
@@ -18,7 +18,7 @@ export default class ThirdPersonPlayer {
     this.playerVelocity = new THREE.Vector3();
     this.playerOnFloor = false;
     this.gravity = GRAVITY;
-    this.turnRateDegree = 50;
+    this.turnRateDegree = 40;
     this.turnRate = THREE.MathUtils.degToRad(this.turnRateDegree);
     this.cameraCollider = new Sphere(new THREE.Vector3(0,1,0), 0.35);
 
@@ -171,6 +171,11 @@ export default class ThirdPersonPlayer {
   }
 
   onKeyDown(event) {
+        // *** NEW CHECK: Ignore event if an input element is focused ***
+    const isInput = event.target.closest('input, textarea, select, [contenteditable="true"]');
+    if (isInput) {
+        return; // Exit the handler immediately if typing in a form field
+    }
     switch (event.code) {
       case 'KeyW': this.input.forward = true; break;
       case 'KeyS': this.input.backward = true; break;
@@ -555,7 +560,7 @@ export default class ThirdPersonPlayer {
             // When moving, continue to smoothly rotate.
             const targetYaw = Math.atan2(vx, vz); // slight left offset for better side-follow
             const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0))
-            const rotSlerpFactor = 0.12;
+            const rotSlerpFactor = 0.3;
             this.model.quaternion.slerp(targetQuat, rotSlerpFactor);
         }
 
@@ -615,8 +620,8 @@ syncFromCrowd() {
   // --- 3. Smoothly Apply Position to the Model ---
   // A high lerp factor makes the player feel responsive to the agent's movement.
   const posLerpFactor = 0.8;
-  this.model.position.x = targetPos.x;
-  this.model.position.z = targetPos.z;
+  this.model.position.x = THREE.MathUtils.lerp(this.model.position.x, targetPos.x, posLerpFactor);
+  this.model.position.z = THREE.MathUtils.lerp(this.model.position.z, targetPos.z, posLerpFactor);
   this.model.position.y = THREE.MathUtils.lerp(this.model.position.y, targetPos.y, posLerpFactor);
 
   // --- 4. Get Agent's Velocity for Rotation and Animation ---
@@ -639,7 +644,7 @@ syncFromCrowd() {
     }
     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
     // Slerp for smooth turning.
-    this.model.quaternion.slerp(targetQuat, 0.15);
+    this.model.quaternion.slerp(targetQuat, 0.1);
   }
 
   // --- 6. Update Animation ---

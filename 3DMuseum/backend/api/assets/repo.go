@@ -17,7 +17,7 @@ type Repository interface {
 	GetAsset(ctx context.Context, RoomID int) ([]model.ResponseMetadataInfor, error)
 	InsertAudio(ctx context.Context, assetCID, language, description string) (*model.Audio, error)
 	FindAudioByHash(ctx context.Context, textHash string, language string) (*model.Audio, error)
-	UpdateAudio(ctx context.Context, assetCID string, language string, status, audioCID string, attemps int) error
+	UpdateAudio(ctx context.Context, assetCID string, language string, status, audioCID string, attempts int) error
 	FetchPendingAudioJobs(ctx context.Context, limit int) ([]model.Audio, error)
 }
 
@@ -247,10 +247,10 @@ func (repo *AssetRepo) FindAudioByHash(ctx context.Context, textHash string, lan
 	return &tuple, nil
 }
 
-func (repo *AssetRepo) UpdateAudio(ctx context.Context, assetCID string, language string, status, audioCID string, attemps int) error {
+func (repo *AssetRepo) UpdateAudio(ctx context.Context, assetCID string, language string, status, audioCID string, attempts int) error {
 	changes := map[string]interface{}{
 		"status":     status,
-		"attemps":    attemps,
+		"attempts":    attempts,
 		"updated_at": time.Now(),
 	}
 

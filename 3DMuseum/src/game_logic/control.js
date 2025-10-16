@@ -103,6 +103,8 @@ export default class FirstPersonPlayer {
   }
 
   onKeyDown(e) {
+    const isInput = e.target.closest('input, textarea, select, [contenteditable="true"]');
+    if (isInput) return; // <-- NEW: Stop processing if an input field has focus
     if (e.code === 'KeyW') this.input.forward = true;
     if (e.code === 'KeyS') this.input.backward = true;
     if (e.code === 'KeyA') this.input.left = true;
