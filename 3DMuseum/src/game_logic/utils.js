@@ -1,6 +1,6 @@
-import { ThreeMFLoader } from "three/examples/jsm/Addons.js";
 import { UploadItem , StartWebSocket , SubscribeChannel} from "./services";
 import * as THREE from "three";
+import { audioCache } from "./index.js";
 
 const uploadModal = document.getElementById("upload-modal");
 const uploadContainer = document.getElementById('upload-container');
@@ -269,6 +269,20 @@ export function DisplayImageOnDiv(imageURL, title, vietnamese_description, engli
     CancelBtnContainer.onclick = () => {
         ImageShowContainer.style.display = 'none';
     };
+}
+
+export function getCachedAudioDuration(audioCID){
+    if (!audioCID) return null;
+    try{
+        if (typeof audioCache !== undefined && audioCache instanceof Map){
+            const buffer = audioCache.get(audioCID);
+            if (buffer && typeof buffer.duration === 'number') return buffer.duration
+        }
+    }catch (error){
+        console.error("Fail to get audio duration: ", error)
+        return null;
+    }
+    return null;
 }
 
 

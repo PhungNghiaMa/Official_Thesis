@@ -147,7 +147,7 @@ let interactedDoor;
 export const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_18.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_19.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -279,9 +279,13 @@ export async function playAudio(audioCID) {
   const source = context.createBufferSource();
   source.buffer = buffer;
   source.connect(context.destination);
+
   source.onended = () => {
-    source.disconnect();
+  try { source.disconnect(); } catch {}
     if (currentSourceNode === source) currentSourceNode = null;
+    if (typeof onEnded === "function") {
+      try { onEnded(); } catch (e) { console.warn("onEnded callback error", e); }
+    }
   };
   source.start(0);
   currentSourceNode = source;
@@ -597,13 +601,13 @@ function initNPC(scene, navQuery, bvhMeshes) {
   const agent = addAgent(
     npcModel.position,
     {
-      radius: 0.25,
+      radius: 0.35,
       height: 2.0,
       maxAcceleration: 20.0,
       maxSpeed: 20.0,
-      separationWeight: 0.0,
-      collisionQueryRange: 0.25,
-      pathOptimizationRange: 20,
+      separationWeight: 0.2,
+      collisionQueryRange: 1,
+      pathOptimizationRange: 40,
     },
     { model: npcModel }
   );
@@ -1032,14 +1036,14 @@ async function loadModel() {
                 // }
 
                 if (child.name.toLowerCase().includes("pictureframe")){
-                  if (child.name === "PictureFrame001"){
+                  if (child.name === "PictureFrame003"){
                     child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
                   }
                   pictureFramesArray.push(child);
                 }
 
                 if (/^ImageMesh\d+$/.test(child.name)) {
-                  if (child.name === "ImageMesh002"){
+                  if (child.name === "ImageMesh004"){
                     child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
                   }
                     imageMeshesArray.push(child);
