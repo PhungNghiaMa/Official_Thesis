@@ -1,6 +1,7 @@
 import { Crowd } from 'recast-navigation';
 import * as THREE from 'three';
 import { prefetchAudio , playAudio , AssetDataMap , FrameToImageMeshMap} from './index.js';
+import { getCachedAudioDuration } from './utils.js';
 
 let crowd = null;
 const agents = new Map();
@@ -35,7 +36,7 @@ export function addAgent(position, agentParams = {}, userData = {}) {
     height: agentParams.height ?? 2.0,
     maxAcceleration: agentParams.maxAcceleration ?? 8.0,
     maxSpeed: agentParams.maxSpeed ?? 3.5,
-    collisionQueryRange: agentParams.collisionQueryRange ?? 10.0,
+    collisionQueryRange: agentParams.collisionQueryRange ?? 30.0,
     pathOptimizationRange: agentParams.pathOptimizationRange ?? 30.0,
     separationWeight: agentParams.separationWeight ?? 2.0,
   };
@@ -274,6 +275,8 @@ export function stopAgentTour(agentEntry) {
   return true;
 }
 
+
+
 export async function updateAgentTours(navQuery) {
   if (!navQuery) return;
 
@@ -314,6 +317,11 @@ export async function updateAgentTours(navQuery) {
       );
 
       const current = tour.queue[tour.index];
+      if (current && !current.pictureMesh && current.pictureMeshName) {
+        const resolved = scene.getObjectByName(current.pictureMeshName);
+        if (resolved) current.pictureMesh = resolved;
+      }
+
       const next = tour.queue[tour.index + 1];
 
       if (!current || !current.navPt?.point) {
@@ -348,6 +356,7 @@ export async function updateAgentTours(navQuery) {
           const nextPictureMesh = next.pictureMesh?.name;
           const nextImageMesh = FrameToImageMeshMap[nextPictureMesh];
           const fetchItem = AssetDataMap.get(nextImageMesh);
+          // console.warn("NEXT IMAGE MESH: ", nextImageMesh)
           if (fetchItem) {
             const language = localStorage.getItem("language") || "en";
             const nextAudioCID = (language === "vi") ? fetchItem.viet_audio_cid : fetchItem.eng_audio_cid;
@@ -366,7 +375,6 @@ export async function updateAgentTours(navQuery) {
             }
           }
         }
-
         // --- ARRIVAL DETECTION (with single-fire) ---
         if (dist <= arrivalDist) {
           // if not already handled as arrived -> handle arrival once
@@ -383,10 +391,34 @@ export async function updateAgentTours(navQuery) {
                 const language = localStorage.getItem('language') || 'en';
                 const audioCID = (language === 'vi') ? assetData.viet_audio_cid : assetData.eng_audio_cid;
                 if (audioCID) {
-                  if (entry && entry.state) entry.state.audioLoading = true;
-                  // small non-blocking defer
+                  // Attempt to obtain cached decoded duration (if pre-decoded)
+                  const cachedDur = (typeof getCachedAudioDuration === 'function') ? getCachedAudioDuration(audioCID) : null;
+                  const padding = 0.15; // small padding to account for latency
+                  const baseHold = (cachedDur && !isNaN(cachedDur)) ? cachedDur : (assetData?.holdTime ?? TOUR_DEFAULT.holdTime);
+                  // Set tour.holdTime synchronously so the nextActionTime uses it
+                  tour.holdTime = Math.max(0.1, baseHold + padding);
+
+                  // mark loading state and start playback shortly (non-blocking)
+                  if (entry && entry.state) {
+                    entry.state.audioLoading = true;
+                    entry.state.isPlayingAudio = false;
+                  }
+
                   setTimeout(() => {
-                    try { playAudio(audioCID); } catch (e) { console.warn('playAudio failed', e); }
+                    try {
+                      // Use onEnded callback so we resume exactly when audio finishes
+                      playAudio(audioCID, () => {
+                        if (entry && entry.state) entry.state.isPlayingAudio = false;
+                        // make tour ready to continue immediately: set nextActionTime to now
+                        try { tour.nextActionTime = (typeof performance !== 'undefined') ? performance.now() / 1000 : Date.now() / 1000; } catch (e) {}
+                        // ensure status is waiting so updateAgentTours will advance next frame
+                        tour.status = 'waiting';
+                      });
+                    } catch (e) {
+                      console.warn('playAudio failed', e);
+                      // fallback: clear playing flag after holdTime
+                      if (entry && entry.state) entry.state.isPlayingAudio = false;
+                    }
                     if (entry && entry.state) {
                       entry.state.audioLoading = false;
                       entry.state.isPlayingAudio = true;
@@ -473,7 +505,8 @@ export async function updateAgentTours(navQuery) {
               entry.state.mode = 'idle';
               entry.state.requestedGait = null;
               entry.state.atDestination = true;
-              entry.state.isViewingPicture = true;
+              entry.state.currentPictureMesh = current.pictureMesh ?? null
+              entry.state.isViewingPicture = true; 
             }
             continue; // next agent
           }

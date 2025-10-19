@@ -1,12 +1,13 @@
 package api
 
 import (
-	"main/api/assets"
 	"main/business"
+	"main/websocket"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-func RegisterRoutes (router *gin.Engine , database *gorm.DB , PinataService *business.PinataService){
-	assets.RegisterAssetRoutes(router , database , PinataService)
+func RegisterRoutes(router *gin.Engine, database *gorm.DB, PinataService *business.PinataService, SFU *websocket.SFU) {
+	RegisterAssetRoutes(router, database, PinataService, SFU)
 }
