@@ -8,12 +8,49 @@ import (
 	"main/model"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
-	"time" // For timestamp generation
+	"time"
+
+	"main/websocket"
 
 	"golang.org/x/exp/slices"
 )
+
+// progressReader reports upload progress via websocket channel
+type progressReader struct {
+	r            io.Reader
+	total        int64
+	sent         int64
+	lastPercent  int
+	lastReportTs time.Time
+	ch           string
+	typ          string // "upload" or "tts"
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.r.Read(p)
+	if n > 0 {
+		pr.sent += int64(n)
+		if pr.total > 0 {
+			percent := int((pr.sent * 100) / pr.total)
+			now := time.Now()
+			if percent != pr.lastPercent || now.Sub(pr.lastReportTs) > 200*time.Millisecond {
+				pr.lastPercent = percent
+				pr.lastReportTs = now
+				if pr.ch != "" {
+					websocket.GlobalHub.BroadcastProgress(pr.ch, map[string]interface{}{
+						"type":     pr.typ,
+						"status":   "uploading",
+						"progress": percent,
+					})
+				}
+			}
+		}
+	}
+	return n, err
+}
 
 type PinataUploadResponse struct {
 	IpfsHash    string `json:"IpfsHash"`
@@ -22,90 +59,236 @@ type PinataUploadResponse struct {
 	IsDuplicate bool   `json:"isDuplicate"`
 }
 
-// PinataService encapsulates Pinata API interactions.
+// PinataRepository interface for uploaders
+type PinataRepository interface {
+	UploadAssetToPinata(fileBuffer []byte, originalFileName string, progressChannel string) (model.AssetStruct, error)
+	UploadAudioToPinata(fileBuffer []byte, fileName string, progressChannel string) (model.AudioStruct, error)
+}
+
+// ------------------------
+// PinataRepo + Service
+// ------------------------
+type PinataRepo struct {
+	PinataService *PinataService
+}
+
 type PinataService struct {
 	JWT        string
-	GatewayURL string // e.g., "https://api.pinata.cloud"
+	GatewayURL string
 }
 
-// NewPinatService creates a new PinataService instance.
-func NewPinatService(jwt, gatewayURL string) *PinataService {
-	return &PinataService{
-		JWT:        jwt,
-		GatewayURL: gatewayURL,
-	}
+func NewPinataService(jwt, gatewayURL string) *PinataService {
+	return &PinataService{JWT: jwt, GatewayURL: gatewayURL}
 }
 
-var allowImageType = []string{"webP", "png", "jpg", "jpeg"}
+func NewPinataRepo(PinataService *PinataService) *PinataRepo {
+	return &PinataRepo{PinataService: PinataService}
+}
+
+// Allowed file types
+var allowImageType = []string{"webp", "png", "jpg", "jpeg", "ktx2"}
 var allowVideoType = []string{"mp4", "mov", "avi"}
+var allow3DType = []string{"glb", "gltf"}
 
-func (PinataService *PinataService) UploadToPinata(fileBuffer []byte, originalFileName string) (model.ImageStruct, error) {
+// UploadAssetToPinata streams the file to Pinata and reports progress to frontend.
+func (r *PinataRepo) UploadAssetToPinata(fileBuffer []byte, originalFileName string, progressChannel string) (model.AssetStruct, error) {
 	now := time.Now()
-	var imageInformation model.ImageStruct
-	timestamp := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(now.Format(time.RFC3339Nano), ":", "-"), ".", "-"), "Z", "")
+	var assetInfo model.AssetStruct
 
-	// GET THE BASENAME AND EXTENSION FILE NAME
+	// --- File categorization ---
+	timestamp := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(now.Format(time.RFC3339Nano), ":", "-"), ".", "-"), "Z", "")
 	extensionFileName := filepath.Ext(originalFileName)
-	basename := strings.TrimSuffix(originalFileName, extensionFileName) // remove the file extension to get the basename
+	basename := strings.TrimSuffix(originalFileName, extensionFileName)
 	ext := strings.TrimPrefix(strings.ToLower(extensionFileName), ".")
-	if exist := slices.Contains(allowImageType, ext); exist == true {
-		imageInformation.CategoryID = 1
-	} else if exist := slices.Contains(allowVideoType, ext); exist == true {
-		imageInformation.CategoryID = 2
+	var folderName string
+
+	if slices.Contains(allowImageType, ext) {
+		assetInfo.CategoryID = 1
+		folderName = "Asset_Image"
+	} else if slices.Contains(allowVideoType, ext) {
+		assetInfo.CategoryID = 2
+		folderName = "Asset_Video"
+	} else if slices.Contains(allow3DType, ext) {
+		assetInfo.CategoryID = 3
+		folderName = "Asset_3D"
 	} else {
-		return model.ImageStruct{}, fmt.Errorf("invalid file type, only png, webp, or jpg is allowed")
+		return model.AssetStruct{}, fmt.Errorf("invalid file type: only png, webp, jpg, jpeg, mp4, mov, avi, glb, gltf are allowed")
 	}
 
 	newFileName := fmt.Sprintf("%s_%s%s", basename, timestamp, extensionFileName)
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
+	apiURL := "https://api.pinata.cloud/pinning/pinFileToIPFS"
 
-	// Create new form file for the acutal file content
-	part, err := writer.CreateFormFile("file", newFileName) // "file" is the expected field name of Pinata
-	if err != nil {
-		return model.ImageStruct{}, fmt.Errorf("failed to create form file: %w", err) // Return empty struct on error
-	}
-	_, err = io.Copy(part, bytes.NewReader((fileBuffer)))
+	// --- Build streaming multipart form ---
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
 
-	if err != nil {
-		return model.ImageStruct{}, fmt.Errorf("failed to copy file buffer to form file: %w", err)
-	}
-	writer.Close()
+	go func() {
+		defer pw.Close()
 
-	// CREATE HTTP REQUEST
-	req, err := http.NewRequest("POST", PinataService.GatewayURL+"pinning/pinFileToIPFS", body)
+		part, err := writer.CreateFormFile("file", newFileName)
+		if err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("create form file failed: %w", err))
+			return
+		}
+
+		rdr := bytes.NewReader(fileBuffer)
+		progR := &progressReader{r: rdr, total: int64(len(fileBuffer)), ch: progressChannel, typ: "upload"}
+		if _, err = io.Copy(part, progR); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("copy file failed: %w", err))
+			return
+		}
+
+		meta := map[string]interface{}{
+			"name": newFileName,
+			"keyvalues": map[string]string{
+				"folder": folderName,
+			},
+		}
+		metaJSON, _ := json.Marshal(meta)
+		_ = writer.WriteField("pinataMetadata", string(metaJSON))
+
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("writer close failed: %w", err))
+		}
+	}()
+
+	req, err := http.NewRequest("POST", apiURL, pr)
 	if err != nil {
-		return model.ImageStruct{}, fmt.Errorf("failed to create HTTP request: %w", err)
+		return model.AssetStruct{}, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	// SET HEADER
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+PinataService.JWT)
 
-	// 4. SEND REQUEST
-	client := &http.Client{Timeout: 30 * time.Second} // Set a timeout for the request
+	// --- Authentication handling ---
+	if r.PinataService != nil && r.PinataService.JWT != "" {
+		req.Header.Set("Authorization", "Bearer "+r.PinataService.JWT)
+	} else {
+		apiKey := strings.TrimSpace(os.Getenv("PINATA_API_KEY"))
+		apiSecret := strings.TrimSpace(os.Getenv("PINATA_API_SECRET"))
+		if apiKey == "" || apiSecret == "" {
+			return model.AssetStruct{}, fmt.Errorf("missing Pinata credentials: please set JWT or API key/secret")
+		}
+		req.Header.Set("pinata_api_key", apiKey)
+		req.Header.Set("pinata_secret_api_key", apiSecret)
+	}
+
+	client := &http.Client{Timeout: 0}
 	resp, err := client.Do(req)
 	if err != nil {
-		return model.ImageStruct{}, fmt.Errorf("failed to send HTTP request to Pinata: %w", err) // Return empty struct on error
+		return model.AssetStruct{}, fmt.Errorf("failed to send request to Pinata: %w", err)
 	}
-	defer resp.Body.Close() // Ensure the response body is closed
+	defer resp.Body.Close()
 
-	// 5. Read the response
-	respBody, err := io.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return model.ImageStruct{}, fmt.Errorf("failed to read Pinata response body: %w", err) // Return empty struct on error
+		return model.AssetStruct{}, fmt.Errorf("failed to read Pinata response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return model.ImageStruct{}, fmt.Errorf("pinata API returned non-OK status: %d - %s", resp.StatusCode, string(respBody)) // Return empty struct on error
+		return model.AssetStruct{}, fmt.Errorf("Pinata API returned %d - %s", resp.StatusCode, string(respBytes))
 	}
 
-	// 6. PARSE JSON
-	var PinataResp PinataUploadResponse
-	if err := json.Unmarshal(respBody, &PinataResp); err != nil {
-		return model.ImageStruct{}, fmt.Errorf("failed to parse Pinata response JSON: %w", err) // Return empty struct on error
+	var pinataResp PinataUploadResponse
+	if err := json.Unmarshal(respBytes, &pinataResp); err != nil {
+		return model.AssetStruct{}, fmt.Errorf("failed to parse Pinata response JSON: %w", err)
 	}
 
-	imageInformation.Filename = basename
-	imageInformation.IpfsHash = PinataResp.IpfsHash
-	return imageInformation, nil
+	assetInfo.Filename = basename
+	assetInfo.IpfsHash = pinataResp.IpfsHash
+
+	if progressChannel != "" {
+		websocket.GlobalHub.BroadcastProgress(progressChannel, map[string]interface{}{
+			"type":     "upload",
+			"status":   "completed",
+			"progress": 100,
+		})
+	}
+	return assetInfo, nil
+}
+
+// UploadAudioToPinata — same JWT logic as above
+func (r *PinataRepo) UploadAudioToPinata(audioData []byte, fileName string, progressChannel string) (model.AudioStruct, error) {
+	apiURL := "https://api.pinata.cloud/pinning/pinFileToIPFS"
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	var folderName = "Audio"
+
+	go func() {
+		defer pw.Close()
+		part, err := writer.CreateFormFile("file", fileName)
+		if err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("create form file: %w", err))
+			return
+		}
+
+		rdr := bytes.NewReader(audioData)
+		progR := &progressReader{r: rdr, total: int64(len(audioData)), ch: progressChannel, typ: "tts"}
+		if _, err := io.Copy(part, progR); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("copy audio failed: %w", err))
+			return
+		}
+
+		meta := map[string]interface{}{
+			"name": fileName,
+			"keyvalues": map[string]string{
+				"folder": folderName,
+			},
+		}
+		metaJSON, _ := json.Marshal(meta)
+		_ = writer.WriteField("pinataMetadata", string(metaJSON))
+
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("writer close: %w", err))
+			return
+		}
+	}()
+
+	req, err := http.NewRequest("POST", apiURL, pr)
+	if err != nil {
+		return model.AudioStruct{}, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	if r.PinataService != nil && r.PinataService.JWT != "" {
+		req.Header.Set("Authorization", "Bearer "+r.PinataService.JWT)
+	} else {
+		apiKey := strings.TrimSpace(os.Getenv("PINATA_API_KEY"))
+		apiSecret := strings.TrimSpace(os.Getenv("PINATA_API_SECRET"))
+		if apiKey == "" || apiSecret == "" {
+			return model.AudioStruct{}, fmt.Errorf("missing Pinata credentials: please set JWT or API key/secret")
+		}
+		req.Header.Set("pinata_api_key", apiKey)
+		req.Header.Set("pinata_secret_api_key", apiSecret)
+	}
+
+	client := &http.Client{Timeout: 0}
+	resp, err := client.Do(req)
+	if err != nil {
+		return model.AudioStruct{}, fmt.Errorf("failed to send request to Pinata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return model.AudioStruct{}, fmt.Errorf("failed to read Pinata response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return model.AudioStruct{}, fmt.Errorf("Pinata API returned %d - %s", resp.StatusCode, string(respBytes))
+	}
+
+	var audioResp model.AudioStruct
+	if err := json.Unmarshal(respBytes, &audioResp); err != nil {
+		return model.AudioStruct{}, fmt.Errorf("failed to unmarshal Pinata audio response: %w", err)
+	}
+
+	if progressChannel != "" {
+		websocket.GlobalHub.BroadcastProgress(progressChannel, map[string]interface{}{
+			"type":     "tts",
+			"status":   "completed",
+			"progress": 100,
+			"cid":      audioResp.IpfsHash,
+		})
+	}
+
+	return audioResp, nil
 }

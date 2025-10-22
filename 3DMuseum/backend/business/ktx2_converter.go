@@ -1,24 +1,43 @@
 package business
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 )
 
-// ConvertToKTX2 tries to convert an image to KTX2 using the 'toktx' CLI tool.
-// Returns fileBuffer and fileName for Pinata upload, or error.
 func ConvertToKTX2(inputPath string) ([]byte, string, error) {
-	ktx2Path := inputPath + ".ktx2"
-	cmd := exec.Command("toktx", "--bcmp", ktx2Path, inputPath)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, "", fmt.Errorf("ktx2 conversion failed: %v, output: %s", err, string(out))
+	outputFile := filepath.Join(os.TempDir(), "temp_output.ktx2")
+
+	// Delete the outputFile from system so it not account the computer memory 
+	// Because later on the content of the output file is copy and this deletion just executed before it return 
+	// so that deleting the outputFile is totally safe
+	defer func() {
+		_ = os.Remove(outputFile)
+	}()
+
+	cmd := exec.Command("toktx",
+		"--t2", "--encode", "etc1s", "--genmipmap",
+		outputFile,
+		inputPath,
+	)
+
+
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, "", fmt.Errorf("toktx failed: %v\n%s", err, stderr.String())
 	}
-	fileBuffer, err := os.ReadFile(ktx2Path)
+
+	// Read result
+	data, err := os.ReadFile(outputFile)
 	if err != nil {
-		return nil, "", fmt.Errorf("read ktx2 file: %w", err)
+		return nil, "", fmt.Errorf("failed to read KTX2 file: %v", err)
 	}
-	return fileBuffer, filepath.Base(ktx2Path), nil
+
+	return data, filepath.Base(outputFile), nil
 }

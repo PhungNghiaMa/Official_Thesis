@@ -19,7 +19,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { KTX2Loader } from "three/examples/jsm/Addons.js";
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
-import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
+// import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Sphere } from "three";
 import { acceleratedRaycast } from "three-mesh-bvh";
@@ -56,8 +56,8 @@ let physicsTimeAccumulator = 0;
 let currentScene = null;
 
 // Third person character model instance
-let characterModelReady = false;
 let character = null;
+let characterModelReady = false
 let characterModel = null;
 let characterGLTF = null;
 let tpViewExisted = null;
@@ -99,6 +99,10 @@ const bvhMeshList = [];          // meshes used for BVH raycasts (ground snap + 
 const navInputMeshes = [];   // meshes we will pass to recast
 let  pictureFramesArray = [];
 
+// PINATA URL 
+const PINATA_URL = import.meta.env.MODE === "production"
+    ? import.meta.env.VITE_PINATA_PRIVATE_GATEWAY // Use VITE_ prefix
+    : import.meta.env.VITE_PINATA_PUBLIC_GATEWAY;     // Use VITE_ prefix
 
 // Container instance 
 let loadingManager = document.getElementById('loading-container');
@@ -141,7 +145,7 @@ let interactedDoor;
 const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_12.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_14.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -225,6 +229,49 @@ function setImageToMesh(scene,meshName, imgUrl) {
     );
 }
 
+
+// NOTE: Make sure ktx2Loader and renderer are defined and accessible in the scope.
+function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgURL for clarity
+
+    // Use the KTX2Loader instance
+    ktx2Loader.load(imgURL,
+        (loadedTexture) => {
+            // Most of these settings are managed by the KTX2Loader/Basis Transcoder, 
+            // but we might keep some for safety or specific overrides.
+            loadedTexture.needsUpdate = true;
+            
+            // KTX2 often handles its own colorspace and filtering internally based on the file.
+            // You can remove most explicit texture properties (like flipY, filters, mipmaps).
+
+            const material = new THREE.MeshStandardMaterial({
+                map: loadedTexture,
+                side: THREE.DoubleSide,
+                roughness: 0.5,
+                metalness: 0.0,
+            });
+
+            let mesh = scene.getObjectByName(meshName)
+            if (mesh && mesh.isMesh) {
+                // Safely dispose of the old material's texture to free memory
+                if (mesh.material.map) {
+                    mesh.material.map.dispose();
+                }
+                mesh.material.dispose();
+                
+                mesh.material = material;
+                mesh.material.needsUpdate = true;
+                // UV update is rarely needed here unless the geometry itself changed
+            } else {
+                console.warn(`Cannot find mesh for ${meshName}`)
+            }
+        },
+        undefined, // Progress is optional
+        (error) => {
+            console.error('Error loading KTX2 texture:', error);
+        }
+    );
+}
+
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
 
@@ -233,7 +280,7 @@ document.body.addEventListener("uploadevent", (event) => {
         annotationMesh[asset_mesh_name].title = title;
         annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
         annotationMesh[asset_mesh_name].eng_des = english_description;
-        setImageToMesh(currentScene,asset_mesh_name, img_url);
+        setImageToMeshKTX2(currentScene,asset_mesh_name, img_url);
     }
 });
 
@@ -471,12 +518,12 @@ function initNPC(scene, navQuery, bvhMeshes) {
   const agent = addAgent(
     npcModel.position,
     {
-      radius: 0.05,
+      radius: 0.1,
       height: 2.0,
       maxAcceleration: 14.0,
       maxSpeed: 10.0,
       separationWeight: 0.0,
-      collisionQueryRange: 0.05,
+      collisionQueryRange: 0.25,
       pathOptimizationRange: 50,
     },
     { model: npcModel }
@@ -491,62 +538,6 @@ function initNPC(scene, navQuery, bvhMeshes) {
 
   return { model: npcModel, agent, walkSpeed: 2.4, runSpeed: 6.0, state: { mode: 'idle' }, requestedGait: null };
 }
-
-// FUNCTION TO MAKE THIRD PERSON PLAYER AGENT FOLLOW NPC IN ROOM TOUR 
-// function setPlayerFollowTarget(playerAgent, npc, navQuery) {
-//   // Follow *behind* the NPC (not to its right). Keep calls minimal while NPC is moving.
-//   if (!playerAgent || !npc || !npc.model || !npc.agent) return;
-
-//   // get NPC world position
-//   const npcPos = npc.model.position.clone();
-
-//   // get NPC forward direction (world), put player behind it
-//   let forward = new THREE.Vector3(0, 0, 1);
-//   try {
-//     forward = npc.model.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
-//     if (forward.lengthSq() < 1e-6) forward.set(0, 0, 1);
-//   } catch (e) {
-//     forward.set(0, 0, 1);
-//   }
-
-//   // Check NPC velocity — only request movement while NPC is visibly moving
-//   let vel = null;
-//   try { vel = (typeof npc.agent.velocity === 'function') ? npc.agent.velocity() : npc.agent.velocity; } catch (e) { vel = null; }
-//   const speed = vel ? Math.sqrt((vel.x ?? 0) ** 2 + (vel.z ?? 0) ** 2) : 0;
-
-//   // If NPC is nearly stopped, clear player's move target so the TP agent doesn't keep nudging
-//   if (speed < 0.02) {
-//     try {
-//       if (typeof playerAgent.resetMoveTarget === 'function') playerAgent.resetMoveTarget();
-//     } catch (e) {}
-//     return;
-//   }
-
-//    // 1. Calculate the NPC's "right" vector using a cross product
-//   const upVector = new THREE.Vector3(0, 1, 0);
-//   const right = new THREE.Vector3().crossVectors(forward, upVector).normalize();
-
-//   // 2. Determine which side to be on (left or right)
-//   const sideMultiplier = (tpView.followSide === 'left') ? -1 : 1;
-
-//   // 3. Define the offsets
-//   const offsetSide = 0.5; // meters to the side (tweak this value)
-//   const offsetBack = 0.0; // meters behind (tweak this value)
-
-//   // 4. Calculate the total offset vector
-//   const sideOffsetVector = right.clone().multiplyScalar(offsetSide * sideMultiplier);
-//   const backOffsetVector = forward.clone().multiplyScalar(-offsetBack);
-//   const totalOffset = sideOffsetVector.add(backOffsetVector);
-
-//   // 5. Calculate the final target position for the player
-//   const playerTargetPos = npcPos.clone().add(totalOffset);
-
-
-//   // set the player agent's target via your navQuery/pathing helper
-//   if (navQuery && typeof setAgentTarget === 'function') {
-//     setAgentTarget(playerAgent, playerTargetPos, navQuery, { entry: null, requestedGait: (speed > 2.5 ? 'run' : 'walk') });
-//   }
-// }
 
 // index.js — replace setPlayerFollowTarget with the version below
 function setPlayerFollowTarget(playerAgent, npc, navQuery) {
@@ -646,7 +637,6 @@ function setPlayerFollowTarget(playerAgent, npc, navQuery) {
   } catch (e) {}
 }
 
-
 function animateProgress() {
   if (currentProgress < targetProgress) {
     // Maximum speed per frame (e.g. ~0.5% per frame at 60fps = ~30%/s)
@@ -693,100 +683,100 @@ function animateProgress() {
 // in index.js, replace the old findReachableNavPointNearMesh with this new one
 
 // Robust helper: returns a navmesh point (object {x,y,z}) in front of a mesh
-function findReachableNavPointNearMesh(targetMesh, opts = {}) {
-  // NEW: Added localForwardVector option
-  const { desiredDistance = 1.5, maxSearch = 4.0, step = 0.2, fanSteps = 16, localForwardVector = null } = opts;
-  const nq = getNavQuery();
-  if (!nq) {
-    console.warn('findReachableNavPointNearMesh: navQuery missing');
-    return null;
-  }
-  if (!museumNPC || !museumNPC.model) {
-    console.warn('findReachableNavPointNearMesh: museumNPC not ready');
-    return null;
-  }
-  if (!targetMesh) return null;
+// function findReachableNavPointNearMesh(targetMesh, opts = {}) {
+//   // NEW: Added localForwardVector option
+//   const { desiredDistance = 1.5, maxSearch = 4.0, step = 0.2, fanSteps = 16, localForwardVector = null } = opts;
+//   const nq = getNavQuery();
+//   if (!nq) {
+//     console.warn('findReachableNavPointNearMesh: navQuery missing');
+//     return null;
+//   }
+//   if (!museumNPC || !museumNPC.model) {
+//     console.warn('findReachableNavPointNearMesh: museumNPC not ready');
+//     return null;
+//   }
+//   if (!targetMesh) return null;
 
-  const npcWorld = museumNPC.model.position.clone();
-  const npcProjRes = nq.findClosestPoint(npcWorld);
-  if (!npcProjRes?.point) {
-    console.warn('findReachableNavPointNearMesh: NPC projection failed', npcWorld);
-    return null;
-  }
-  const startNav = new THREE.Vector3(npcProjRes.point.x, npcProjRes.point.y, npcProjRes.point.z);
+//   const npcWorld = museumNPC.model.position.clone();
+//   const npcProjRes = nq.findClosestPoint(npcWorld);
+//   if (!npcProjRes?.point) {
+//     console.warn('findReachableNavPointNearMesh: NPC projection failed', npcWorld);
+//     return null;
+//   }
+//   const startNav = new THREE.Vector3(npcProjRes.point.x, npcProjRes.point.y, npcProjRes.point.z);
 
-  const meshWorld = new THREE.Vector3();
-  targetMesh.getWorldPosition(meshWorld);
-  const floorY = startNav.y;
-  const base = new THREE.Vector3(meshWorld.x, floorY, meshWorld.z);
+//   const meshWorld = new THREE.Vector3();
+//   targetMesh.getWorldPosition(meshWorld);
+//   const floorY = startNav.y;
+//   const base = new THREE.Vector3(meshWorld.x, floorY, meshWorld.z);
   
-  let dir = new THREE.Vector3();
+//   let dir = new THREE.Vector3();
 
-  // =========================================================================
-  // ✅ STRATEGY 1 (BEST): Use the provided local forward vector. This is reliable.
-  // =========================================================================
-  if (localForwardVector && localForwardVector.isVector3) {
-      const q = targetMesh.getWorldQuaternion(new THREE.Quaternion());
-      dir.copy(localForwardVector).applyQuaternion(q);
-      dir.y = 0;
-      dir.normalize();
-  } else {
-  // =========================================================================
-  // ⚠️ STRATEGY 2 (FALLBACK): Calculate direction from mesh towards the NPC.
-  // =========================================================================
-      dir.subVectors(npcWorld, base);
-      dir.y = 0;
-      if (dir.lengthSq() < 1e-6) {
-        dir.set(0, 0, 1); // Failsafe if NPC is on top of target
-      }
-      dir.normalize();
-  }
+//   // =========================================================================
+//   // ✅ STRATEGY 1 (BEST): Use the provided local forward vector. This is reliable.
+//   // =========================================================================
+//   if (localForwardVector && localForwardVector.isVector3) {
+//       const q = targetMesh.getWorldQuaternion(new THREE.Quaternion());
+//       dir.copy(localForwardVector).applyQuaternion(q);
+//       dir.y = 0;
+//       dir.normalize();
+//   } else {
+//   // =========================================================================
+//   // ⚠️ STRATEGY 2 (FALLBACK): Calculate direction from mesh towards the NPC.
+//   // =========================================================================
+//       dir.subVectors(npcWorld, base);
+//       dir.y = 0;
+//       if (dir.lengthSq() < 1e-6) {
+//         dir.set(0, 0, 1); // Failsafe if NPC is on top of target
+//       }
+//       dir.normalize();
+//   }
 
-  // (The rest of the function remains the same)
-  const startForPath = { x: startNav.x, y: startNav.y, z: startNav.z };
-  function checkCandidate(candidateVec3) {
-    const proj = nq.findClosestPoint({ x: candidateVec3.x, y: candidateVec3.y, z: candidateVec3.z });
-    if (!proj?.point) return null;
-    const navPt = new THREE.Vector3(proj.point.x, proj.point.y, proj.point.z);
+//   // (The rest of the function remains the same)
+//   const startForPath = { x: startNav.x, y: startNav.y, z: startNav.z };
+//   function checkCandidate(candidateVec3) {
+//     const proj = nq.findClosestPoint({ x: candidateVec3.x, y: candidateVec3.y, z: candidateVec3.z });
+//     if (!proj?.point) return null;
+//     const navPt = new THREE.Vector3(proj.point.x, proj.point.y, proj.point.z);
 
-    // const maxSnapDist = Math.max(0.8, step * 3);
-    const maxSnapDist = 2
-    if (navPt.distanceTo(candidateVec3) > maxSnapDist) return null;
+//     // const maxSnapDist = Math.max(0.8, step * 3);
+//     const maxSnapDist = 2
+//     if (navPt.distanceTo(candidateVec3) > maxSnapDist) return null;
 
-    const pathRes = nq.computePath(startForPath, { x: navPt.x, y: navPt.y, z: navPt.z });
-    if (!pathRes || !pathRes.success || !pathRes.path || pathRes.path.length === 0) return null;
+//     const pathRes = nq.computePath(startForPath, { x: navPt.x, y: navPt.y, z: navPt.z });
+//     if (!pathRes || !pathRes.success || !pathRes.path || pathRes.path.length === 0) return null;
 
-    return { x: navPt.x, y: navPt.y, z: navPt.z };
-  }
+//     return { x: navPt.x, y: navPt.y, z: navPt.z };
+//   }
 
-  for (let d = desiredDistance; d >= 0; d -= step) {
-    const cand = base.clone().add(dir.clone().multiplyScalar(d));
-    const ok = checkCandidate(cand);
-    if (ok) return ok;
-  }
+//   for (let d = desiredDistance; d >= 0; d -= step) {
+//     const cand = base.clone().add(dir.clone().multiplyScalar(d));
+//     const ok = checkCandidate(cand);
+//     if (ok) return ok;
+//   }
 
-  for (let d = desiredDistance + step; d <= maxSearch; d += step) {
-    const cand = base.clone().add(dir.clone().multiplyScalar(d));
-    const ok = checkCandidate(cand);
-    if (ok) return ok;
-  }
+//   for (let d = desiredDistance + step; d <= maxSearch; d += step) {
+//     const cand = base.clone().add(dir.clone().multiplyScalar(d));
+//     const ok = checkCandidate(cand);
+//     if (ok) return ok;
+//   }
   
-  // (Fan sampling and final fallback remain the same)
-  for (let i = 0; i < fanSteps; i++) {
-    const angle = (i / fanSteps) * Math.PI * 2;
-    const rotated = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-    for (let d = step; d <= maxSearch; d += step) {
-      const cand = base.clone().add(rotated.clone().multiplyScalar(d));
-      const ok = checkCandidate(cand);
-      if (ok) return ok;
-    }
-  }
+//   // (Fan sampling and final fallback remain the same)
+//   for (let i = 0; i < fanSteps; i++) {
+//     const angle = (i / fanSteps) * Math.PI * 2;
+//     const rotated = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+//     for (let d = step; d <= maxSearch; d += step) {
+//       const cand = base.clone().add(rotated.clone().multiplyScalar(d));
+//       const ok = checkCandidate(cand);
+//       if (ok) return ok;
+//     }
+//   }
 
-  const last = nq.findClosestPoint({ x: base.x, y: base.y, z: base.z });
-  if (last?.point) return { x: last.point.x, y: last.point.y, z: last.point.z };
+//   const last = nq.findClosestPoint({ x: base.x, y: base.y, z: base.z });
+//   if (last?.point) return { x: last.point.x, y: last.point.y, z: last.point.z };
 
-  return null;
-}
+//   return null;
+// }
 
 // --------- helper: compute nav path length (meters) ----------
 function computeNavPathLength(navQuery, startPoint, endPoint) {
@@ -842,37 +832,6 @@ async function loadModel() {
     sun.castShadow = true;
     scene.add(sun);
     scene.add(sun.target); 
-
-    // TRY TO LOAD EXTERNAL NAVMESH 
-
-
-
-    // // main gallery lights
-    // spot1 = new THREE.SpotLight(0xffffff, 20);
-    // spot1.position.set(6, 8, 6);
-    // spot1.angle = Math.PI / 8;
-    // spot1.penumbra = 0.4;
-    // spot1.decay = 2;
-    // spot1.distance = 30;
-    // spot1.castShadow = true;
-    // spot1.shadow.bias = -0.0001;
-    // spot1.shadow.camera.near = 0.1;
-    // spot1.shadow.camera.far  = 40;
-    // spot1.shadow.mapSize.set(2048, 2048);
-    // scene.add(spot1);
-
-    // spot2 = new THREE.SpotLight(0xffffff, 15);
-    // spot2.position.set(-6, 8, -6);
-    // spot2.angle = Math.PI / 8;
-    // spot2.penumbra = 0.4;
-    // spot2.decay = 2;
-    // spot2.distance = 30;
-    // spot2.castShadow = true;
-    // spot2.shadow.camera.near = 0.1;
-    // spot2.shadow.camera.far  = 40;
-    // spot2.shadow.mapSize.set(2048, 2048);
-    // spot2.shadow.bias = -0.0001;
-    // scene.add(spot2);
 
 
 // environment map
@@ -931,7 +890,8 @@ async function loadModel() {
 
 
         // 2. Create a promise for the API call.
-        const getAssetsPromise = GetRoomAsset(currentMuseumId);
+        const getAssetsPromise =  GetRoomAsset(currentMuseumId);
+
 
         // 3. Load third view character
         const loadModelCharacterPromise = characterLoader.loadAsync('optimizedModel/ANIMATED_1.glb');
@@ -956,8 +916,8 @@ async function loadModel() {
         });
 
         // 3. Wait for BOTH promises to complete simultaneously.
-        // const [gltf, items] = await Promise.all([loadModelPromise, getAssetsPromise]);
-        const [gltf, items] = await Promise.all([loadModelPromise]);
+        // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
+        const [gltf] = await Promise.all([loadModelPromise]);
 
 
         // --- SCENE SETUP (executes after all assets are downloaded) ---
@@ -981,25 +941,26 @@ async function loadModel() {
             });
         }
 
-        let index = 0;
-
         gltf.scene.traverse((child) => {
-            // if(!child.isMesh) return;
-          if (child.name.startsWith('TourTarget_')) {
-            let frameName = child.name.replace('TourTarget_', '');
+          // if(!child.isMesh) return;
+          if (child.name.endsWith('_NPC_Target')) {
+            let frameName = child.name.replace('_NPC_Target', '');
+            console.warn("Initial frame name: ", frameName)
             // Use a specific regex to handle the CubeXXX001 case
-            const match = frameName.match(/^(Cube\d{3})(\d{3,})$/);
+            const match = frameName.match(/^(Cube)(\d{3})$/);
             // If a match is found, reformat the name
             if (match) {
-                const base = match[1]; // 'Cube046'
+                console.log(`frameName: ${frameName} - Match: ${!!match}`)
+                console.log(`${match[1]} - ${match[2]}`)
+                const base = match[1]; // 'Cube'
                 const num = parseInt(match[2], 10); // 1
-                frameName = `${base}_${num}`;
+                frameName = `${base}046_${num}`;
             }
             tourTargetsMap.set(frameName, child);
             // debug: print so we know the empties were found
             const worldPos = new THREE.Vector3();
             child.getWorldPosition(worldPos);
-            console.log('Found TourTarget:', child.name, '=> maps to', frameName, 'worldPos', worldPos);
+            console.log('Found TourTarget:', child.name, '=> maps to', frameName);
           }
             
             child.updateMatrixWorld(true);
@@ -1020,7 +981,7 @@ async function loadModel() {
                 navInputMeshes.push(child);
             }
 
-            if (child.isObject3D && child.name.startsWith('TourTarget_')) {
+            if (child.isObject3D) {
               console.log("Found an empty object of type Object3D:", child.name);
             }
 
@@ -1083,13 +1044,13 @@ async function loadModel() {
                     }
                 }
 
-                if (child.parent?.name === "Door") {
-                    doorBoundingBox = new THREE.Box3().setFromObject(child);
-                }
+                // if (child.parent?.name === "Door") {
+                //     doorBoundingBox = new THREE.Box3().setFromObject(child);
+                // }
                 
-                if (child.name === "Handle") {
-                    child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
-                }
+                // if (child.name === "Handle") {
+                //     child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
+                // }
 
                 if (/^ImageMesh\d+$/.test(child.name)) {
                     imageMeshesArray.push(child);
@@ -1103,6 +1064,7 @@ async function loadModel() {
                     label.position.copy(center);
                     scene.add(label);
                     annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
+                    // Attach to DOM so it can be seen
                     annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
                 }
 
@@ -1127,12 +1089,13 @@ async function loadModel() {
         } else {
             console.warn("Failed to load external navmesh!");
         }
-        const nearestPoint = navQuery.findClosestPoint({ x: 0.5, y: 0, z: 0.5 });
-        console.log('nearestPoint:', nearestPoint);
 
-        console.log("navMesh.raw exist: ", !!navMesh.raw);
-        console.log("navMesh.raw : ", navMesh.raw);
-        console.log("Crowd poly count:", navMesh.getPolyCount ? navMesh.getPolyCount() : "no getPolyCount()");
+        // DEBUG NAVQUERY CODE
+        // const nearestPoint = navQuery.findClosestPoint({ x: 0.5, y: 0, z: 0.5 });
+        // console.log('nearestPoint:', nearestPoint);
+        // console.log("navMesh.raw exist: ", !!navMesh.raw);
+        // console.log("navMesh.raw : ", navMesh.raw);
+        // console.log("Crowd poly count:", navMesh.getPolyCount ? navMesh.getPolyCount() : "no getPolyCount()");
 
 
 
@@ -1205,10 +1168,10 @@ async function loadModel() {
         // --- POPULATE SCENE WITH DATA ---
         (Array.isArray(items) ? items : []).forEach(item => {
             if (!item) return;
-            const { asset_mesh_name, asset_cid, title, viet_des, en_des } = item;
+            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid  } = item;
             if (annotationMesh[asset_mesh_name]) {
-                annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des);
-                setImageToMesh(currentScene, asset_mesh_name, `https://gateway.pinata.cloud/ipfs/${asset_cid}`);
+                annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
+                setImageToMesh(currentScene, asset_mesh_name, `https://${PINATA_URL}/${asset_cid}`);
             }
         });
 
@@ -1273,10 +1236,6 @@ function closeMenu(){
 if (menuContainer) menuContainer.style.display = "none";
 }
 
-
-
-
-
 // pointer lock mouse look (example — adapt to your app)
 window.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement) {
@@ -1289,6 +1248,12 @@ window.addEventListener('mousemove', (e) => {
 
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
+
+    // render CSS3D (if you use it)
+  if (css3dRenderer) css3dRenderer.render(scene, camera);
+
+  // render CSS2D (labels)
+  if (cssRenderer) cssRenderer.render(scene, camera);
 
   const frameDelta = Math.min(0.05, clock.getDelta());
   physicsTimeAccumulator += frameDelta;
@@ -1620,11 +1585,6 @@ function animate() {
     }
   }
 
-
-
-
-  
-
   // ---------------- MIXERS ----------------
   if (mixer) mixer.update(frameDelta);
   if (tpView?.mixer) tpView.mixer.update(frameDelta * 0.9);
@@ -1634,21 +1594,17 @@ function animate() {
 }
 
 
-// ------------------------
-// activateThirdPerson
-// ------------------------
-function activateThirdPerson() {
+async function activateThirdPerson() {
   activePlayer = 'tp';
 
-
-  // Build / attach tpView if it was delayed previously
+  // --- Late-load initialization ---
   if (tpViewLoadLate) {
+    console.log("TP VIEW IS LOAD LATE");
+
     if (!tpViewExisted && character) {
       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
       tpView.buildBVHFromMeshes(bvhMeshList);
       tpView.handleAnimation(character.model, character.gltf);
-
-      // snap smoothing state immediately
       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
       tpView._cameraSnapped = false;
@@ -1657,10 +1613,8 @@ function activateThirdPerson() {
       tpViewExisted = true;
       tpViewLoadLate = false;
     } else if (tpViewExisted && character) {
-      // reattach model if needed
       if (!tpView.model) tpView.attachModel(character.model);
       tpView.handleAnimation(character.model, character.gltf);
-
       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
       tpView._cameraSnapped = false;
@@ -1668,138 +1622,125 @@ function activateThirdPerson() {
       scene.add(tpView.model);
       tpViewLoadLate = false;
     } else {
-      console.info("Not finished loading Character Model yet; retrying activateThirdPerson shortly...");
+      console.info("Character not loaded yet — retrying...");
       setTimeout(activateThirdPerson, 1000);
-      tpViewExisted = false;
-      tpViewLoadLate = false;
+      return;
     }
-    return;
   }
 
-  // Normal re-activation path
-  if (!tpViewLoadLate && tpViewExisted) {
-    // Reset movement/input so no auto-walk carries over
+  // --- Normal reactivation ---
+  if (tpViewExisted && tpView) {
     tpView.resetControls();
-
-    // Align facing with current FP yaw (keep camera continuity)
     tpView.faceYaw(camYaw);
-
-    // Snap smoothing state so model + camera align immediately
     if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
     if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
     tpView._cameraSnapped = false;
-
     scene.add(tpView.model);
     tpView.model.visible = true;
   }
 
-  if (tpView && !tpView.crowdAgent && crowd) {
-    addThirdPersonToCrowd(scene, crowd, tpView);
+  // --- Create or ensure TP agent exists ---
+  if (tpView && tpView.model && !tpView.crowdAgent && crowd) {
+    await addThirdPersonToCrowd(scene, crowd, tpView);
   }
 
-  // --- If a tour is currently active, ensure TP will follow the NPC ---
-  try {
-    const tourNpc = (npcAgents && npcAgents.length) ? npcAgents[0] : null;
-    if (tourNpc && tourNpc.state?.touring) {
-      // Optionally align the TP agent to the TP model immediately so there is no jump
-      if (tpView && tpView.crowdAgent && tpView.model) {
-        try {
-          const tgt = { x: tourNpc.model.position.x, y: tourNpc.model.position.y, z: tourNpc.model.position.z };
-          if (typeof tpView.crowdAgent.teleport === 'function') {
-            tpView.crowdAgent.teleport(tgt);
-          } else {
-            // fallback for different crowd API shapes
-            tpView.crowdAgent.position = tgt;
-          }
-        } catch (e) {
-          // non-fatal
-          console.debug('activateThirdPerson: teleport/copy tpView.crowdAgent failed', e);
-        }
-      }
+  // --- If NPC is touring, start follow ---
+  const tourNpc = npcAgents?.[0];
+  if (tourNpc?.state?.touring) {
+    const nq = getNavQuery() ?? navQuery;
 
-      // Start visual follow on TP view
-      if (typeof tpView.startFollowAgent === 'function') {
-        try {
-          // Use conservative defaults; adjust offsetBehind/side per your UX tuning
-          tpView.startFollowAgent(tourNpc, {
-            offsetBehind: 0.5,
-            smoothing: 0.12,
-            heightOffset: 0.0,
-            side: 1
-          });
-          tpView.isTouring = true;
-        } catch (e) {
-          console.warn('activateThirdPerson: startFollowAgent failed', e);
-        }
-      }
-
-      // Stop FP follow (if any) so only the active view follows
-      if (fpView && typeof fpView.stopFollowAgent === 'function') {
-        try { fpView.stopFollowAgent(); } catch (e) {}
-      }
+    // align the TP agent to NPC immediately to avoid snapping
+    try {
+      const tgt = {
+        x: tourNpc.model.position.x,
+        y: tourNpc.model.position.y,
+        z: tourNpc.model.position.z,
+      };
+      if (tpView?.crowdAgent?.teleport) tpView.crowdAgent.teleport(tgt);
+      else if (tpView?.crowdAgent) tpView.crowdAgent.position = tgt;
+    } catch (e) {
+      console.debug("teleport failed", e);
     }
-  } catch (ex) {
-    console.error('activateThirdPerson: error handling tour follow state', ex);
+
+    // Start TP follow behavior
+    if (tpView && typeof tpView.startFollowAgent === "function") {
+      tpView.startFollowAgent(tourNpc, {
+        offsetBehind: 0.5,
+        smoothing: 0.12,
+        heightOffset: 0.0,
+        side: 1,
+      });
+      tpView.isTouring = true;
+    }
+
+    // Ensure crowd movement begins
+    if (tpView?.crowdAgent && nq && typeof setPlayerFollowTarget === "function") {
+      setPlayerFollowTarget(tpView.crowdAgent, tourNpc, nq);
+    }
+
+    // Stop FP follow (if any)
+    if (fpView && typeof fpView.stopFollowAgent === "function") {
+      try { fpView.stopFollowAgent(); } catch {}
+    }
+
+    console.debug("✅ Third-person follow started successfully (with async crowd registration).");
   }
 }
 
 
-// ------------------------
-// activateFirstPerson
-// ------------------------
 function activateFirstPerson() {
+  activePlayer = 'fp';
+
+  // Capture yaw from TP model for smooth rotation continuity
   if (tpView && tpView.model) {
     const e = new THREE.Euler().setFromQuaternion(tpView.model.quaternion, 'YXZ');
     camYaw = e.y;
     camPitch = 0;
-    if (fpView) {
-      fpView.resetControls();      // stop stale movement
-      if (fpView._smoothedPlayerPosition && fpView.playerCollider) {
-        fpView._smoothedPlayerPosition.copy(fpView.playerCollider.end);
-      }
-      if (typeof fpView.tempQuaternion !== 'undefined' && fpView.model) {
-        fpView.tempQuaternion.copy(fpView.model.quaternion || new THREE.Quaternion());
-      }
-      fpView.setYaw(camYaw);
-      fpView.setPitch(camPitch);
-      fpView._cameraSnapped = false; // snap camera next frame
-    }
   }
 
-  activePlayer = 'fp';
-
-  if (tpView?.model) {
+  // Deactivate TP view
+  if (tpView && tpView.model) {
     scene.remove(tpView.model);
     tpView.model.visible = false;
-  }
-
-  // --- If a tour is currently active, ensure FP will follow the NPC ---
-  try {
-    const tourNpc = (npcAgents && npcAgents.length) ? npcAgents[0] : null;
-    if (tourNpc && tourNpc.state?.touring) {
-      // stop TP follow first (if any)
-      if (tpView && typeof tpView.stopFollowAgent === 'function') {
-        try { tpView.stopFollowAgent(); } catch (e) {}
-        tpView.isTouring = false;
-      }
-
-      // Start FP follow - pass playerCollider if your FP follow impl expects it
-      if (fpView && typeof fpView.setFollowAgent === 'function') {
-        try {
-          fpView.setFollowAgent(tourNpc, playerCollider);
-          fpView.isTouring = true;
-        } catch (e) {
-          console.warn('activateFirstPerson: setFollowAgent failed', e);
-        }
-      }
+    tpView.isTouring = false;
+    if (typeof tpView.stopFollowAgent === 'function') {
+      try { tpView.stopFollowAgent(); } catch {}
     }
-  } catch (ex) {
-    console.error('activateFirstPerson: error handling tour follow state', ex);
   }
+
+  // Reset FP view
+  if (fpView) {
+    fpView.resetControls();
+    if (fpView._smoothedPlayerPosition && fpView.playerCollider)
+      fpView._smoothedPlayerPosition.copy(fpView.playerCollider.end);
+
+    if (typeof fpView.tempQuaternion !== 'undefined' && fpView.model) {
+      fpView.tempQuaternion.copy(fpView.model.quaternion || new THREE.Quaternion());
+    }
+
+    fpView.setYaw(camYaw);
+    fpView.setPitch(camPitch);
+    fpView._cameraSnapped = false;
+  }
+
+  // Resume NPC follow if touring
+  const tourNpc = npcAgents?.[0];
+  if (tourNpc?.state?.touring && fpView) {
+    try {
+      if (typeof fpView.setFollowAgent === 'function') {
+        fpView.setFollowAgent(tourNpc, playerCollider);
+      } else if (typeof fpView.startFollowAgent === 'function') {
+        fpView.startFollowAgent(tourNpc, { offsetBehind: 0, smoothing: 0.1, heightOffset: 0 });
+      }
+      fpView.isTouring = true;
+      console.debug('✅ First-person follow resumed.');
+    } catch (e) {
+      console.warn('activateFirstPerson: follow re-init failed', e);
+    }
+  }
+
+  console.debug('Switched to First-person view.');
 }
-
-
-
 
 export function initializeGame(targetContainerId = 'model-container') {
     container = document.getElementById(targetContainerId);
@@ -1858,7 +1799,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     outlinePass.visibleEdgeColor.set("#ffffff");
     outlinePass.hiddenEdgeColor.set("#000000");
     outlinePass.hiddenEdgeColor.multiplyScalar(0); // effectively transparent
-    outlinePass.renderToScreen = true;      // if it's the last pass
+    outlinePass.renderToScreen = false;      // if it's the last pass
     outlinePass.enabled = false;
     outlinePass.clear = false;              // don’t clear the whole buffer
     outlinePass.clearAlpha = 0;             // transparent, not black
@@ -1884,6 +1825,7 @@ export function initializeGame(targetContainerId = 'model-container') {
         if (event.code === 'KeyV'){
             // active toogle to switch between first and third view
             activePlayer === 'fp' ? activateThirdPerson() : activateFirstPerson();
+            
         }
 
         // 'I' key to start/stop tour with first NPC
@@ -2078,10 +2020,16 @@ export function initializeGame(targetContainerId = 'model-container') {
               requestedGait: npcEntry.state.requestedGait,
               pathLength
             });
-          }      
+          }
+
+
+
+    
+        
     });
-   
     raycasterManager.setOutlinePass(outlinePass);
+
+
     initUploadModal();
     initMenu();
     loadModel();
