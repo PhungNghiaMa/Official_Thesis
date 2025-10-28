@@ -29,6 +29,8 @@ export default class ThirdPersonPlayer {
     this.isRoomTourActive = false;
     this.crowdAgent = null;
     this.isNPC = false;
+    this.isRunning = false ;
+    this.isWalking = false ;  
 
     // Start position inside building (adjust as needed)
     const start = new THREE.Vector3(0, 2, 0);
@@ -258,11 +260,15 @@ export default class ThirdPersonPlayer {
       if (run && hasRun) {
         this.runningAction.timeScale = 1.5;
         this.playAction(this.runningAction);
+        this.isRunning = true ;
+        this.isWalking = false ;
         if (this.currentAction) {
           this.currentAction.timeScale = 1.5;
         }
       } else if (hasWalk) {
         this.playAction(this.walkAction);
+        this.isWalking = true ;
+        this.isRunning = false ;
         if (this.currentAction) {
           this.currentAction.timeScale = 1.0;
         }
@@ -289,6 +295,38 @@ export default class ThirdPersonPlayer {
   setNPCAnimationState(speed, opts = {}) {
     this.updateAnimationState(speed, opts);
   }
+
+    /**
+   * Return a stable world position for the player. Prefer the smoothed capsule end
+   * (this._smoothedPlayerPosition) if available (prevents jitter). Otherwise fall
+   * back to playerCollider.end, model.position, or (0,0,0).
+   */
+  getPlayerPosition() {
+    // Return a clone to avoid accidental external mutation
+    if (this._smoothedPlayerPosition) return this._smoothedPlayerPosition.clone();
+    if (this.playerCollider && this.playerCollider.end) return this.playerCollider.end.clone();
+    if (this.model) return this.model.position.clone();
+    return new THREE.Vector3(0, 0, 0);
+  }
+
+  /**
+   * Return a stable orientation for the player.
+   * Prefer model quaternion if available, otherwise tempQuaternion or identity.
+   */
+  getPlayerQuaternion() {
+    if (this.model && this.model.quaternion) return this.model.quaternion.clone();
+    if (this.tempQuaternion) return this.tempQuaternion.clone();
+    return new THREE.Quaternion();
+  }
+
+  /**
+   * Optional helper: expose the player's capsule (useful for server/follow logic or to
+   * compute a per-model floor offset once).
+   */
+  getPlayerCollider() {
+    return this.playerCollider;
+  }
+
 
   update(delta) {
     if (!this.bvhReady || !this.model) return;
@@ -577,80 +615,80 @@ export default class ThirdPersonPlayer {
     this.crowdAgent = agent;
   }
 
-syncFromCrowd() {
-  if (!this.crowdAgent || !this.model) return;
+  syncFromCrowd() {
+    if (!this.crowdAgent || !this.model) return;
 
-  // --- 1. Get Agent's Position ---
-  let agentPosData;
-  try {
-    // Use the smoother interpolated position if available
-    agentPosData = this.crowdAgent.interpolatedPosition ?? this.crowdAgent.position();
-  } catch (e) {
-    agentPosData = this.crowdAgent.position();
-  }
-  if (!agentPosData) return;
-
-  const agentPos = new THREE.Vector3(agentPosData.x, agentPosData.y, agentPosData.z);
-
-  // --- 2. Snap Vertically to the Visual Floor ---
-  // This is crucial to prevent floating. It's the same logic used for NPCs.
-  let targetPos = agentPos.clone();
-  let snappedToBVH = false;
-
-  if (this.bvhMeshes && this.bvhMeshes.length > 0) {
+    // --- 1. Get Agent's Position ---
+    let agentPosData;
     try {
-      const downOrigin = new THREE.Vector3(agentPos.x, agentPos.y + 2.0, agentPos.z);
-      const downRay = new THREE.Raycaster(downOrigin, new THREE.Vector3(0, -1, 0));
-      const hits = downRay.intersectObjects(this.bvhMeshes, true);
-      if (hits && hits.length > 0) {
-        targetPos.y = hits[0].point.y;
-        snappedToBVH = true;
-      }
-    } catch (e) { /* Ignore raycast errors */ }
-  }
-
-  // If we couldn't snap to a mesh, use the agent's navmesh height as a fallback.
-  if (!snappedToBVH) {
-    targetPos.y = agentPos.y;
-  }
-  // Apply the foot offset to place the model's feet on the ground.
-  targetPos.y += this.footOffset;
-
-
-  // --- 3. Smoothly Apply Position to the Model ---
-  // A high lerp factor makes the player feel responsive to the agent's movement.
-  const posLerpFactor = 0.8;
-  this.model.position.x = THREE.MathUtils.lerp(this.model.position.x, targetPos.x, posLerpFactor);
-  this.model.position.z = THREE.MathUtils.lerp(this.model.position.z, targetPos.z, posLerpFactor);
-  this.model.position.y = THREE.MathUtils.lerp(this.model.position.y, targetPos.y, posLerpFactor);
-
-  // --- 4. Get Agent's Velocity for Rotation and Animation ---
-  let vel;
-  try {
-    vel = this.crowdAgent.velocity();
-  } catch (e) {
-    vel = null;
-  }
-  const vx = vel?.x ?? 0;
-  const vz = vel?.z ?? 0;
-  const speed = Math.sqrt(vx * vx + vz * vz);
-
-  // --- 5. Apply Rotation ---
-  // Make the model face the direction it's moving.
-  if (speed > 1e-3) {
-    let targetYaw = Math.atan2(vx, vz);
-    if (this.isNPC){
-      targetYaw -= Math.PI/2
+      // Use the smoother interpolated position if available
+      agentPosData = this.crowdAgent.interpolatedPosition ?? this.crowdAgent.position();
+    } catch (e) {
+      agentPosData = this.crowdAgent.position();
     }
-    const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
-    // Slerp for smooth turning.
-    this.model.quaternion.slerp(targetQuat, 0.1);
-  }
+    if (!agentPosData) return;
 
-  // --- 6. Update Animation ---
-  // Use the agent's speed to decide whether to play the walk or run animation.
-  const isRunning = speed > (2.4 * 1.1); // A little higher than walk speed
-  this.updateAnimationState(speed, { run: isRunning });
-}
+    const agentPos = new THREE.Vector3(agentPosData.x, agentPosData.y, agentPosData.z);
+
+    // --- 2. Snap Vertically to the Visual Floor ---
+    // This is crucial to prevent floating. It's the same logic used for NPCs.
+    let targetPos = agentPos.clone();
+    let snappedToBVH = false;
+
+    if (this.bvhMeshes && this.bvhMeshes.length > 0) {
+      try {
+        const downOrigin = new THREE.Vector3(agentPos.x, agentPos.y + 2.0, agentPos.z);
+        const downRay = new THREE.Raycaster(downOrigin, new THREE.Vector3(0, -1, 0));
+        const hits = downRay.intersectObjects(this.bvhMeshes, true);
+        if (hits && hits.length > 0) {
+          targetPos.y = hits[0].point.y;
+          snappedToBVH = true;
+        }
+      } catch (e) { /* Ignore raycast errors */ }
+    }
+
+    // If we couldn't snap to a mesh, use the agent's navmesh height as a fallback.
+    if (!snappedToBVH) {
+      targetPos.y = agentPos.y;
+    }
+    // Apply the foot offset to place the model's feet on the ground.
+    targetPos.y += this.footOffset;
+
+
+    // --- 3. Smoothly Apply Position to the Model ---
+    // A high lerp factor makes the player feel responsive to the agent's movement.
+    const posLerpFactor = 0.8;
+    this.model.position.x = THREE.MathUtils.lerp(this.model.position.x, targetPos.x, posLerpFactor);
+    this.model.position.z = THREE.MathUtils.lerp(this.model.position.z, targetPos.z, posLerpFactor);
+    this.model.position.y = THREE.MathUtils.lerp(this.model.position.y, targetPos.y, posLerpFactor);
+
+    // --- 4. Get Agent's Velocity for Rotation and Animation ---
+    let vel;
+    try {
+      vel = this.crowdAgent.velocity();
+    } catch (e) {
+      vel = null;
+    }
+    const vx = vel?.x ?? 0;
+    const vz = vel?.z ?? 0;
+    const speed = Math.sqrt(vx * vx + vz * vz);
+
+    // --- 5. Apply Rotation ---
+    // Make the model face the direction it's moving.
+    if (speed > 1e-3) {
+      let targetYaw = Math.atan2(vx, vz);
+      if (this.isNPC){
+        targetYaw -= Math.PI/2
+      }
+      const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+      // Slerp for smooth turning.
+      this.model.quaternion.slerp(targetQuat, 0.1);
+    }
+
+    // --- 6. Update Animation ---
+    // Use the agent's speed to decide whether to play the walk or run animation.
+    const isRunning = speed > (2.4 * 1.1); // A little higher than walk speed
+    this.updateAnimationState(speed, { run: isRunning });
+  }
 }
 
