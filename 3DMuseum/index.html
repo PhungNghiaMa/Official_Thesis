@@ -16,6 +16,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 
   </head>
+  <script type="module" src="./src/game_logic/index.js"></script>
+  <script type="module">
+    import { initConnection } from './src/game_logic/webRTC.js';
+    window.initConnection = initConnection; // optional global
+  </script>
+
   <body style="width: 100%; height:100%; overflow: hidden; margin: 0; padding: 0;">
     <div id="landingpageContainer" class="GeneralContainer w-full min-h-full  overflow-y-auto overflow-x-hidden absolute top-0 left-0" >
       <div class="Page_1_Container w-full h-full overflow-hidden py-5">

@@ -105,6 +105,19 @@ const PINATA_URL = import.meta.env.MODE === "production"
     ? import.meta.env.VITE_PINATA_PRIVATE_GATEWAY // Use VITE_ prefix
     : import.meta.env.VITE_PINATA_PRIVATE_GATEWAY;     // Use VITE_ prefix
 
+// Multiplayer instances
+const remotePlayers = new Map();    
+window.REMOTEPLAYERS = new Map(); // This just for testing. This is global variable that can test from the console on browswer
+                                  // Later on when set up final version , please delete this variable and all the set up in functions
+                                  // track scheduled retries so we don't schedule multiple timers per peer
+const REMOTE_LOAD_RETRY = {}; // peerId -> timeoutId
+
+const MAX_AVATAR_LOAD_ATTEMPTS = 4;
+const AVATAR_RETRY_DELAY_MS = 5000; // 5s
+const REMOTE_INACTIVITY_TIMEOUT = 30; // seconds before considering remote dead
+let defaultAvatarFloorOffset = null; // cached default floor offset for remote avatars
+window.THREE = THREE                                  
+
 
 // Container instance 
 let loadingManager = document.getElementById('loading-container');
@@ -900,16 +913,16 @@ async function loadModel() {
         });
 
         // 3. Wait for BOTH promises to complete simultaneously.
-        // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
-        const [gltf] = await Promise.all([loadModelPromise]);
+        const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
+        // const [gltf] = await Promise.all([loadModelPromise]);
 
-        // // Clear map before use 
-        // AssetDataMap.clear()
+        // Clear map before use 
+        AssetDataMap.clear()
         // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
         // // image mesh name
-        // for (const item of items){
-        //   AssetDataMap.set(item.asset_mesh_name , item)
-        // }
+        for (const item of items){
+          AssetDataMap.set(item.asset_mesh_name , item)
+        }
 
         // let URL = "QmV55VNUfsGpCqv18Ak2B2VMHRxpaeupFedBMBJQVZ61zq"
         // await prefetchAudio(URL)
@@ -1036,16 +1049,16 @@ async function loadModel() {
                 // }
 
                 if (child.name.toLowerCase().includes("pictureframe")){
-                  if (child.name === "PictureFrame003"){
-                    child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
-                  }
+                  // if (child.name === "PictureFrame003"){
+                  //   child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
+                  // }
                   pictureFramesArray.push(child);
                 }
 
                 if (/^ImageMesh\d+$/.test(child.name)) {
-                  if (child.name === "ImageMesh004"){
-                    child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
-                  }
+                  // if (child.name === "ImageMesh004"){
+                  //   child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
+                  // }
                     imageMeshesArray.push(child);
                     const imagePlane = child;
                     if (imagePlane.geometry?.attributes.uv) imagePlane.geometry.attributes.uv.needsUpdate = true;
@@ -1122,6 +1135,7 @@ async function loadModel() {
         new THREE.Vector3(playerStart.x, endY,   playerStart.z),
         RADIUS
         );
+
 
         // INIT FIRST VIEW PLAYER
         activateFirstPerson();
@@ -1248,6 +1262,11 @@ function animate() {
   const frameDelta = Math.min(0.05, clock.getDelta());
   physicsTimeAccumulator += frameDelta;
   const FIXED_TIMESTEP = 1 / 60;
+
+  // update remote players (multiplayer)
+  if (typeof window.updateRemotePlayers === "function") {
+    try { window.updateRemotePlayers(frameDelta); } catch(e){ console.warn("updateRemotePlayers failed", e); }
+  }
 
   if (outlinePass) {
     const hasTargets = (outlinePass.selectedObjects?.length ?? 0) > 0;
@@ -1598,6 +1617,13 @@ function animate() {
   if (mixer) mixer.update(frameDelta);
   if (tpView?.mixer) tpView.mixer.update(frameDelta);
 
+  // ---------------- UPDATE MULTIPLAYERS ---------------
+  // Update all remote players (from webrtc_game.js)
+  // keep remote avatars in-sync (safe even if webRTC not loaded)
+  if (typeof updateRemotePlayers === "function") {
+    try { updateRemotePlayers(frameDelta); } catch (e) { console.warn("updateRemotePlayers failed", e); }
+  }
+
   checkPlayerPosition();
   composer.render();
 }
@@ -1750,6 +1776,414 @@ function activateFirstPerson() {
 
   console.debug('Switched to First-person view.');
 }
+
+function computeRemotePlayerFloorOffset() {
+ // If cached already, return it
+ if (typeof defaultAvatarFloorOffset === "number") return defaultAvatarFloorOffset;
+
+ // Fallback: compute once from characterModel bounding box if available
+ try {
+  if (characterModel) {
+   const box = new THREE.Box3().setFromObject(characterModel);
+   
+   // Calculate offset: 0 (world floor) - box.min.y (model's lowest point relative to pivot)
+   // If box.min.y is -1, the offset is 1.0 (pivot needs to move up 1 unit).
+   const offset = 0 - box.min.y;
+   
+   // NOTE: The collider-based calculation is overly complex for a remote model
+   // that just needs to sit on the ground, so we rely on the canonical model's 
+   // bounding box, which is the most reliable method for a static avatar mesh.
+      
+   defaultAvatarFloorOffset = offset;
+   console.debug("[AvatarOffset] computed from model bbox fallback", { modelMinY: box.min.y, offset });
+   return offset;
+  }
+ } catch (e) {
+  console.warn("[AvatarOffset] model bbox fallback failed:", e);
+ }
+
+ // last-resort default
+ defaultAvatarFloorOffset = 0;
+ return 0;
+}
+
+
+// Call this once when characterModel finishes loading:
+// (if you already have a loader callback, simply call computeRemotePlayerFloorOffset() there)
+// if (characterModel && typeof defaultAvatarFloorOffset === "undefined") {
+//   computeRemotePlayerFloorOffset();
+// }
+
+function computeFootOffsetForModel(model) {
+  // returns positive number = distance from model origin to feet
+  try {
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    // If bbox is very tiny (unloaded), return null to indicate "not ready"
+    const size = box.getSize(new THREE.Vector3());
+    if (size.lengthSq() < 1e-6) return null;
+    return -box.min.y; // distance from origin to bottom
+  } catch (e) {
+    return null;
+  }
+}
+
+
+function createRemoteAvatarFromTemplate(peerId, attempts = 1) {
+  if (!characterModelReady || !characterModel) {
+    if (attempts < MAX_AVATAR_LOAD_ATTEMPTS && !REMOTE_LOAD_RETRY[peerId]) {
+      console.warn(`[Avatar] Model not ready for peer ${peerId}. Retrying in ${AVATAR_RETRY_DELAY_MS/1000}s (Attempt ${attempts}).`);
+      REMOTE_LOAD_RETRY[peerId] = setTimeout(() => {
+        delete REMOTE_LOAD_RETRY[peerId];
+        addRemotePlayer(peerId, attempts + 1);
+      }, AVATAR_RETRY_DELAY_MS);
+    } else if (attempts >= MAX_AVATAR_LOAD_ATTEMPTS) {
+      console.error(`[Avatar] FATAL: Failed to load model for peer ${peerId} after ${attempts} attempts.`);
+    }
+    return null;
+  }
+
+  // clone skeleton-aware if SkeletonUtils available, else do a simple clone
+  const src = characterModel;
+  let clone;
+  try {
+    clone = (SkeletonUtils && typeof SkeletonUtils.clone === 'function')
+      ? SkeletonUtils.clone(src)
+      : src.clone(true);
+  } catch (e) {
+    console.warn('[Avatar] clone failed, falling back to simple clone', e);
+    clone = src.clone(true);
+  }
+
+  clone.name = `RemotePlayer_${peerId}`;
+  // default off-screen placement; real placement occurs when first network state arrives.
+  clone.position.set(0, 0, 0);
+
+  // Optional: disable frustum culling for remote players so they don't pop out
+  clone.traverse((c) => { if (c.isMesh) c.frustumCulled = false; });
+
+  scene.add(clone);
+  // console.debug('[Avatar] created clone for', peerId, 'floorOffset=', floorOffset);
+  return {clone};
+}
+
+
+export function addRemotePlayer(peerId, attempts = 1) {
+  if (!peerId) return null;
+  if (remotePlayers.has(peerId)) return remotePlayers.get(peerId);
+
+  const result = createRemoteAvatarFromTemplate(peerId, attempts);
+  if (!result) return null;
+
+  const model = result.clone;
+
+  // compute floor offset as you already do
+  let floorOffset = computeFootOffsetForModel(model);
+  if (floorOffset == null) floorOffset = 0;
+  console.debug(`[AvatarOffset] floorOffset for ${peerId}:`, floorOffset);
+
+  // Create an AnimationMixer later when attach controller
+  let mixer = null;
+  let animCtrl = null; // controller returned by createAnimController
+
+  // If you have loaded characterGLTF (clips etc.), create controller for this clone
+  if (typeof characterGLTF !== "undefined" && characterGLTF) {
+    try {
+      animCtrl = createAnimController(model, characterGLTF);
+      mixer = animCtrl.mixer;
+      // start idle if available (createAnimController may already do this)
+      if (animCtrl.idleAction) animCtrl.idleAction.play();
+      model.userData.animCtrl = animCtrl;
+    } catch (e) {
+      console.warn("[RemotePlayer] createAnimController failed:", e);
+      animCtrl = null;
+      mixer = null;
+    }
+  } else {
+    // characterGLTF not yet loaded - remote will remain t-pose until loaded
+    console.warn("⚠️ characterGLTF not loaded yet — remote player will remain T-pose until loaded");
+  }
+
+  const player = {
+    id: peerId,
+    model,
+    mixer,
+    animCtrl,        // may be null until characterGLTF exists
+    actions: {},     // kept for backward compat if you use it
+    currentAction: "idle",
+    // authoritative / last received
+    targetPos: new THREE.Vector3(),
+    targetQuat: new THREE.Quaternion(),
+    // store previous target+time so we can compute speed on next update
+    _prevTargetPos: null,
+    _prevTime: null,
+    lastUpdateTime: performance.now() / 1000,
+    // interpolation state
+    interpPos: new THREE.Vector3(),
+    interpQuat: new THREE.Quaternion(),
+    floorOffset,
+    firstSet: false,
+
+    setState(state) {
+      // normalize
+      const p = Array.isArray(state.p) ? { x: state.p[0], y: state.p[1], z: state.p[2] } : (state.p || { x: 0, y: 0, z: 0 });
+      const q = Array.isArray(state.q) ? { x: state.q[0], y: state.q[1], z: state.q[2], w: state.q[3] } : (state.q || { x: 0, y: 0, z: 0, w: 1 });
+
+      // store previous for speed calc
+      if (this._prevTargetPos === null) {
+        this._prevTargetPos = this.targetPos.clone();
+        this._prevTime = this.lastUpdateTime || (performance.now() / 1000);
+      }
+
+      // update authoritative target
+      this.targetPos.set(p.x, p.y, p.z);
+      this.targetQuat.set(q.x, q.y, q.z, q.w);
+      const now = performance.now() / 1000;
+      const dt = Math.max(1e-6, now - (this._prevTime || now));
+
+      // compute speed = distance / dt using previous target (if available)
+      const dist = this._prevTargetPos ? this._prevTargetPos.distanceTo(this.targetPos) : 0;
+      const speed = dist / dt;
+
+      // compute yaw delta to detect left/right turning
+      let left = false, right = false;
+      try {
+        const prevYaw = new THREE.Euler().setFromQuaternion(this._prevTargetPos ? this._prevTargetPosQuaternion || new THREE.Quaternion() : new THREE.Quaternion(), "YXZ").y;
+      } catch (e) {
+        // fallback: compute from _prev quaternion if you store it (we'll store below)
+      }
+
+      // store current quaternion for next delta
+      this._prevTargetPosQuaternion = this.targetQuat.clone();
+      this._prevTargetPos.copy(this.targetPos);
+      this._prevTime = now;
+      this.lastUpdateTime = now;
+
+      // Decide run vs walk thresholds (tune these)
+      const WALK_THRESHOLD = 0.05; // m/s (very small movement = idle)
+      const RUN_THRESHOLD = 8.0;   // m/s
+
+      const run = speed >= RUN_THRESHOLD;
+      const moving = speed >= WALK_THRESHOLD;
+
+      // compute left/right via yaw delta (optional, tolerant threshold)
+      // We'll compute yaw difference between prev and current quaternions if prev exists
+      if (this._prevTargetPosQuaternion) {
+        const prevEuler = new THREE.Euler().setFromQuaternion(this._prevTargetPosQuaternion, "YXZ");
+        const curEuler = new THREE.Euler().setFromQuaternion(this.targetQuat, "YXZ");
+        let yawDelta = curEuler.y - prevEuler.y;
+        // normalize to [-PI,PI]
+        while (yawDelta > Math.PI) yawDelta -= 2 * Math.PI;
+        while (yawDelta < -Math.PI) yawDelta += 2 * Math.PI;
+        const TURN_THRESHOLD = 0.15; // radians ~ 8.6 deg
+        if (yawDelta > TURN_THRESHOLD) right = true;
+        else if (yawDelta < -TURN_THRESHOLD) left = true;
+      }
+
+      // Apply animation state via animCtrl if present
+      if (this.animCtrl && typeof this.animCtrl.setNPCAnimationState === "function") {
+        try {
+          this.animCtrl.setNPCAnimationState(speed, { left, right, moving, run });
+        } catch (e) {
+          // safe ignore
+        }
+      } else {
+        // fallback: if user provided 'a' field, try to play that (existing code)
+        if (state.a && typeof this.setAnimationState === "function") {
+          try { this.setAnimationState(state.a); } catch (e) {}
+        }
+      }
+
+      // place instantly to avoid popping; interpolation will smooth later
+      this.interpPos.copy(this.targetPos);
+      this.interpQuat.copy(this.targetQuat);
+      this.model.position.set(this.interpPos.x, this.interpPos.y + (this.floorOffset || 0), this.interpPos.z);
+      this.model.quaternion.copy(this.interpQuat);
+      this.firstSet = true;
+    },
+
+    update(dt) {
+      // interpolation and mixer update
+      const alpha = 1 - Math.exp(-10 * dt);
+      this.interpPos.lerp(this.targetPos, alpha);
+      this.interpQuat.slerp(this.targetQuat, alpha);
+      if (this.interpPos.y > 50) this.interpPos.y = 0; // clamp
+      this.model.position.copy(this.interpPos).add(new THREE.Vector3(0, this.floorOffset || 0, 0));
+      this.model.quaternion.copy(this.interpQuat);
+      if (this.mixer) this.mixer.update(dt);
+    }
+  };
+
+  remotePlayers.set(peerId, player);
+  window.REMOTEPLAYERS = remotePlayers; // debug handle
+  console.warn('[RemotePlayer] addRemotePlayer', peerId);
+  return player;
+}
+
+
+// expect THREE in scope, remotePlayers Map defined elsewhere
+// remotePlayers is Map<string, { mesh, lastPos:THREE.Vector3, lastQuat:THREE.Quaternion, lastUpdateTime:number, mixer?:THREE.AnimationMixer }>
+export function updateRemotePlayerState(peerId, state) {
+  if (!peerId) return;
+
+  const pData = Array.isArray(state.p)
+    ? { x: state.p[0], y: state.p[1], z: state.p[2] }
+    : (state.p || { x: 0, y: 0, z: 0 });
+  const qData = Array.isArray(state.q)
+    ? { x: state.q[0], y: state.q[1], z: state.q[2], w: state.q[3] }
+    : (state.q || { x: 0, y: 0, z: 0, w: 1 });
+
+  if (!remotePlayers.has(peerId)) addRemotePlayer(peerId);
+  const entry = remotePlayers.get(peerId);
+  if (!entry) return;
+
+
+
+  const prevPos = entry.targetPos.clone();
+  const prevTime = entry.lastUpdateTime || (performance.now() / 1000);
+
+  entry.targetPos.set(pData.x, pData.y, pData.z);
+  entry.targetQuat.set(qData.x, qData.y, qData.z, qData.w);
+
+  const WALK_THRESHOLD = 0.3; // 0.3 m/s → idle→walk
+  const RUN_THRESHOLD  = 8.0; // 3.0 m/s → walk→run
+
+  const now = performance.now() / 1000;
+  const dt = Math.max(1e-6, now - prevTime);
+  const dist = prevPos.distanceTo(entry.targetPos);
+  const speed = dist / dt; // m/s
+  entry.lastUpdateTime = now;
+  
+  if (entry.mixer){
+    entry.mixer.timeScale = 0.6;
+  }
+
+  const run = speed >= RUN_THRESHOLD;
+
+  // ---------------------------
+  // Corrected thresholds (match local player's)
+  // ---------------------------
+
+
+  // Optional: turning detection
+  let left = false, right = false;
+  if (entry._prevQuat) {
+    const prevEuler = new THREE.Euler().setFromQuaternion(entry._prevQuat, "YXZ");
+    const curEuler  = new THREE.Euler().setFromQuaternion(entry.targetQuat, "YXZ");
+    let yawDelta = curEuler.y - prevEuler.y;
+    while (yawDelta > Math.PI) yawDelta -= 2 * Math.PI;
+    while (yawDelta < -Math.PI) yawDelta += 2 * Math.PI;
+    const TURN_THRESHOLD = 0.15;
+    if (yawDelta > TURN_THRESHOLD) right = true;
+    else if (yawDelta < -TURN_THRESHOLD) left = true;
+  }
+  entry._prevQuat = entry.targetQuat.clone();
+
+  // ---------------------------
+  // Apply animation
+  // ---------------------------
+  if (entry.animCtrl && typeof entry.animCtrl.setNPCAnimationState === "function") {
+    try {
+      entry.animCtrl.setNPCAnimationState(speed - 0.3, { left, right, run });
+    } catch (err) {
+      console.warn("[RemotePlayer] animCtrl error:", err);
+    }
+  }
+
+  // Update target pos/rot for interpolation
+  entry.targetPos.set(pData.x, pData.y, pData.z);
+  entry.targetQuat.set(qData.x, qData.y, qData.z, qData.w);
+}
+
+
+
+export function removeRemotePlayer(peerId) {
+  const p = remotePlayers.get(peerId);
+  if (!p) return;
+  try {
+    scene.remove(p.model);
+    // optionally dispose geometries / materials here if you want to free memory
+  } catch (e) { /* ignore */ }
+  remotePlayers.delete(peerId);
+  if (REMOTE_LOAD_RETRY[peerId]) {
+    clearTimeout(REMOTE_LOAD_RETRY[peerId]);
+    delete REMOTE_LOAD_RETRY[peerId];
+  }
+  window.REMOTEPLAYERS = remotePlayers;
+  console.warn('[RemotePlayer] removeRemotePlayer', peerId);
+}
+
+// Call this from your main animate loop in index.js:
+export function updateRemotePlayers(dt) {
+  for (const p of remotePlayers.values()){
+    if (p.mixer) p.mixer.update(dt);
+    p.update(dt);
+  }
+} 
+
+// export function getLocalPlayerState() {
+//   // Should return a compact plain object matching sendLocalStateBinary encoding
+//   // Prefer 1) third-person view player's collider position (tpView), 2) camera fallback
+//   if (tpView && typeof tpView.getPlayerPosition === "function") {
+//     const pos = tpView.getPlayerPosition();
+//     const quat = (typeof tpView.getPlayerQuaternion === "function")
+//       ? tpView.getPlayerQuaternion()
+//       : (tpView.model ? tpView.model.quaternion : new THREE.Quaternion());
+//     return {
+//       p: [pos.x, pos.y, pos.z],
+//       q: [quat.x, quat.y, quat.z, quat.w],
+//       // optional: a: "walk"/"idle"
+//     };
+//   }
+
+//   // fallback to global camera
+//   if (camera) {
+//     const cp = camera.position;
+//     const cq = camera.quaternion;
+//     return { p: [cp.x, cp.y, cp.z], q: [cq.x, cq.y, cq.z, cq.w] };
+//   }
+
+//   // final fallback (0)
+//   return { p: [0, 0, 0], q: [0, 0, 0, 1] };
+// }
+
+export function getLocalPlayerState() {
+  if (tpView && tpView.model && tpView.playerCollider) {
+    // Get collider bottom point (feet on floor)
+    const bottom = tpView.playerCollider.start
+      ? tpView.playerCollider.start.y - (tpView.playerCollider.radius || 0)
+      : tpView.model.position.y;
+    const pos = tpView.model.position.clone();
+    pos.y = bottom; // use feet height, not camera height
+    const quat = tpView.model.quaternion.clone();
+    let animState = "idle";
+    if (tpView.isWalking) animState = "walk";
+    else if (tpView.isRunning) animState = "run";
+
+    return { p: [pos.x, pos.y, pos.z], q: [quat.x, quat.y, quat.z, quat.w], a: animState };
+  }
+
+  // fallback
+  if (camera) {
+    const cp = camera.position;
+    const cq = camera.quaternion;
+    return { p: [cp.x, 0, cp.z], q: [cq.x, cq.y, cq.z, cq.w] }; // force y≈0
+  }
+
+  return { p: [0, 0, 0], q: [0, 0, 0, 1] };
+}
+
+
+window.spawnDebugMarker = function (pos = [0, 0, 0], color = 0x00ff00) {
+  const geo = new THREE.SphereGeometry(0.3, 12, 12);
+  const mat = new THREE.MeshBasicMaterial({ color });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(pos[0], pos[1], pos[2]);
+  scene.add(mesh);
+  console.warn('[DEBUG] Marker spawned at', pos);
+  return mesh;
+};
+
 
 export function initializeGame(targetContainerId = 'model-container') {
     container = document.getElementById(targetContainerId);
@@ -1928,13 +2362,15 @@ export function initializeGame(targetContainerId = 'model-container') {
           }
         });
 
-      window.addEventListener('keyup', (event) => {
-          if (activePlayer === 'fp' && fpView) {
-              fpView.onKeyUp(event);
-          } else if (activePlayer === 'tp' && tpView) {
-              tpView.onKeyUp(event);
-          }
-      });
+    window.addEventListener('keyup', (event) => {
+        if (activePlayer === 'fp' && fpView) {
+            fpView.onKeyUp(event);
+        } else if (activePlayer === 'tp' && tpView) {
+            tpView.onKeyUp(event);
+        }
+    });
+
+    window.getLocalPlayerState = getLocalPlayerState;
 
     container.addEventListener("keydown", (e) => e.key === "Shift" && hideAnnotations());
     container.addEventListener("keyup", (e) => e.key === "Shift" && showAnnotations());
