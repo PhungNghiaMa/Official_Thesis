@@ -15,6 +15,7 @@ export default class AnnotationDiv{
 
         this.expandedDiv = document.createElement('div');
         this.expandedDiv.className = 'expanded-annotation';
+        this.expandedDiv.style.overflow = 'auto';
         this.title;
 
         const uploadBtn = document.createElement("button")

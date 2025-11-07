@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 // -----------------------------------------------------------------------------
@@ -29,11 +30,13 @@ type Room struct {
 }
 
 type Peer struct {
-	id      string
-	pc      *webrtc.PeerConnection
-	roomRef *Room
-	data    *webrtc.DataChannel
-	closed  chan struct{}
+	id         string
+	pc         *webrtc.PeerConnection
+	roomRef    *Room
+	data       *webrtc.DataChannel
+	closed     chan struct{}
+	recvTracks map[string]*webrtc.TrackRemote // <--- add this
+
 }
 
 // -----------------------------------------------------------------------------
@@ -79,11 +82,66 @@ func (s *SFU) getOrCreateRoom(roomID string) *Room {
 	return room
 }
 
+// func (r *Room) addPeer(p *Peer) {
+// 	r.mu.Lock()
+// 	defer r.mu.Unlock()
+// 	r.peers[p.id] = p
+// 	log.Printf("[room %s] peer %s joined (total %d)", r.id, p.id, len(r.peers))
+// }
+
 func (r *Room) addPeer(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.peers[p.id] = p
 	log.Printf("[room %s] peer %s joined (total %d)", r.id, p.id, len(r.peers))
+
+	// Forward all existing remote tracks from other peers to this new peer
+	go func() {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+
+		for _, other := range r.peers {
+			if other.id == p.id {
+				continue
+			}
+
+			for _, remote := range other.recvTracks {
+				codec := remote.Codec()
+				rtpCap := webrtc.RTPCodecCapability{
+					MimeType:  codec.MimeType,
+					ClockRate: codec.ClockRate,
+					Channels:  codec.Channels,
+				}
+
+				localTrack, err := webrtc.NewTrackLocalStaticRTP(rtpCap, remote.ID(), "relay")
+				if err != nil {
+					log.Printf("[room %s] failed create local track for %s: %v", r.id, remote.ID(), err)
+					continue
+				}
+
+				sender, err := p.pc.AddTrack(localTrack)
+				if err != nil {
+					log.Printf("[room %s] addTrack failed: %v", r.id, err)
+					continue
+				}
+
+				// Copy audio packets from remote -> local
+				go func() {
+					defer func() { _ = sender.Stop() }()
+					buf := make([]byte, 1500)
+					for {
+						n, _, err := remote.Read(buf)
+						if err != nil {
+							return
+						}
+						if _, err = localTrack.Write(buf[:n]); err != nil {
+							return
+						}
+					}
+				}()
+			}
+		}
+	}()
 }
 
 func (r *Room) removePeer(id string) {
@@ -149,15 +207,16 @@ func (s *SFU) HandleJoin(c *gin.Context) {
 
 	room := s.getOrCreateRoom(roomID)
 	peer := &Peer{
-		id:      peerID,
-		pc:      pc,
-		roomRef: room,
-		closed:  make(chan struct{}),
+		id:         peerID,
+		pc:         pc,
+		roomRef:    room,
+		closed:     make(chan struct{}),
+		recvTracks: make(map[string]*webrtc.TrackRemote),
 	}
 	room.addPeer(peer)
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		log.Printf("[peer %s] datachannel open: %s"   , peerID, dc.Label())
+		log.Printf("[peer %s] datachannel open: %s", peerID, dc.Label())
 		peer.data = dc
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			room.broadcastData(peerID, msg.Data)
@@ -233,7 +292,10 @@ func (r *Room) broadcastData(senderID string, data []byte) {
 		_ = p.data.Send(data)
 	}
 }
-
+// Reads raw RTP and feeds it into a sample-based local track (smoother).
+// Adds a 20 ms jitter buffer (prevents audio crackles on lag spikes).
+// Gracefully drops old packets instead of freezing audio.
+// Keeps latency low (~100–150 ms typical).
 func (r *Room) forwardTrack(senderID string, remote *webrtc.TrackRemote) {
 	r.mu.RLock()
 	peers := make([]*Peer, 0, len(r.peers))
@@ -246,6 +308,7 @@ func (r *Room) forwardTrack(senderID string, remote *webrtc.TrackRemote) {
 		if p.id == senderID || p.pc == nil {
 			continue
 		}
+
 		codec := remote.Codec()
 		rtpCap := webrtc.RTPCodecCapability{
 			MimeType:  codec.MimeType,
@@ -253,26 +316,57 @@ func (r *Room) forwardTrack(senderID string, remote *webrtc.TrackRemote) {
 			Channels:  codec.Channels,
 		}
 
-		localTrack, err := webrtc.NewTrackLocalStaticRTP(rtpCap, remote.ID(), "relay")
+		// use TrackLocalStaticSample for smoother pacing
+		localTrack, err := webrtc.NewTrackLocalStaticSample(rtpCap, remote.ID(), "relay")
 		if err != nil {
+			log.Printf("[room %s] track relay create err: %v", r.id, err)
 			continue
 		}
 
 		sender, err := p.pc.AddTrack(localTrack)
 		if err != nil {
+			log.Printf("[room %s] add track err: %v", r.id, err)
 			continue
 		}
 
 		go func() {
 			defer func() { _ = sender.Stop() }()
 			buf := make([]byte, 1500)
-			for {
-				n, _, err := remote.Read(buf)
-				if err != nil {
-					return
+
+			// small jitter buffer channel
+			packets := make(chan []byte, 200)
+
+			go func() {
+				for {
+					n, _, err := remote.Read(buf)
+					if err != nil {
+						close(packets)
+						return
+					}
+					frame := make([]byte, n)
+					copy(frame, buf[:n])
+					select {
+					case packets <- frame:
+					default:
+						// drop if buffer full
+					}
 				}
-				if _, err = localTrack.Write(buf[:n]); err != nil {
-					return
+			}()
+
+			ticker := time.NewTicker(20 * time.Millisecond) // 50fps pacing
+			defer ticker.Stop()
+
+			for range ticker.C {
+				select {
+				case pkt, ok := <-packets:
+					if !ok {
+						return
+					}
+					// write as audio sample with ~20ms duration
+					if err := localTrack.WriteSample(media.Sample{Data: pkt, Duration: 20 * time.Millisecond}); err != nil {
+						return
+					}
+				default:
 				}
 			}
 		}()

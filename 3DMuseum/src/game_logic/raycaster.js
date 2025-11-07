@@ -66,12 +66,18 @@ handleClick(event) {
   this.updatePointer(event);
   this.raycaster.setFromCamera(this.pointer, this.camera);
   const intersects = this.raycaster.intersectObjects(this.scene.children, true);
-  if (intersects.length === 0) return;
+  if (intersects.length === 0){
+    console.warn("INTERSECTS NOT EXIST !")
+    return;
+  } 
+  window.INTERSECTS = intersects;
 
   // choose the first meaningful intersection
   const first = intersects[0];
   const clickedObject = first.object;
   const name = clickedObject.name;
+
+  window.CLICK_PICTURE = name
 
   // door click (keep old behavior) -> return after handling
   if (this.doorNames.includes(clickedObject.parent?.name) && this.doorClickCallback) {
@@ -80,9 +86,11 @@ handleClick(event) {
   }
 
   // picture frame click -> return after handling
-  if (/^Picture_Frame\d+$/.test(name)) {
+  if (/^(PictureFrame)(\d{3})$/.test(name) || /^(ImageMesh)(\d{3})$/.test(name)) {
     if (this.pictureClickCallback) {
       this.pictureClickCallback(name);
+    }else{
+      console.warn("PICTURE CLICK CALLBACK NOT EXIST !")
     }
     return;
   }

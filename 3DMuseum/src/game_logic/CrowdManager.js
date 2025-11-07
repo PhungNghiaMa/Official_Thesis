@@ -2,8 +2,8 @@ import { Crowd } from 'recast-navigation';
 import * as THREE from 'three';
 import { prefetchAudio , playAudio , AssetDataMap , FrameToImageMeshMap} from './index.js';
 import { getCachedAudioDuration } from './utils.js';
-
-let crowd = null;
+import {hostStartTour} from './webRTC.js';
+export let crowd = null;
 const agents = new Map();
 
 export function initCrowd(navMesh, maxAgents = 16, maxAgentRadius = 1.0) {
@@ -21,8 +21,6 @@ export function initCrowd(navMesh, maxAgents = 16, maxAgentRadius = 1.0) {
   }
 }
 
-
-
 export function addAgent(position, agentParams = {}, userData = {}) {
   if (!crowd) {
     console.error("addAgent: crowd not initialized");
@@ -38,7 +36,7 @@ export function addAgent(position, agentParams = {}, userData = {}) {
     maxSpeed: agentParams.maxSpeed ?? 3.5,
     collisionQueryRange: agentParams.collisionQueryRange ?? 30.0,
     pathOptimizationRange: agentParams.pathOptimizationRange ?? 30.0,
-    separationWeight: agentParams.separationWeight ?? 2.0,
+    separationWeight: agentParams.separationWeight ?? 0.05,
   };
 
   const agent = crowd.addAgent(pos, params);
@@ -106,18 +104,20 @@ export function setAgentTarget(agentId, targetPosition, navQuery, options = {}) 
       }
     }
 
-    console.log('🎯 Agent target set to', navPt.point);
+    // console.log('🎯 Agent target set to', navPt.point);
   } catch (e) {
     console.warn('setAgentTarget failed:', e);
   }
 }
 
 // CrowdManager.js - replace existing updateCrowd
+// CrowdManager.js - updated updateCrowd to apply remote-controlled transforms
+
 export function updateCrowd(dt, timeSinceLastFrame = undefined, maxSubSteps = undefined) {
   if (!crowd) return;
   try {
+    // run existing crowd update (if supported)
     if (timeSinceLastFrame !== undefined && maxSubSteps !== undefined) {
-      // fixed time stepping with interpolation if crowd supports it
       if (typeof crowd.update === 'function') {
         crowd.update(dt, timeSinceLastFrame, maxSubSteps);
       }
@@ -127,7 +127,182 @@ export function updateCrowd(dt, timeSinceLastFrame = undefined, maxSubSteps = un
   } catch (e) {
     console.warn('updateCrowd error:', e);
   }
+
+  // ---- New: reconcile externally-driven agents (remoteControlled) ----
+  // Use the exported getAgents() or a passed-in agents Map as your codebase provides.
+  try {
+    // try to get agents Map from global / exported function if available
+    const agentsMap = (typeof getAgents === 'function') ? getAgents() : (typeof window !== 'undefined' && window.getAgents ? window.getAgents() : null);
+    if (agentsMap && typeof agentsMap.values === 'function') {
+      for (const entry of agentsMap.values()) {
+        try {
+          
+          const agentHandle = entry?.agent || entry?.key || null;
+          const model = entry?.model || entry?.userData?.model || null;
+          const ud = entry?.userData || (agentHandle && agentHandle.userData) || null;
+
+          if (!ud) continue;
+          // Check whether this agent is remoteControlled and has externalPos
+          if (ud.remoteControlled && ud.externalPos) {
+            // Canonicalize pos/quaternion into Three objects
+            let netPos = ud.externalPos;
+            let netQuat = ud.externalQuat;
+            if (netPos && !(netPos instanceof THREE.Vector3)) {
+              netPos = new THREE.Vector3(netPos.x || 0, netPos.y || 0, netPos.z || 0);
+              ud.externalPos = netPos;
+              model.userData.externalPos = netPos;
+            }
+            if (netQuat && !(netQuat instanceof THREE.Quaternion)) {
+              netQuat = new THREE.Quaternion(netQuat.x||0, netQuat.y||0, netQuat.z||0, netQuat.w||1);
+              ud.externalQuat = netQuat;
+              model.userData.externalQuat = netQuat;
+            }
+
+            // Ensure animation controller exists (create if missing)
+            let animationCtrl = model.userData?.animationCtrl || model.userData?.animCtrl || null;
+
+            try {
+              if (animationCtrl && animationCtrl.mixer) {
+                animationCtrl.mixer.update(safeDt);
+                // run animations slightly slower overall (60% speed)
+                animationCtrl.mixer.timeScale = 0.6;
+              }
+            } catch(e) {}
+
+            if (!animationCtrl && typeof createAnimController === 'function' && typeof characterGLTF !== 'undefined' && characterGLTF) {
+              try {
+                animationCtrl = createAnimController(model, characterGLTF);
+                model.userData.animationCtrl = animationCtrl;
+                model.userData.animCtrl = animationCtrl;
+                if (animationCtrl.idleAction && typeof animationCtrl.idleAction.play === 'function') {
+                  animationCtrl.idleAction.play();
+                }
+              } catch (e) { /* ignore */ }
+            }
+
+            // Safe dt
+            const safeDt = (typeof dt === 'number' && dt > 1e-6) ? dt : (1/60);
+
+            // Compute instantaneous displacement then exponential-smooth the speed
+            const nowPos = netPos;
+            const prevPos = model.userData._prevPos instanceof THREE.Vector3 ? model.userData._prevPos : nowPos.clone();
+            const dist = prevPos.distanceTo(nowPos);
+            const instantaneousSpeed = dist / safeDt - 1e-6; // subtract small epsilon to avoid jitter at low speeds
+            // exponential smoothing of speed: new = old + (inst - old) * alphaSpeed
+            // alphaSpeed chosen to be responsive to starts but decay slowly on stops
+            const alphaSpeed = 0.12; // tune: larger -> more responsive, smaller -> smoother
+            const lastSmoothed = model.userData._smoothedSpeed || 0;
+            const smoothedSpeed = lastSmoothed + (instantaneousSpeed - lastSmoothed) * alphaSpeed;
+            // scale down to ~0.8 so animation & speed decisions are slightly reduced
+            const scaledSmoothed = smoothedSpeed * 0.8;
+            model.userData._smoothedSpeed = (scaledSmoothed < 0.02) ? 0 : scaledSmoothed;
+            model.userData._prevPos = nowPos.clone();
+
+            // drive animation with smoothed speed
+            const moving = model.userData._smoothedSpeed > 0.01;
+            const run = model.userData._smoothedSpeed > 8.0;
+            if (animationCtrl && typeof animationCtrl.setNPCAnimationState === 'function') {
+              try { animationCtrl.setNPCAnimationState(model.userData._smoothedSpeed, { moving, run }); } catch(e) {}
+            }
+            try { if (animationCtrl && animationCtrl.mixer) animationCtrl.mixer.update(safeDt); } catch(e) {}
+
+            // Teleport the crowd agent once (keeps navmesh state coherent)
+            try {
+              // If this is the very first remote sync for this model, perform an immediate
+              // exact teleport of model, agent and camera (if provided). This ensures a
+              // newly-joining non-host will match the host 100% on tour start.
+              if (!model.userData._firstRemoteSync) {
+                try {
+                  // Teleport visual model immediately to network pose
+                  if (model.position && typeof model.position.set === 'function') {
+                    model.position.set(nowPos.x, nowPos.y, nowPos.z);
+                  }
+                  if (model.quaternion && netQuat) {
+                    model.quaternion.copy(netQuat);
+                  }
+                  // initialize interpolation targets so next frames don't snap
+                  model.userData._targetPos = nowPos.clone();
+                  model.userData._targetQuat = netQuat.clone();
+                  model.userData._prevPos = nowPos.clone();
+                  model.userData._firstRemoteSync = true;
+
+                  // If a tpView (third-person view) is associated, also snap its camera
+                  const tpView = model.userData?.tpView || (entry && entry.userData && entry.userData.tpView);
+                  if (tpView && tpView.camera) {
+                    // If external camera pose was provided, prefer that; otherwise infer from model
+                    const camPos = ud.externalCameraPos && !(ud.externalCameraPos instanceof THREE.Vector3)
+                      ? new THREE.Vector3(ud.externalCameraPos.x||0, ud.externalCameraPos.y||0, ud.externalCameraPos.z||0)
+                      : (ud.externalCameraPos instanceof THREE.Vector3 ? ud.externalCameraPos : null);
+                    const camQuat = ud.externalCameraQuat && !(ud.externalCameraQuat instanceof THREE.Quaternion)
+                      ? new THREE.Quaternion(ud.externalCameraQuat.x||0, ud.externalCameraQuat.y||0, ud.externalCameraQuat.z||0, ud.externalCameraQuat.w||1)
+                      : (ud.externalCameraQuat instanceof THREE.Quaternion ? ud.externalCameraQuat : null);
+
+                    if (camPos) tpView.camera.position.copy(camPos);
+                    else {
+                      // fallback: position camera relative to model using tpView offsets if available
+                      if (tpView._smoothedPlayerPosition) tpView._smoothedPlayerPosition.copy(nowPos);
+                      if (tpView.playerCollider && tpView.playerCollider.end) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
+                    }
+                    if (camQuat) tpView.camera.quaternion.copy(camQuat);
+                    if (tpView.playerCollider) {
+                      tpView._smoothedPlayerPosition = tpView._smoothedPlayerPosition || new THREE.Vector3().copy(nowPos);
+                    }
+                  }
+                } catch (e) {
+                  /* non-fatal */
+                }
+              }
+
+              // Always ensure the nav-agent internal pose is set to the authoritative network position
+              if (agentHandle && typeof agentHandle.teleport === 'function') {
+                agentHandle.teleport({ x: nowPos.x, y: nowPos.y, z: nowPos.z });
+              } else if (agentHandle && agentHandle.position) {
+                agentHandle.position = { x: nowPos.x, y: nowPos.y, z: nowPos.z };
+              }
+            } catch (e) { /* ignore */ }
+
+            // Visual interpolation toward target (exponential lerp based on dt)
+            // alpha = 1 - exp(-k * dt) gives framerate-independent smoothing.
+            const k = 4; // responsiveness constant, tune between 4..14 (larger -> snappier)
+            const alpha = 1 - Math.exp(-k * safeDt);
+            // Initialize target storage
+            if (!model.userData._targetPos) {
+              model.userData._targetPos = model.position.clone();
+              model.userData._targetQuat = model.quaternion.clone();
+            }
+            model.userData._targetPos.copy(nowPos);
+            model.userData._targetQuat.copy(netQuat);
+
+            // Interpolate visual model toward target
+            if (model.position && typeof model.position.lerp === 'function') {
+              model.position.lerp(model.userData._targetPos, alpha);
+            } else if (model.position && typeof model.position.set === 'function') {
+              model.position.set(nowPos.x, nowPos.y, nowPos.z);
+            }
+            if (model.quaternion && typeof model.quaternion.slerp === 'function') {
+              model.quaternion.slerp(model.userData._targetQuat, alpha);
+            } else if (model.quaternion && typeof model.quaternion.set === 'function') {
+              model.quaternion.set(netQuat.x, netQuat.y, netQuat.z, netQuat.w);
+            }
+            if (model.matrixWorldNeedsUpdate !== undefined) model.matrixWorldNeedsUpdate = true;
+
+            // update crowd agent interpolated cache if provided (best-effort)
+            try {
+              if (agentHandle && typeof agentHandle.interpolatedPosition === 'function') {
+                const ip = agentHandle.interpolatedPosition();
+                if (ip) { ip.x = nowPos.x; ip.y = nowPos.y; ip.z = nowPos.z; }
+              }
+            } catch (e) { /* ignore */ }
+          }
+        }catch (err) {}
+      }
+    }
+  } catch (err) {
+    // Non-fatal - we want to avoid noisy failures
+    console.debug('updateCrowd remote reconciliation failed:', err);
+  }
 }
+
 
 export function getAgents() {
   return agents;
@@ -181,6 +356,9 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
     const queue = [];
     const tempWorldPos = new THREE.Vector3();
 
+    if (typeof hostStartTour === "function") hostStartTour(agentEntry.model);
+
+
     for (const pictureMesh of PictureMeshes) {
         if (!pictureMesh) continue;
 
@@ -217,7 +395,7 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
             faceWorldPos: facePos,  // look at the picture
             targetWorldPos: tempWorldPos.clone()
         });
-        console.warn("Queued tour target:", pictureMesh.name, "=> TourTarget worldPos", tempWorldPos);
+        // console.warn("Queued tour target:", pictureMesh.name, "=> TourTarget worldPos", tempWorldPos);
     }
 
     if (queue.length === 0) {
@@ -299,12 +477,20 @@ export async function updateAgentTours(navQuery) {
       if (entry && entry.state) entry.state.mode = tour.status;
 
       // get agent position (interpolated if available)
-      let agentPosition;
+      // get agent position (interpolated if available).
+      // If agent is remoteControlled and has externalPos, prefer that (host-driven).
+      let agentPosition = null;
       try {
-        agentPosition =
-          (typeof agentHandle.interpolatedPosition === "function")
-            ? agentHandle.interpolatedPosition()
-            : (typeof agentHandle.position === "function" ? agentHandle.position() : agentHandle.position);
+        const ud = (agentHandle && agentHandle.userData) ? agentHandle.userData : null;
+        if (ud && ud.remoteControlled && ud.externalPos) {
+          // externalPos is expected to be a THREE.Vector3-like {x,y,z}
+          agentPosition = ud.externalPos;
+        } else {
+          agentPosition =
+            (typeof agentHandle.interpolatedPosition === "function")
+              ? agentHandle.interpolatedPosition()
+              : (typeof agentHandle.position === "function" ? agentHandle.position() : agentHandle.position);
+        }
       } catch {
         agentPosition = agentHandle.position ?? null;
       }
@@ -461,10 +647,10 @@ export async function updateAgentTours(navQuery) {
             } catch (e) { /* ignore errors */ }
 
             // align model to agent pos (snap when arrived)
-            // if (model) {
-            //   const footOffset = (typeof model.userData?.footOffset === 'number') ? model.userData.footOffset : 0;
-            //   model.position.set(agentPos.x, agentPos.y + footOffset, agentPos.z);
-            // }
+            if (model) {
+              const footOffset = (typeof model.userData?.footOffset === 'number') ? model.userData.footOffset : 0;
+              model.position.set(agentPos.x, agentPos.y + footOffset, agentPos.z);
+            }
 
             // face picture (same as before)
             if (model) {
@@ -607,9 +793,9 @@ export function addThirdPersonToCrowd(scene, crowd, tpView) {
       height: 1.8,
       maxSpeed: 2.4,
       maxAcceleration: 6.0,
-      collisionQueryRange: 0.25,
+      collisionQueryRange: 1,
       pathOptimizationRange: 50,
-      separationWeight: 0.05,
+      separationWeight: 0,
     });
 
     if (!agent) {
@@ -627,6 +813,21 @@ export function addThirdPersonToCrowd(scene, crowd, tpView) {
 
     if (tpView.setCrowdAgent) tpView.setCrowdAgent(agentHandle);
     else tpView.crowdAgent = agentHandle;
+
+    // Record mapping between agent entry and the tpView/model so updateCrowd
+    // can find the camera and perform an exact snap when remote-controlled data arrives.
+    try {
+      const stored = agents.get(agent);
+      if (stored) {
+        stored.model = tpView.model || stored.model;
+        stored.userData = stored.userData || {};
+        stored.userData.model = tpView.model || stored.userData.model;
+        stored.userData.tpView = tpView;
+      }
+      if (tpView.model && tpView.model.userData) {
+        tpView.model.userData.tpView = tpView;
+      }
+    } catch (e) { /* ignore */ }
 
     // Align immediately to tpView model position
     try {
