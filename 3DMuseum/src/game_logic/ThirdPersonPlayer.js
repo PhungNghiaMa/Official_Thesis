@@ -33,7 +33,7 @@ export default class ThirdPersonPlayer {
     this.isWalking = false ;  
 
     // Start position inside building (adjust as needed)
-    const start = new THREE.Vector3(0, 2, 0);
+    const start = new THREE.Vector3(0, 1, 0);
     this.playerCollider = playerCollider ?? new Capsule(
       start.clone(),
       start.clone().add(new THREE.Vector3(0, 1.0, 0)),
@@ -60,7 +60,8 @@ export default class ThirdPersonPlayer {
     this.isTouring = false;
     this.followSide = 'right'; // 'left' or 'right';
     this.isViewingPicture = false;
-
+    this.isHost = false;
+    this.remoteControlled = false;
 
     // helpers
     this.tempBox = new THREE.Box3();
@@ -472,6 +473,7 @@ export default class ThirdPersonPlayer {
   // ThirdPersonPlayer.js — inside class ThirdPersonPlayer
   
   startFollowAgent(npcEntry, options = {}) {
+    this.isTouring = true;
     if (!npcEntry || !npcEntry.agent) {
       console.warn('ThirdPersonPlayer.startFollowAgent: expected npc entry with .agent and .model');
       return false;
@@ -524,10 +526,23 @@ export default class ThirdPersonPlayer {
   stopFollowAgent() {
     this._follow = null;
     this.isTouring = false;
+    this.resetControls();
   }
 
   isTouring() {
     return this.isTouring;
+  }
+
+  setHost(value){
+    this.isHost = value;
+  }
+
+  getHost(){
+    return this.isHost;
+  }
+
+  getCamera(){
+    return this.camera
   }
 
   // small helper: resolve agent position object -> {x,y,z}
@@ -675,6 +690,19 @@ export default class ThirdPersonPlayer {
 
     // --- 5. Apply Rotation ---
     // Make the model face the direction it's moving.
+    // if (isHost === true){
+    //   if (speed > 1e-3) {
+    //     let targetYaw = Math.atan2(vx, vz);
+    //     if (this.isNPC){
+    //       targetYaw -= Math.PI/2
+    //     }
+    //     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+    //     // Slerp for smooth turning.
+    //     this.model.quaternion.slerp(targetQuat, 0.1);
+    //   }
+    // }
+
+       
     if (speed > 1e-3) {
       let targetYaw = Math.atan2(vx, vz);
       if (this.isNPC){
@@ -683,7 +711,23 @@ export default class ThirdPersonPlayer {
       const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
       // Slerp for smooth turning.
       this.model.quaternion.slerp(targetQuat, 0.1);
+    }else{
+      return;
     }
+
+    // if (!this.remoteControlled) { // <--- The crucial check
+    //   if (speed > 1e-3) {
+    //     let targetYaw = Math.atan2(vx, vz);
+    //     if (this.isNPC){
+    //       targetYaw -= Math.PI/2
+    //     }
+    //     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
+    //     // Slerp for smooth turning.
+    //     this.model.quaternion.slerp(targetQuat, 0.1);
+    //   }
+    // }
+    
+
 
     // --- 6. Update Animation ---
     // Use the agent's speed to decide whether to play the walk or run animation.

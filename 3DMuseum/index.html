@@ -37,11 +37,10 @@
               <a data-i18n="LandingPage.contact" id="contact" class="navigation contact px-2" href="/contact">Contact</a>
             </nav>
             <div class="LanguageSwitcherContainer w-auto h-auto flex flex-row items-center transition-all ease-in-out 10s text-xs font-semibold">
-              <div class="VietBtn lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200">
-                <button href="/" onclick="changeLanguage('vi')">VI</button>
-              </div>
-              <div class="EnBtn lang hidden mx-2 border-2 border-gray-400 hover:border-orange-400 rounded-lg text-gray-300">
-                <button href="/" onclick="changeLanguage('en')">EN</button>
+              <div class="LangToogleContainer lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200" id="LangToogleContainer">
+                <button id="LangToggleBtn" class="LangToogleBtn" 
+                    type="button" onclick="changeLanguage()">
+                VI</button>
               </div>
             </div>
           </div>
@@ -157,11 +156,12 @@
     <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
 
     <script type="module">
+
       // Render landing page quickly with template
       import landingPageHTML from './template/landingpage_template.js';
 
       document.getElementById('landingpage').innerHTML = landingPageHTML;
-      
+      localStorage.setItem('language', 'vi');
       // Lazy i18n loader
       const lazyI18n = () =>
         import('./src/i18next.js').then(({ initI18next, updateContent, changeLanguage }) => {
