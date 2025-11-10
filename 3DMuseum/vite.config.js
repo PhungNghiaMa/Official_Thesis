@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
+import viteCompression from 'vite-plugin-compression'
+
 
 export default defineConfig({
   cacheDir: 'node_modules/.vite',   // correct place for cache dir
@@ -12,6 +14,10 @@ export default defineConfig({
 
   plugins: [
     tailwindcss(),
+    viteCompression({
+      algorithm: 'brotliCompress',
+      threshold: 10
+    }),
   ],
 
   build: {
@@ -36,16 +42,7 @@ export default defineConfig({
   optimizeDeps: {
     include: [
       'three',
-      'three/examples/jsm/loaders/GLTFLoader.js',
-      'three/examples/jsm/renderers/CSS3DRenderer.js',
-      'three/examples/jsm/postprocessing/EffectComposer.js',
-      'three/examples/jsm/postprocessing/RenderPass.js',
-      'three/examples/jsm/postprocessing/OutlinePass.js',
-      '@recast-navigation/three'
     ],
-    exclude: [
-      'recast-navigation'
-    ]
   }
 })
 

@@ -1,4 +1,3 @@
-// import "tailwindcss"
 export default 
 `<div id="landing_page" class="LandingPageContainer w-full overflow-hidden top-0">
       <div class="LandingPageWrapContainer w-full h-auto flex flex-row-reverse overlfow-hidden">
@@ -14,11 +13,11 @@ export default
             </div>
           </div>
           <div class="LandingPageFunctionContainer w-full h-8/12">
-            <div class="StartBtnContainer w-full h-full">
-              <div class="StartBtn w-full h-fit overflow-hidden flex items-start justify-end pt-16">
-                <button type="button" id="start_button" class="button h-auto overflow-hidden flex items-center justify-center">
+            <div class="InitBtnContainer w-full h-full">
+              <div class="InitBtn w-full h-fit overflow-hidden flex items-start justify-end pt-16">
+                <button type="button" id="init_button" class="button h-auto overflow-hidden flex items-center justify-center">
                     <div class="wrap">
-                      <p data-i18n="LandingPage.StartBtn">
+                      <p data-i18n="LandingPage.InitBtn">
                         <span>✧</span>
                         <span>✦</span>
                         Start

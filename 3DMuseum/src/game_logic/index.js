@@ -1,6 +1,6 @@
 // src/game_logic/index.js
 
-import "../../main.css";
+// import "../../main.css";
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -1228,16 +1228,16 @@ async function loadModel() {
         });
 
         // 3. Wait for BOTH promises to complete simultaneously.
-        const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
-        // const [gltf] = await Promise.all([loadModelPromise]);
+        // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
+        const [gltf] = await Promise.all([loadModelPromise]);
 
         // Clear map before use 
-        AssetDataMap.clear()
-        // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
-        // // image mesh name
-        for (const item of items){
-          AssetDataMap.set(item.asset_mesh_name , item)
-        }
+        // AssetDataMap.clear()
+        // // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
+        // // // image mesh name
+        // for (const item of items){
+        //   AssetDataMap.set(item.asset_mesh_name , item)
+        // }
 
         // let URL = "QmV55VNUfsGpCqv18Ak2B2VMHRxpaeupFedBMBJQVZ61zq"
         // await prefetchAudio(URL)
@@ -2977,7 +2977,6 @@ export function initializeGame(targetContainerId = 'model-container') {
     initUploadModal(ktx2Loader);
     initMenu();
     loadModel();
-    // initPostProcessing();
     setGameScene(scene);
 
     if (animationFrameId === null) {

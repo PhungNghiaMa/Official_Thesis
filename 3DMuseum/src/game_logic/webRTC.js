@@ -6,7 +6,6 @@
 import { addRemotePlayer, updateRemotePlayerState, removeRemotePlayer, updateRemotePlayers, getLocalPlayerState , getCurrentNPCState , initNPC , _sharedRefs } 
   from './index.js';
 const API_BASE = "http://localhost:3001"// default to backend:3001
-const ROOM_ID = new URLSearchParams(location.search).get("room") || "default";
 const PEER_ID = (window.WEBRTC_PEER_ID) ? window.WEBRTC_PEER_ID : Math.random().toString(36).substring(2, 10);
 
 let pc = null;
@@ -197,6 +196,10 @@ function getAgentsFunc() { return _sharedRefs.getAgents ? _sharedRefs.getAgents(
 function stopTour(npc) {return _sharedRefs.stopTour ? _sharedRefs.stopTour(npc) : null;}
 
 
+const getRooomID  = (INPUT_ROOM_ID) =>{
+  if (INPUT_ROOM_ID) return INPUT_ROOM_ID;
+  return window.WEBRTC_ROOM_ID ??  (new URLSearchParams(location.search).get("room") || "default");
+}
 
 
 function vecDistance(a, b) {
@@ -702,7 +705,7 @@ const ICE_CONFIG = {
 
 
 export async function initConnection() {
-  console.log("[WebRTC] Connecting to SFU... room:", ROOM_ID, "peer:", PEER_ID);
+  console.log("[WebRTC] Connecting to SFU... room:", getRooomID(null), "peer:", PEER_ID);
   // create RTCPeerConnection
   pc = new RTCPeerConnection(ICE_CONFIG);
 
@@ -808,6 +811,7 @@ export async function initConnection() {
   };
 
   // create offer and send to SFU
+  const ROOM_ID = getRooomID(null);
   const joinUrl = `${API_BASE}/join?room=${encodeURIComponent(ROOM_ID)}&peer=${encodeURIComponent(PEER_ID)}`;
   const answer = await createAndSendOffer(pc, joinUrl);
   console.log('[WebRTC] SFU answer received (object):', answer);
@@ -1569,6 +1573,49 @@ export function leaveRoom() {
   cleanup();
   // optional: notify backend, etc.
 }
+
+export function updateLobbyUI(CURRENT_PEER_IDS){
+  const playerSlots = ['P1', 'P2', 'P3', 'P4', 'P5'];
+
+  // Clear all slots first
+  playerSlots.forEach(slotID => {
+    const slotDiv = document.getElementById(slotID);
+    if (slotDiv) {
+      slotDiv.classList.add('border-dashed', 'opacity-50');
+      slotDiv.classList.remove('opacity-100');
+    }
+  });
+
+  // 2. Populate slots based on the order in the list (index 0 -> P1, index 1 -> P2, etc.)
+  CURRENT_PEER_IDS.forEach((peerID, index) => {
+    if (index < playerSlots.length) {
+      const slotDiv = document.getElementById(playerSlots[index]);
+      if (slotDiv) {
+        slotDiv.classList.remove('border-dashed', 'opacity-50');
+        slotDiv.classList.add('opacity-100');
+      }
+    }
+  })
+  console.log(`[updateLobbyUI] Updated UI with ${CURRENT_PEER_IDS.length} players.`);
+}
+
+export async function updateLobbyState(inputRoomID){
+  if (inputRoomID) window.roomID = inputRoomID;
+  const ROOM_ID = getRooomID(inputRoomID)
+  const joinUrl = `${API_BASE}/join?room=${encodeURIComponent(ROOM_ID)}&peer=${encodeURIComponent(PEER_ID)}`;
+  try{
+    const response = await fetch(joinUrl, {method: "POST"});
+    if (!response.ok) {
+      throw new Error(`[ updateLobbyState ] HTTP error! Status: ${response.status}`);
+    }
+    const data = await response.json();
+    updateLobbyUI(data.players || []);
+  }catch(error){
+    console.error("[ updateLobbyState ] Error:", error);
+    updateLobbyUI([PEER_ID]);
+  }
+}
+
 
 // auto-init (optional) — comment out if you want manual control.
 // initConnection().catch(err => console.warn('webrtc init failed', err));
