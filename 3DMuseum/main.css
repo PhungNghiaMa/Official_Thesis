@@ -109,7 +109,7 @@ body {
 .LandingPageContainer , .LandingPageWrapContainer{
     height: inherit;
 }
-.StartBtn{
+.InitBtn{
     padding-right: 8dvw;
 }
 
@@ -244,9 +244,11 @@ body {
         padding-left: 1vw;
         font-weight: 500;
     }
-    .StartBtn{
+    .InitBtn{
         display: flex;
         justify-content: end;
+        width: max-content;
+        height: auto;
     }
     .button{
         width: max-content;
@@ -341,8 +343,8 @@ canvas{
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
+    width: 100dvw;
+    height: 100dvh;
     color: white;
     flex-direction: column;
     justify-content: center;
@@ -351,6 +353,7 @@ canvas{
     flex-direction: column;
     align-items: center;
     gap: 20px;
+    display: none;
 }
 
 #loading-bar {
@@ -541,7 +544,6 @@ canvas{
     border-radius: 8px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
     padding: 20px;
-    width: 100%;
     width: 100%;
     max-width: 500px;
     z-index: 999;
@@ -776,4 +778,17 @@ canvas{
 }
 .BottomContainer{
     font-weight: 500;
+}
+
+.inputIDValue::placeholder {
+    font: 200;
+    font-size: small;
+    opacity: .8;
+}
+
+.SinglePlayer_MultiPlayer_Container{
+    top: 30dvh;
+    left: 50dvw;
+    position: relative;
+    transform: translate(-50% , -50%);
 }
