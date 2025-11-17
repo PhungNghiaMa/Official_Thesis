@@ -31,7 +31,7 @@
           </div>
 
           <div class="NavBarContainer w-10/12 h-fit flex flex-row items-center justify-end-safe px-5 box-border">
-            <nav class="NavBar w-1/5 max-h-fit flex items-center justify-around text-md ">
+            <nav class="NavBar w-1/ h-fit flex items-center justify-around text-md ">
               <a data-i18n="LandingPage.about" id="about" class="navigation about px-2" href="/about">About</a>
               <a data-i18n="LandingPage.gallery" id="gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
               <a data-i18n="LandingPage.contact" id="contact" class="navigation contact px-2" href="/contact">Contact</a>
@@ -46,13 +46,13 @@
           </div>
       </div>
 
-        <div class="ContentContainer w-full max-h-fit overflow-hidden my-3 bg-transparent">
-          <div class="WrapContainer w-auto overflow-hidden" style="max-height: fit-content;">
-            <div class="PagesContainer w-full h-fit overflow-auto">
-              <div id="landingpage" class="landingpage w-full" style="height: fit-content"></div>
-            </div>
+      <div class="ContentContainer w-full max-h-full overflow-hidden my-3 bg-transparent">
+        <div class="WrapContainer w-auto overflow-hidden" style="max-height: fit-content;">
+          <div class="PagesContainer w-full h-fit overflow-auto">
+            <div id="landingpage" class="landingpage w-full" style="height: fit-content"></div>
           </div>
         </div>
+      </div>
       </div>
     </div>
 
@@ -102,7 +102,7 @@
         </div>
     </div>
     
-    <div class="MenuContainerWrapper w-full h-full flex items-center justify-center bg-amber-300">
+    <div class="MenuContainerWrapper w-full h-full flex items-center justify-center bg-transparent">
       <div class="menu-container" id="menu-container" style="display: none;">
         <div class="MenuCloseContainer flex items-center justify-end" style="width:100%;">
           <i class="menu_close bi bi-x bg-orange-400 rounded-2xl" id="menu-close" ></i>
@@ -173,10 +173,7 @@
       </div>
     </div>
     
-
-
     <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
-
     <script type="module">
 
       // Render landing page quickly with template

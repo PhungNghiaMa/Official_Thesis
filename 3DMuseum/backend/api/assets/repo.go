@@ -157,38 +157,41 @@ func (Repository *AssetRepo) GetAsset(ctx context.Context, RoomID int) ([]model.
 				ROW_NUMBER() OVER (PARTITION BY asset_mesh_name ORDER BY version DESC) AS rn
 			FROM assets
 			WHERE room_id = ?
-			),
-			filtered_assets AS (
+		),
+		filtered_assets AS (
 			SELECT * FROM latest_assets WHERE rn = 1
-			)
-			SELECT
+		)
+		SELECT
 			a.asset_mesh_name,
 			a.asset_cid,
 			a.webp_cid,
 			a.title,
 			a.vietnamese_description AS vietnamese_description,
 			a.english_description AS english_description,
+			c.category AS category,  
 			va.audio_cid AS viet_audio_cid,
 			ea.audio_cid AS eng_audio_cid
-			FROM filtered_assets AS a
-			LEFT JOIN LATERAL (
+		FROM filtered_assets AS a
+		JOIN categories c ON c.category_id = a.category_id   
+		LEFT JOIN LATERAL (
 			SELECT audio_cid
 			FROM audios au
 			WHERE au.asset_cid = a.asset_cid
-				AND au.language = 'vi'
-				AND au.status = 'completed'
+			AND au.language = 'vi'
+			AND au.status = 'completed'
 			ORDER BY au.created_at DESC
 			LIMIT 1
-			) AS va ON TRUE
-			LEFT JOIN LATERAL (
+		) AS va ON TRUE
+		LEFT JOIN LATERAL (
 			SELECT audio_cid
 			FROM audios au2
 			WHERE au2.asset_cid = a.asset_cid
-				AND au2.language = 'en'
-				AND au2.status = 'completed'
+			AND au2.language = 'en'
+			AND au2.status = 'completed'
 			ORDER BY au2.created_at DESC
 			LIMIT 1
-			) AS ea ON TRUE;
+		) AS ea ON TRUE;
+
 
 	`
 	result := Repository.database.WithContext(ctx).Raw(query, room_id).Scan(&Assets)
