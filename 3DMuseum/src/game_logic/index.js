@@ -28,6 +28,7 @@ import { initRecastIfNeeded  , getNavQuery , LoadExternalNavMesh } from "./recas
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { updateCrowd , addAgent, initCrowd, setAgentTarget, startAgentTour , updateAgentTours , stopAgentTour , addThirdPersonToCrowd, getAgents  } from "./CrowdManager.js";
 import { createAnimController } from "./createAnimationController.js";
+import Hls from 'hls.js';
 
 
 THREE.Cache.enabled = true; // Enable caching for better performance
@@ -402,44 +403,102 @@ document.addEventListener("click", () => {
 // NOTE: Make sure ktx2Loader and renderer are defined and accessible in the scope.
 function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgURL for clarity
 
-    // Use the KTX2Loader instance
-    ktx2Loader.load(imgURL,
-        (loadedTexture) => {
-            // Most of these settings are managed by the KTX2Loader/Basis Transcoder, 
-            // but we might keep some for safety or specific overrides.
-            loadedTexture.needsUpdate = true;
-            
-            // KTX2 often handles its own colorspace and filtering internally based on the file.
-            // You can remove most explicit texture properties (like flipY, filters, mipmaps).
+  // Use the KTX2Loader instance
+  ktx2Loader.load(imgURL,
+      (loadedTexture) => {
+          // Most of these settings are managed by the KTX2Loader/Basis Transcoder, 
+          // but we might keep some for safety or specific overrides.
+          loadedTexture.needsUpdate = true;
+          
+          // KTX2 often handles its own colorspace and filtering internally based on the file.
+          // You can remove most explicit texture properties (like flipY, filters, mipmaps).
 
-            const material = new THREE.MeshStandardMaterial({
-                map: loadedTexture,
-                side: THREE.DoubleSide,
-                roughness: 0.5,
-                metalness: 0.0,
-            });
+          const material = new THREE.MeshStandardMaterial({
+              map: loadedTexture,
+              side: THREE.DoubleSide,
+              roughness: 0.5,
+              metalness: 0.0,
+          });
 
-            let mesh = scene.getObjectByName(meshName)
-            if (mesh && mesh.isMesh) {
-                // Safely dispose of the old material's texture to free memory
-                if (mesh.material.map) {
-                    mesh.material.map.dispose();
-                }
-                mesh.material.dispose();
-                
-                mesh.material = material;
-                mesh.material.needsUpdate = true;
-                // UV update is rarely needed here unless the geometry itself changed
-            } else {
-                console.warn(`Cannot find mesh for ${meshName}`)
-            }
-        },
-        undefined, // Progress is optional
-        (error) => {
-            console.error('Error loading KTX2 texture:', error);
-        }
-    );
+          let mesh = scene.getObjectByName(meshName)
+          if (mesh && mesh.isMesh) {
+              // Safely dispose of the old material's texture to free memory
+              if (mesh.material.map) {
+                  mesh.material.map.dispose();
+              }
+              mesh.material.dispose();
+              
+              mesh.material = material;
+              mesh.material.needsUpdate = true;
+              // UV update is rarely needed here unless the geometry itself changed
+          } else {
+              console.warn(`Cannot find mesh for ${meshName}`)
+          }
+      },
+      undefined, // Progress is optional
+      (error) => {
+          console.error('Error loading KTX2 texture:', error);
+      }
+  );
 }
+
+// Function to set HLS video to mesh 
+function setVideoToMeshHLS(scene, meshName, hlsURL) {
+  const video = document.createElement('video');
+  video.autoplay = true;
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+  video.crossOrigin = 'anonymous';
+  video.style.display = 'none';
+
+  console.log("HSL URL: ", hlsURL)
+
+  let hls;
+  hlsURL = hlsURL + "/master.m3u8"
+  if (Hls.isSupported()) {
+    hls = new Hls();
+    hls.loadSource(hlsURL);
+    hls.attachMedia(video);
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = hlsURL;
+  } else {
+    console.error('HLS not supported in this browser');
+    return;
+  }
+
+  // Wait until video can render a frame
+  video.addEventListener('canplay', () => {
+    video.play();
+
+    const videoTexture = new THREE.VideoTexture(video);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    videoTexture.format = THREE.RGBFormat;
+
+    const material = new THREE.MeshBasicMaterial({ map: videoTexture });
+
+    const mesh = scene.getObjectByName(meshName);
+    if (mesh && mesh.isMesh) {
+      if (mesh.material.map) mesh.material.map.dispose();
+      mesh.material.dispose();
+
+      mesh.material = material;
+      mesh.material.needsUpdate = true;
+    } else {
+      console.warn(`Cannot find mesh for ${meshName}`);
+    }
+  });
+
+  // Optional: log HLS errors
+  if (hls) {
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      console.error("HLS.js error:", data);
+    });
+  }
+}
+
+
 
 
 
@@ -451,7 +510,7 @@ document.body.addEventListener("uploadevent", (event) => {
         annotationMesh[asset_mesh_name].title = title;
         annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
         annotationMesh[asset_mesh_name].eng_des = english_description;
-        setImageToMeshKTX2(currentScene,asset_mesh_name, img_url);
+        // setImageToMeshKTX2(currentScene,asset_mesh_name, img_url);
     }
 });
 
@@ -1173,11 +1232,7 @@ async function loadModel() {
         // Use the GLTFLoader instance from your game logic.
             loader.load(
                 ModelPaths[currentMuseumId],
-                (gltf) => {
-                    // Calculate the bandwidth
-                    const endTime = new Date().getTime();
-                    const elapsedTime = endTime - startTime;
-                    
+                (gltf) => {                    
                     // Set target to 100 and start animation
                     targetProgress = 100;
                     animateProgress();
@@ -1228,16 +1283,18 @@ async function loadModel() {
         });
 
         // 3. Wait for BOTH promises to complete simultaneously.
-        // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
-        const [gltf] = await Promise.all([loadModelPromise]);
+        const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
+        // const [gltf] = await Promise.all([loadModelPromise]);
+
+        console.warn("FETCHING ITEMS: ", items);
 
         // Clear map before use 
-        // AssetDataMap.clear()
-        // // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
-        // // // image mesh name
-        // for (const item of items){
-        //   AssetDataMap.set(item.asset_mesh_name , item)
-        // }
+        AssetDataMap.clear()
+        // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
+        // // image mesh name
+        for (const item of items){
+          AssetDataMap.set(item.asset_mesh_name , item)
+        }
 
         // let URL = "QmV55VNUfsGpCqv18Ak2B2VMHRxpaeupFedBMBJQVZ61zq"
         // await prefetchAudio(URL)
@@ -1493,12 +1550,16 @@ async function loadModel() {
         (Array.isArray(items) ? items : []).forEach(item => {
             console.warn(item)
             if (!item) return;
-            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid  } = item;
+            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
             if (annotationMesh[asset_mesh_name]) {
                 annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
                 annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
-
-                setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                if (category === "Image"){
+                  setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                }else if (category === "Video"){
+                  setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                }
+                
             }
         });
 

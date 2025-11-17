@@ -14,7 +14,7 @@ export default
           </div>
           <div class="LandingPageFunctionContainer w-full h-8/12">
             <div class="InitBtnContainer w-full h-full">
-              <div class="InitBtn w-full h-fit overflow-hidden flex items-start justify-end pt-16">
+              <div id="InitButton" class="InitBtn w-full h-fit overflow-hidden flex justify-end-safe pt-16">
                 <button type="button" id="init_button" class="button h-auto overflow-hidden flex items-center justify-center">
                     <div class="wrap">
                       <p data-i18n="LandingPage.InitBtn">
