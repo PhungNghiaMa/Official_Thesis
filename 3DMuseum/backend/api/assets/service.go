@@ -270,6 +270,13 @@ func (s *AssetService) ProcessAudioJobs(assetCID string, detail model.DetailUplo
 			attempts := 0
 			start := time.Now()
 
+			_, err := s.AssetRepo.InsertAudio(ctx, assetCID, j.Lang, j.Text)
+			if err != nil {
+				// If we can't insert into DB, we should probably stop here
+				fmt.Printf("❌ Failed to insert initial audio record for %s: %v\n", j.Lang, err)
+				return
+			}
+
 			// 1️⃣ Check cache
 			existing, err := s.AssetRepo.FindAudioByHash(ctx, textHash, j.Lang)
 			if err == nil && existing.AudioCID != "" {
