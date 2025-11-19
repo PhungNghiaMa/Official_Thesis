@@ -90,6 +90,13 @@ window.THREE = THREE; // expose for debugging
 window.getAgents = getAgents();
 
 
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+window.audioCtx = audioCtx
+
+// Keep references for updates
+const spatialSources = new Map(); // key: meshName -> { panner, source, video }
+const listener = audioCtx.listener;
+
 
 
 export let isHost = false;
@@ -485,6 +492,36 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
 
       mesh.material = material;
       mesh.material.needsUpdate = true;
+
+      // 2) Spatial audio graph
+      if (!spatialSources.has(meshName)) {
+        const source = audioCtx.createMediaElementSource(video);
+        const panner = audioCtx.createPanner();
+        const gain = audioCtx.createGain();
+
+        // Configure panner
+        panner.panningModel = "HRTF";
+        panner.distanceModel = "inverse";
+        panner.refDistance = 2.0;
+        panner.maxDistance = 5.0;
+        panner.rolloffFactor = 1.0;
+        panner.coneInnerAngle = 360.0;
+        panner.coneOuterAngle = 0.0;
+        panner.coneOuterGain = 0.0;
+
+
+        // Connect graph: source -> panner -> gain -> destination
+        source.connect(panner);
+        panner.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        // Initial position
+        const pos = mesh.position;
+        panner.setPosition(pos.x, pos.y, pos.z);
+
+        // Save reference so we don’t recreate it
+        spatialSources.set(meshName, { source, panner, gain, video, mesh });
+      }
     } else {
       console.warn(`Cannot find mesh for ${meshName}`);
     }
@@ -656,6 +693,50 @@ function checkPlayerPosition() {
         }
     }
 }
+
+function checkCurrentPosition() {
+  let playerPosition = null;
+  let playerQuaternion = null;
+
+  if (activePlayer === 'tp' && tpView) {
+    playerPosition = tpView.getPlayerPosition();
+    playerQuaternion = tpView.getPlayerQuaternion();
+  } else if (activePlayer === 'fp' && fpView) {
+    playerPosition = fpView.getPlayerPosition();
+    playerQuaternion = fpView.getPlayerQuaternion();
+  }
+
+  if (playerPosition && playerQuaternion) {
+    listener.setPosition(playerPosition.x, playerPosition.y, playerPosition.z);
+
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(playerQuaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(playerQuaternion);
+
+    listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+  }
+}
+
+
+export function updateSpatialAudio(scene) {
+  // Update listener (player)
+  checkCurrentPosition();
+
+  // Update each source (mesh)
+  for (const [meshName, node] of spatialSources.entries()) {
+    const { panner, mesh } = node;
+    if (!mesh) continue;
+
+    const pos = mesh.position;
+    panner.setPosition(pos.x, pos.y, pos.z);
+
+    // Optional: orient the panner to face the mesh’s forward
+    if (mesh.rotation) {
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion);
+      panner.setOrientation(fwd.x, fwd.y, fwd.z);
+    }
+  }
+}
+
 
 // Material Tuning Function
 // function tuneMaterial(material) {
@@ -1659,6 +1740,8 @@ function animate() {
     // render CSS3D (if you use it)
   if (css3dRenderer) css3dRenderer.render(scene, camera);
 
+  updateSpatialAudio(scene);
+
 
   // render CSS2D (labels)
   if (cssRenderer) cssRenderer.render(scene, camera);
@@ -2057,7 +2140,7 @@ function animate() {
   }
   updateAudioListener(camera)
 
-  checkPlayerPosition();
+  // checkPlayerPosition();
   composer.render();
 }
 
