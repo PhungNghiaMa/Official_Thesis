@@ -1,0 +1,39 @@
+# config.toml - ion-sfu example with TURN & STUN
+[log]
+level = "info"
+
+[rtc]
+# IP/port used for WebRTC and SFU workers
+external_ip = "" # set if running behind NAT (public IP)
+bind = "0.0.0.0:5000"
+
+# ICE configuration: public STUN and an authenticated TURN server
+[rtc.ice_servers]
+[[rtc.ice_servers.servers]]
+urls = ["stun:stun.l.google.com:19302"]
+
+# Example TURN (replace with your TURN hostname and credentials)
+[[rtc.ice_servers.servers]]
+urls = [
+  "turn:turn.example.com:3478?transport=udp",
+  "turn:turn.example.com:3478?transport=tcp"
+]
+username = "turnuser"
+credential = "turnpassword"
+
+# optional: specify range for RTP/RTCP port allocation (if needed)
+# [rtc.ports]
+# min = 30000
+# max = 32000
+
+[web]
+# HTTP management port (for ion api / health / stats). Adjust if you want.
+bind = "0.0.0.0:7000"
+
+[grpc]
+bind = "0.0.0.0:50051"
+
+[sfu]
+# tuning params (defaults are usually fine). Example:
+max_subscribers = 50
+max_publishers = 10

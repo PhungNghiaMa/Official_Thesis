@@ -14,17 +14,12 @@ body {
 }
 
 
-.VietBtn , .EnBtn{
+.LangToogleContainer{
     width: 35px;
     height: 35px;
 }
 
-.LanguageSwitcherContainer:hover .EnBtn{
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    white-space: wrap;
-}
+
 
 .WrapContainer{
     height: 87dvh;
@@ -103,7 +98,11 @@ body {
   height: 100%;
   position: absolute;
   font-family: 'Noto Serif Display', serif;
-  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+   user-select: none;
+
 }
 
 

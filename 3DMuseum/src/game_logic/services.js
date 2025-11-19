@@ -19,10 +19,10 @@ const validateData = (data) => {
 	if (!data.title || data.title.length > 40) {
 		return 'Title is required and must be at most 40 characters.'
 	}
-	if (!data.vietnamese_description || data.vietnamese_description.length > 500) {
+	if (!data.vietnamese_description) {
 		return 'Vietnamese description is required and must be at most 500 characters.'
 	}
-	if (!data.english_description.length || data.english_description.length > 500) {
+	if (!data.english_description.length) {
 		return 'English description is required and must be at most 500 characters.'
 	}
 	return ''
