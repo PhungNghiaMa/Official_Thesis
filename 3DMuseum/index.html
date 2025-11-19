@@ -57,41 +57,67 @@
     </div>
 
     <!-- MODE SELECTION CONTAINER -->
-    <div id="ModeSelectionContainer" class="ModeSelectionContainer w-full h-full flex flex-col box-border overflow-hidden" style="display: none;">
-      <div id="SinglePlayer_MultiPlayer_Container" class="SinglePlayer_MultiPlayer_Container w-1/2 h-max p-4 flex items-center justify-center bg-green-400 ">
-        <div class="SelectMode w-1/2 h-max flex flex-row gap-10 p-4 items-center justify-around bg-red-300">
-          <button id="Solo" type="button" class="cursor-pointer">Solo</button>
-          <button id="Multi" type="button" class="cursor-pointer">Multiplayer</button>
-        </div>
-      </div>
-      <div id="RoomIDContainer" class="RoomIDContainer w-full h-1/12 flex flex-row gap-10 items-center justify-center bg-amber-200" style="display: none;">
-        <label for="roomID">Send this to your friends</label>
-        <div id="roomID" class="RoomID w-20 h-max px-4 py-2 font-bold text-sm border-2 border-gray-600 rounded-md "></div>
-        <label for="inputID">Or input ID to join the game with friends</label>
-        <div id="inputID" class="InputRoomID w-20 h-max px-2  py-2 font-bold text-sm border-2 border-gray-600 rounded-md ">
-          <input id="inputIDValue" type="text" class="inputIDValue w-full h-full focus: outline-none text-center" placeholder="RoomID">
-        </div>
-      </div>
-      <div id="AlertContainer" class="AlertContainer w-full h-max self-center flex items-center justify-center" style="display: none;">
-        <div class="Alert w-max h-14 px-4 rounded-4xl flex flex-col items-center justify-center bg-red-300">
-          <span class="text-lg font-semibold text-red-500" >ALERT !</span>
-          <span id="alert_content" class="text-sm whitespace-pre-wrap"></span>
-        </div>
-      </div>
-      <div id="PlayerContainer" class="PlayerContainer w-full h-11/12 flex flex-col gap-3.5 box-border overflow-hidden bg-red-200" style="display: none;">
-        <div class="Player w-full h-max flex flex-row gap-5 items-center justify-center bg-green-300 my-10">
-          <div id="P1" class="player player1 w-10 h-10 border rounded-md  ">A</div>
-          <div id ="P2" class="player player2 w-10 h-10 border rounded-md">B</div>
-          <div id="P3" class="player player3 w-10 h-10  border rounded-md">C</div>
-          <div id="P4" class="player player4 w-10 h-10  border rounded-md">D</div>
-          <div id="P5" class="player player5 w-10 h-10  border rounded-md">E</div>
+    <div id="ModeSelectionContainer" class="ModeSelectionContainer" style="display: none;">
+        
+        <!-- MODE SELECTION SCREEN -->
+        <div id="SinglePlayer_MultiPlayer_Container" class="SinglePlayer_MultiPlayer_Container">
+            
+            <div class="mode-header">
+                <h1 class="mode-title">The Journey</h1>
+                <div class="mode-subtitle">Select Your Path</div>
+            </div>
+
+            <div class="SelectMode">
+                <!-- SOLO BUTTON -->
+                <button id="Solo" type="button" class="traditional-btn">
+                    <div class="btn-icon">✦</div> <!-- Or use <i class="fa-solid fa-user"></i> -->
+                    <span class="btn-label">Solo</span>
+                    <span class="btn-desc">Explore Alone</span>
+                </button>
+
+                <!-- MULTI BUTTON -->
+                <button id="Multi" type="button" class="traditional-btn">
+                    <div class="btn-icon">❖</div> <!-- Or use <i class="fa-solid fa-users"></i> -->
+                    <span class="btn-label">Co-Op</span>
+                    <span class="btn-desc">Join Friends</span>
+                </button>
+            </div>
         </div>
 
-        <div class="StartBtnContainer w-full h-max flex justify-center items-center">
-          <button id="start_button" type="button" class="StartBtn w-max h-max p-2 cursor-pointer">Start</button>
+        <!-- ROOM ID SCREEN (Hidden by default, styled to match) -->
+        <div id="RoomIDContainer" class="RoomIDContainer" style="display: none; flex-direction: column; gap: 15px;">
+            <label for="roomID" style="color: #1a1a1a; font-weight: bold;">Share this Code</label>
+            <div id="roomID" class="RoomID">123456</div>
+            
+            <div style="width: 100%; height: 1px; background: #f0f0f0; margin: 10px 0;"></div>
+
+            <label for="inputID" style="color: #1a1a1a;">Or Enter Friend's Code</label>
+            <div id="inputID" class="InputRoomID" style="border: 1px solid #1a1a1a; padding: 5px;">
+                <input id="inputIDValue" type="text" placeholder="ROOM ID" 
+                       style="width: 100%; text-align: center; border: none; background: transparent; outline: none; font-family: inherit; font-size: 1.2rem;">
+            </div>
         </div>
-        
-      </div>
+
+        <!-- ALERT (Hidden) -->
+        <div id="AlertContainer" class="AlertContainer" style="display: none; margin-top: 20px;">
+            <div class="Alert" style="background: transparent;">
+                <span style="color: #9e0e0e; font-weight: bold; display: block;">⚠ ALERT</span>
+                <span id="alert_content">Invalid Room ID</span>
+            </div>
+        </div>
+
+        <!-- LOBBY SCREEN (Hidden) -->
+        <div id="PlayerContainer" class="PlayerContainer" style="display: none; margin-top: 20px; width: 500px;">
+            <h3 style="margin:0 0 15px 0; color: #9e0e0e;">Waiting for Players...</h3>
+            <div class="Player" style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px;">
+                <div id="P1" class="player-slot" style="padding: 10px; border: 1px solid #1a1a1a;">A</div>
+                <div id="P2" class="player-slot" style="padding: 10px; border: 1px dashed #999;">-</div>
+                <div id="P3" class="player-slot" style="padding: 10px; border: 1px dashed #999;">-</div>
+            </div>
+            <div class="StartBtnContainer">
+                <button id="start_button" type="button" class="StartBtn">Start Journey</button>
+            </div>
+        </div>
     </div>
 
     <!--  Game Container -->
@@ -212,27 +238,33 @@
         const multiBtn = document.getElementById('Multi');
         const single_multiplayer_container = document.getElementById('SinglePlayer_MultiPlayer_Container');
         const playerContainer = document.getElementById('PlayerContainer');
+        
         if (!soloBtn || !multiBtn){
           console.error("Cannot find the buttons!")
           return;
         } 
+        
         soloBtn.addEventListener('click', () => {
           isMultiplayerMode = false
-           startGame()
+          startGame()
         });
+        
         multiBtn.addEventListener('click', () => {
           isMultiplayerMode = true;
           single_multiplayer_container.style.display = 'none';
+          
+          // Note: Using 'flex' because of the new CSS style
           const roomIDContainer = document.getElementById('RoomIDContainer');
           roomIDContainer.style.display = 'flex';
           playerContainer.style.display = 'flex';
+          
           waitForStartButton();
         });
       }
       handleModeSelection();
 
 
-      // Handle Init button → lazy load game
+      // Handle Init button -> lazy load game
       const waitForStartButton = () => {
         const btn = document.getElementById('start_button');
         if (!btn) return;
@@ -240,25 +272,36 @@
         btn.addEventListener('click', async () => {
           const {initConnection} = await import('./src/game_logic/webRTC.js');
           initConnection().catch(console.error);
+          
           if (!isGameInitialized) {
-            const { initializeGame } = await import('./src/game_logic/index.js');          
+            const { initializeGame } = await import('./src/game_logic/index.js');           
             requestAnimationFrame(() => initializeGame('model-container'));
             isGameInitialized = true;
           }
+          
           if (generalContainer) generalContainer.style.display = 'none';
           if (modelContainer)   modelContainer.style.display   = 'block';
           if (menuContainer)    menuContainer.style.display    = 'flex';
+          
+          // FIX: Hide the mode selection container explicitly
+          const modeContainer = document.getElementById('ModeSelectionContainer');
+          if(modeContainer) modeContainer.style.display = 'none';
         });
       };
 
       const startGame = async () => {
         if (!isGameInitialized) {
-          const { initializeGame } = await import('./src/game_logic/index.js');          
+          const { initializeGame } = await import('./src/game_logic/index.js');           
           requestAnimationFrame(() => initializeGame('model-container'));
           isGameInitialized = true;
+          
           if (generalContainer) generalContainer.style.display = 'none';
           if (modelContainer)   modelContainer.style.display   = 'block';
           if (menuContainer)    menuContainer.style.display    = 'flex';
+          
+          // FIX: Hide the mode selection container explicitly
+          const modeContainer = document.getElementById('ModeSelectionContainer');
+          if(modeContainer) modeContainer.style.display = 'none';
         }
       }
 
@@ -302,12 +345,16 @@
         const landingPage = document.getElementById('landingpageContainer');
         const roomID =  (Math.floor(Math.random() * 900000) + 100000).toString();
         window.WEBRTC_ROOM_ID = roomID // Assign for use inside the multiplayer mode
-        document.getElementById('roomID').innerHTML = roomID;
+        
+        // Use JS to fill the RoomID since we changed the HTML structure
+        const roomIDEl = document.getElementById('roomID');
+        if(roomIDEl) roomIDEl.innerHTML = roomID;
+        
+        // NOTE: init_button comes from 'landingpage_template.js' so we might need to wait
+        // If this fails, move this logic inside a MutationObserver or a short timeout
+        if (!initBtn) return;
+        
         initBtn.addEventListener('click', async () => {
-          if (!initBtn){
-            console.error("Cannot find the init button!")
-            return;
-          }
           console.log("window.WEBRTC_ROOM_ID: ", window.WEBRTC_ROOM_ID)
           if (modeContainer && landingPage){
             modeContainer.style.display = 'flex';
@@ -316,11 +363,13 @@
           } 
         })
       }
-
       
-      waitForInitButton();
+      // Since init_button is inside the template injected at the top, 
+      // we need to wait a moment or use event delegation.
+      // Simple fix: Wait for the next tick since we set innerHTML at start of script
+      setTimeout(waitForInitButton, 100);
       
-      // Handle Gallery → lazy load gallery code
+      // Handle Gallery -> lazy load gallery code
       if (galleryLink) {
         galleryLink.addEventListener('click', async (e) => {
           e.preventDefault();
@@ -338,6 +387,11 @@
           if (generalContainer) generalContainer.style.display = 'none';
           if (modelContainer)   modelContainer.style.display   = 'none';
           if (menuContainer)    menuContainer.style.display    = 'none';
+          
+          // Hide mode container if gallery is clicked
+          const modeContainer = document.getElementById('ModeSelectionContainer');
+          if(modeContainer) modeContainer.style.display = 'none';
+          
           galleryContainer.style.display = 'block';
 
           const { initGalleryPage } = await import('./src/gallery_logic.js');

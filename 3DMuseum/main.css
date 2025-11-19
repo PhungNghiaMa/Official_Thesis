@@ -1,10 +1,28 @@
 @import "tailwindcss";
+@import 'bootstrap-icons/font/bootstrap-icons.css';
+
+
+@font-face {
+  font-family: 'CustomFont1';
+  src: url('/fonts/PlayfairDisplay-VariableFont_wght.ttf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+
 body {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
   position: absolute;
+  font-family: 'CustomFont1', Georgia, 'Times New Roman', Times, serif;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+   user-select: none;
+   font-weight: 500;
+
 }
 
 .GeneralContainer{
@@ -25,28 +43,6 @@ body {
     height: 87dvh;
 }
 
-.Circle{
-    width: 7px;
-    height: 7px;
-    background-color: rgb(244, 109, 19);
-    display: flex;
-    justify-self: center;
-    align-self: center;
-
-}
-
-.WrapperCircle{
-    width: 14px;
-    height: 14px;
-    /* From https://css.glass */
-    background: rgba(36, 36, 36, 0.56);
-    border-radius: 16px;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-    -webkit-backdrop-filter: blur(2.1px);
-    backdrop-filter: blur(2.1px);
-    border: 1px solid rgb(52, 50, 50);
-    align-items: center;
-}
 
 .Footer{
     cursor: pointer;
@@ -72,7 +68,7 @@ body {
     font-size: small;
 }
 
-@media screen and (min-width: 2500px) and (resolution: 1.5dppx) {
+@media screen and (min-width: 2500px) {
     .WrapContainer{
         height: 91dvh;
     }
@@ -97,21 +93,6 @@ body {
 }
 
 
-body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  font-family: 'Noto Serif Display', serif;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-   user-select: none;
-
-}
-
-
 .LandingPageContainer , .LandingPageWrapContainer{
     height: inherit;
 }
@@ -119,8 +100,9 @@ body {
     padding-right: 8dvw;
 }
 
-
 .button {
+  width: max-content;
+  height: 55px;
   --white: #ceb01c;
   --bg: #707070a3;
   --radius: 100px;
@@ -227,12 +209,6 @@ body {
     -ms-user-select: none; /* IE10+/Edge */
     user-select: none; /* Standard */
 }
-.button{
-  width: max-content;
-  height: 55px;
-}
-
-
 
 @media screen and (min-width: 2500px) and (resolution: 1.5dppx) {
     .SubMuseumName{
@@ -425,50 +401,79 @@ canvas{
   pointer-events: none;
 }
 
-
-
-
-
 /* Menu Container */
 .menu-container {
     position: fixed;
-    margin: 50%;
-    width: 50%;
-    height: 50%;
-    background-color: rgba(255, 255, 255, 0.9);
-    display: none; /* Hidden by default, shown by JS */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 70%;
+    max-width: 900px;
+    max-height: 80vh;
+    background: linear-gradient(135deg, #f5f5f5 0%, #ffffff 50%, #f5f5f5 100%);
+    border: 6px solid #000000;
+    border-radius: 0;
+    display: none;
     flex-direction: column;
     align-items: center;
-    justify-self: center;
-    align-self: center;
-    padding: 20px;
+    padding: 60px 60px 60px 60px;
     box-sizing: border-box;
     z-index: 999;
-    overflow-y: auto; /* Enable scrolling if content overflows */
-    background: rgba(36, 36, 36, 0.56);
-    border-radius: 16px;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-    -webkit-backdrop-filter: blur(2.1px);
-    backdrop-filter: blur(2.1px);
-    border: 1px solid rgb(52, 50, 50);
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.menu-container::before {
+    content: '';
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 85%;
+    height: 6px;
+    background: linear-gradient(90deg, #dc143c 0%, #dc143c 20%, #000000 20%, #000000 25%, #dc143c 25%, #dc143c 40%, #ffffff 40%, #ffffff 50%, #dc143c 50%, #dc143c 65%, #000000 65%, #000000 70%, #dc143c 70%, #dc143c 100%);
+    border-top: 2px solid #000000;
+    border-bottom: 2px solid #000000;
+}
+
+.menu-container::after {
+    content: '';
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 85%;
+    height: 6px;
+    background: linear-gradient(90deg, #dc143c 0%, #dc143c 20%, #000000 20%, #000000 25%, #dc143c 25%, #dc143c 40%, #ffffff 40%, #ffffff 50%, #dc143c 50%, #dc143c 65%, #000000 65%, #000000 70%, #dc143c 70%, #dc143c 100%);
+    border-top: 2px solid #000000;
+    border-bottom: 2px solid #000000;
 }
 
 .menu-container .flex {
     width: 100%;
-    justify-content: flex-end; /* Aligns the close icon to the right */
+    justify-content: flex-end;
+    position: relative;
+    z-index: 10;
 }
 
 .menu-container h2 {
     margin-top: 0;
-    margin-bottom: 20px;
-    color: #333;
+    margin-bottom: 10px;
+    color: #dc143c;
+    font-size: 2.2rem;
+    font-weight: 900;
+    font-family: 'Noto Serif Display', serif;
+    text-align: center;
+    text-shadow: 2px 2px 0px #000000;
 }
 
 .menu-container hr {
     width: 80%;
     border: none;
-    border-top: 1px solid #ccc;
-    margin-top: 30px; /* Specific margin from HTML */
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #dc143c 20%, #000000 50%, #dc143c 80%, transparent);
+    margin-top: 20px;
+    margin-bottom: 20px;
 }
 
 #menu-close {
@@ -478,12 +483,20 @@ canvas{
     height: 2.5rem;
     display: flex;
     padding: .28rem;
+    color: #dc143c;
+    border: 2px solid #000000;
+    border-radius: 0;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    transition: all 0.3s ease;
 }
 
 #menu-close:hover {
-    background-color: rgb(182, 174, 160);
-    transform: rotateZ(180deg);
-    transition: 0.5s ease-out;
+    background-color: #dc143c;
+    color: #ffffff;
+    transform: rotateZ(90deg);
+    transition: 0.3s ease-out;
 }
 
 
@@ -498,19 +511,31 @@ canvas{
 }
 
 .menu-item {
-    padding: 10px 15px;
-    background-color: #f0f0f0;
-    width: 50%;
+    padding: 20px 30px;
+    background: linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%);
+    width: 80%;
     height: auto;
-    border-radius: 5px;
+    border: 3px solid #000000;
+    border-radius: 0;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #000000;
     text-align: center;
-    transition: background-color 0.3s ease;
+    transition: all 0.3s ease;
+    box-shadow: 4px 4px 0px #dc143c, 6px 6px 0px rgba(0, 0, 0, 0.2);
+    font-family: 'Noto Serif Display', serif;
 }
 
 .menu-item:hover {
-    background-color: #e0e0e0;
+    background: linear-gradient(135deg, #f5f5f5 0%, #ffffff 100%);
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0px #dc143c, 8px 8px 0px rgba(0, 0, 0, 0.3);
+}
+
+.menu-item:active {
+    transform: translate(0px, 0px);
+    box-shadow: 2px 2px 0px #dc143c, 3px 3px 0px rgba(0, 0, 0, 0.1);
 }
 
 .menu-container ul {
@@ -595,9 +620,6 @@ canvas{
     object-fit: contain;
     object-fit: contain;
 }
-
-
-
 
 
 #upload-text {
@@ -792,9 +814,227 @@ canvas{
     opacity: .8;
 }
 
-.SinglePlayer_MultiPlayer_Container{
-    top: 30dvh;
-    left: 50dvw;
-    position: relative;
-    transform: translate(-50% , -50%);
-}
+.ModeSelectionContainer {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 999;
+        
+        /* Traditional Pattern Background */
+        background-color: #1a1a1a;
+        background-image: 
+            linear-gradient(30deg, #242424 12%, transparent 12.5%, transparent 87%, #242424 87.5%, #242424),
+            linear-gradient(150deg, #242424 12%, transparent 12.5%, transparent 87%, #242424 87.5%, #242424),
+            linear-gradient(30deg, #242424 12%, transparent 12.5%, transparent 87%, #242424 87.5%, #242424),
+            linear-gradient(150deg, #242424 12%, transparent 12.5%, transparent 87%, #242424 87.5%, #242424),
+            linear-gradient(60deg, #1f1f1f 25%, transparent 25.5%, transparent 75%, #1f1f1f 75%, #1f1f1f),
+            linear-gradient(60deg, #1f1f1f 25%, transparent 25.5%, transparent 75%, #1f1f1f 75%, #1f1f1f);
+        background-size: 80px 140px;
+        background-position: 0 0, 0 0, 40px 70px, 40px 70px, 0 0, 40px 70px;
+    }
+
+    /* --- CARD CONTAINER --- */
+    /* This replaces your old simple flex container with a styled card */
+    .SinglePlayer_MultiPlayer_Container {
+        background-color: #e9e9e9; /* Off-white paper color */
+        width: 800px;
+        max-width: 90%;
+        padding: 60px 40px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 40px;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        
+        /* Double Border Effect */
+        border: 2px solid #1a1a1a;
+        outline: 4px solid #9e0e0e; /* Red accent border */
+        outline-offset: -12px;
+    }
+
+    /* Corner Decorations (The ornamental flourish) */
+    .SinglePlayer_MultiPlayer_Container::before,
+    .SinglePlayer_MultiPlayer_Container::after {
+        content: "";
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        background-image: 
+            linear-gradient(45deg, #9e0e0e 10px, transparent 10px),
+            linear-gradient(135deg, #9e0e0e 10px, transparent 10px),
+            linear-gradient(225deg, #9e0e0e 10px, transparent 10px),
+            linear-gradient(315deg, #9e0e0e 10px, transparent 10px);
+        background-position: top left, top right, bottom right, bottom left;
+        background-size: 50% 50%;
+        background-repeat: no-repeat;
+        top: 0; left: 0;
+        opacity: 0; /* Hidden by default, simpler design chosen */
+    }
+
+    /* --- TYPOGRAPHY --- */
+    .mode-header {
+        text-align: center;
+        margin-bottom: 10px;
+        z-index: 2;
+    }
+
+    .mode-title {
+        font-size: 3.5rem;
+        font-weight: 700;
+        color: #1a1a1a;
+        margin: 0;
+        line-height: 1.2;
+        letter-spacing: -1px;
+        text-transform: uppercase;
+    }
+    
+    .mode-subtitle {
+        font-size: 1rem;
+        color: #9e0e0e;
+        font-style: italic;
+        letter-spacing: 3px;
+        margin-top: 5px;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 15px;
+    }
+
+    .mode-subtitle::before, .mode-subtitle::after {
+        content: "";
+        display: block;
+        height: 1px;
+        width: 40px;
+        background-color: #9e0e0e;
+    }
+
+    /* --- BUTTONS LAYOUT --- */
+    .SelectMode {
+        display: flex;
+        flex-direction: row;
+        gap: 40px;
+        width: 100%;
+        justify-content: center;
+        z-index: 2;
+    }
+
+    /* --- TRADITIONAL BUTTON STYLES --- */
+    .traditional-btn {
+        position: relative;
+        width: 220px;
+        height: 280px;
+        background: transparent;
+        border: 2px solid #1a1a1a;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.4s ease;
+        overflow: hidden;
+    }
+
+    /* Inner decorative border inside button */
+    .traditional-btn::after {
+        content: '';
+        position: absolute;
+        top: 6px; left: 6px; right: 6px; bottom: 6px;
+        border: 1px solid #9e0e0e; /* Thin red line */
+        transition: all 0.4s ease;
+    }
+
+    /* Icon / Large Text styling */
+    .btn-icon {
+        font-size: 3rem;
+        color: #1a1a1a;
+        margin-bottom: 20px;
+        transition: all 0.4s ease;
+    }
+
+    /* Main Label */
+    .btn-label {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1a1a1a;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        transition: color 0.4s ease;
+    }
+
+    /* Description */
+    .btn-desc {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 10px;
+        font-style: italic;
+        transition: color 0.4s ease;
+    }
+
+    /* --- HOVER EFFECTS --- */
+    .traditional-btn:hover {
+        background-color: #9e0e0e; /* Fill with Red */
+        border-color: #9e0e0e;
+        transform: translateY(-5px);
+        box-shadow: 0 15px 30px rgba(158, 14, 14, 0.3);
+    }
+
+    .traditional-btn:hover::after {
+        border-color: #f4f1ea; /* Inner line becomes white */
+    }
+
+    .traditional-btn:hover .btn-label,
+    .traditional-btn:hover .btn-icon,
+    .traditional-btn:hover .btn-desc {
+        color: #f4f1ea; /* Text becomes white */
+    }
+
+    /* --- RESPONSIVE --- */
+    @media (max-width: 768px) {
+        .SelectMode { flex-direction: column; align-items: center; }
+        .traditional-btn { width: 100%; height: 120px; flex-direction: row; gap: 20px; }
+        .btn-icon { margin-bottom: 0; font-size: 2rem; }
+        .mode-title { font-size: 2.5rem; }
+    }
+
+    /* --- STYLING FOR THE HIDDEN INPUTS (Matching Theme) --- */
+    /* Ensuring subsequent screens look good too */
+    .RoomIDContainer, .AlertContainer, .PlayerContainer {
+        background-color: #f4f1ea;
+        padding: 20px;
+        border: 2px solid #1a1a1a;
+        outline: 2px solid #9e0e0e;
+        outline-offset: -6px;
+        max-width: 500px;
+        text-align: center;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    
+    #roomID {
+        font-family: 'Noto Serif Display', serif;
+        color: #9e0e0e;
+        border-color: #1a1a1a;
+        background: transparent;
+        font-size: 1.5rem;
+    }
+
+    .StartBtn {
+        background-color: #1a1a1a;
+        color: #f4f1ea;
+        border: none;
+        padding: 10px 40px;
+        font-family: 'Noto Serif Display';
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        transition: background 0.3s;
+    }
+    .StartBtn:hover { background-color: #9e0e0e; }

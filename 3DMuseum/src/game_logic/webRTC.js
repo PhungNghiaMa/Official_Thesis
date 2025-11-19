@@ -1602,7 +1602,7 @@ export function updateLobbyUI(CURRENT_PEER_IDS){
 export async function updateLobbyState(inputRoomID){
   if (inputRoomID) window.roomID = inputRoomID;
   const ROOM_ID = getRooomID(inputRoomID)
-  const joinUrl = `${API_BASE}/join?room=${encodeURIComponent(ROOM_ID)}&peer=${encodeURIComponent(PEER_ID)}`;
+  const joinUrl = `${API_BASE}/join?room=${ROOM_ID}&peer=${PEER_ID}`;
   try{
     const response = await fetch(joinUrl, {method: "POST"});
     if (!response.ok) {

@@ -52,6 +52,14 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp model.AssetStru
 	var latestAsset model.Asset
 	var currentVersion int = 0 // Start at 0 for the initial check
 
+	// Check if the webpCID parameter is an empty string "" . If yes assign a pointer corresponding to the value of webpCID
+	var newWebpCID *string
+	if webpCID == ""{
+		newWebpCID = nil
+	}else{
+		newWebpCID = &webpCID
+	}
+
 	// 1. Find the LATEST existing version for this mesh/room combination
 	err := tx.Where("asset_mesh_name = ? AND room_id = ?", info.MeshName, info.RoomID).
 		Order("version DESC").
@@ -93,8 +101,8 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp model.AssetStru
 		// Update the webp_cid if:
 		// 1. The CIDs are DIFFERENT (user uploaded a new WebP fallback for the same KTX2).
 		// 2. OR, if the old one was missing and the new one is present (fixing a previous fail).
-		if latestAsset.WebpCID != webpCID {
-			updates["webp_cid"] = webpCID
+		if (latestAsset.WebpCID == nil && newWebpCID != nil) || (latestAsset.WebpCID != nil && *latestAsset.WebpCID != *newWebpCID)  {
+			updates["webp_cid"] = newWebpCID
 		}
 		// Ensure that at least 1 field change then upgrad will be execute
 		// else not do anything so we can save up resource to request to database and keep the system more consistent
@@ -112,7 +120,7 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp model.AssetStru
 		// Create a new record with the incremented version.
 		newAsset := model.Asset{
 			AssetCID:              ktx2Resp.IpfsHash, // New KTX2 CID
-			WebpCID:               webpCID,           // New WebP CID
+			WebpCID:               newWebpCID,           // New WebP CID
 			AssetMeshName:         info.MeshName,
 			AssetName:             ktx2Resp.Filename,
 			Title:                 info.Title,

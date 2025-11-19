@@ -22,7 +22,7 @@ type Category struct {
 type Asset struct {
 	AID      uint   `gorm:"column:asset_id;primaryKey;autoIncrement" json:"aid"`
 	AssetCID string `gorm:"column:asset_cid;type:varchar(255);unique;not null" json:"asset_cid"`
-	WebpCID  string `gorm:"column:webp_cid;type:varchar(255);unique" json:"webp_cid"` // fallback webp image
+	WebpCID  *string `gorm:"column:webp_cid;type:varchar(255);unique" json:"webp_cid"` // fallback webp image , pointer string allow the database accept the &"" and insert it as null
 
 	AssetMeshName         string `gorm:"type:varchar(255);index:idx_assets_room_mesh_version,priority:2" json:"asset_mesh_name"`
 	AssetName             string `gorm:"type:varchar(255);not null" json:"asset_name"`
