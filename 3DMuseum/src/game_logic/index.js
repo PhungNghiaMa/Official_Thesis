@@ -446,7 +446,7 @@ function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgU
 function setVideoToMeshHLS(scene, meshName, hlsURL) {
   const video = document.createElement('video');
   video.autoplay = true;
-  video.muted = true;
+  video.muted = false;
   video.loop = true;
   video.playsInline = true;
   video.crossOrigin = 'anonymous';
@@ -1286,7 +1286,6 @@ async function loadModel() {
         const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
         // const [gltf] = await Promise.all([loadModelPromise]);
 
-        console.warn("FETCHING ITEMS: ", items);
 
         // Clear map before use 
         AssetDataMap.clear()

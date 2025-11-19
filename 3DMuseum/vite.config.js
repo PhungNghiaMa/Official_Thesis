@@ -25,6 +25,8 @@ export default defineConfig({
     minify: 'esbuild', // fast & good enough
     // If you really want Terser for advanced compression, set minify: 'terser'
     // and move terserOptions here.
+    modulePreload : false,
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks: {
