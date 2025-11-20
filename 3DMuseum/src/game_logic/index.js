@@ -29,6 +29,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { updateCrowd , addAgent, initCrowd, setAgentTarget, startAgentTour , updateAgentTours , stopAgentTour , addThirdPersonToCrowd, getAgents  } from "./CrowdManager.js";
 import { createAnimController } from "./createAnimationController.js";
 import Hls from 'hls.js';
+import { distance } from 'three/src/nodes/TSL.js';
 
 
 THREE.Cache.enabled = true; // Enable caching for better performance
@@ -452,9 +453,10 @@ function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgU
 // Function to set HLS video to mesh 
 function setVideoToMeshHLS(scene, meshName, hlsURL) {
   const video = document.createElement('video');
-  video.autoplay = true;
+  video.autoplay = false;
+  video.pause();
   video.muted = false;
-  video.loop = true;
+  video.loop = false;
   video.playsInline = true;
   video.crossOrigin = 'anonymous';
   video.style.display = 'none';
@@ -464,9 +466,41 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
   let hls;
   hlsURL = hlsURL + "/master.m3u8"
   if (Hls.isSupported()) {
-    hls = new Hls();
+    const hlsConfig = {
+      startLevel: 0,             // Force start at lowest quality (index 0)
+      autoStartLoad: true,       // Start loading immediately
+      capLevelToPlayerSize: true,// Don't load 4K if mesh is small
+      lowLatencyMode: false,     // Disable low latency for better buffering
+      maxBufferLength: 30,       // Max seconds to buffer ahead
+      maxMaxBufferLength: 600,   
+      maxBufferHole: 0.5,        // Tolerance for small gaps (fix for bufferSeekOverHole)
+      nudgeOffset: 0.1,          // Helper for skipping holes
+      nudgeMaxRetry: 5,
+    };
+
+    hls = new Hls(hlsConfig);
     hls.loadSource(hlsURL);
     hls.attachMedia(video);
+
+    // Add Robust Error Recovery
+    hls.on(Hls.Events.ERROR, function (event, data) {
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            console.warn("Network error, trying to recover...");
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            console.warn("Media error, trying to recover...");
+            hls.recoverMediaError();
+            break;
+          default:
+            console.error("Unrecoverable HLS error");
+            hls.destroy();
+            break;
+        }
+      }
+    });
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = hlsURL;
   } else {
@@ -475,7 +509,7 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
   }
 
   // Wait until video can render a frame
-  video.addEventListener('canplay', () => {
+  video.addEventListener('canplaythrough', () => {
     video.play();
 
     const videoTexture = new THREE.VideoTexture(video);
@@ -506,8 +540,7 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
         panner.maxDistance = 5.0;
         panner.rolloffFactor = 1.0;
         panner.coneInnerAngle = 360.0;
-        panner.coneOuterAngle = 0.0;
-        panner.coneOuterGain = 0.0;
+
 
 
         // Connect graph: source -> panner -> gain -> destination
@@ -525,7 +558,7 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
     } else {
       console.warn(`Cannot find mesh for ${meshName}`);
     }
-  });
+  }, { once: true });
 
   // Optional: log HLS errors
   if (hls) {
@@ -697,18 +730,22 @@ function checkPlayerPosition() {
 function checkCurrentPosition() {
   let playerPosition = null;
   let playerQuaternion = null;
+  let player = null;
+  const video = document.getElementsByName("video")
+  video.autoplay = false;
 
   if (activePlayer === 'tp' && tpView) {
+    player = tpView
     playerPosition = tpView.getPlayerPosition();
     playerQuaternion = tpView.getPlayerQuaternion();
   } else if (activePlayer === 'fp' && fpView) {
+    player = fpView
     playerPosition = fpView.getPlayerPosition();
     playerQuaternion = fpView.getPlayerQuaternion();
   }
 
   if (playerPosition && playerQuaternion) {
     listener.setPosition(playerPosition.x, playerPosition.y, playerPosition.z);
-
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(playerQuaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(playerQuaternion);
 
@@ -716,25 +753,86 @@ function checkCurrentPosition() {
   }
 }
 
+const lastAudioPos = new THREE.Vector3();
+const lastAudioQuat = new THREE.Quaternion();
+function updateSpatialAudio(scene) {
+  // Check if camera moved enough to warrant an update
+  if (camera.position.distanceToSquared(lastAudioPos) < 0.01 && 
+      camera.quaternion.angleTo(lastAudioQuat) < 0.01) {
+      return; 
+  }
 
-export function updateSpatialAudio(scene) {
-  // Update listener (player)
+  // Update cache
+  lastAudioPos.copy(camera.position);
+  lastAudioQuat.copy(camera.quaternion);
+
+  // Update listener (player position)
   checkCurrentPosition();
 
-  // Update each source (mesh)
+  // Define the distance at which audio should start playing
+  const AUDIO_PLAY_DISTANCE = 5.0; // meters
+
+  // Iterate through all spatial sources
   for (const [meshName, node] of spatialSources.entries()) {
-    const { panner, mesh } = node;
+    // Destructure 'video' from the node (assuming you saved it there in setVideoToMeshHLS)
+    const { panner, mesh, video } = node; 
     if (!mesh) continue;
 
     const pos = mesh.position;
     panner.setPosition(pos.x, pos.y, pos.z);
 
-    // Optional: orient the panner to face the mesh’s forward
+    // Orientation logic
     if (mesh.rotation) {
       const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion);
       panner.setOrientation(fwd.x, fwd.y, fwd.z);
     }
+
+    // --- 🔊 DISTANCE CHECK LOGIC ---
+    const lastExitTimes = {}; 
+
+    if (video) {
+      const distance = camera.position.distanceTo(pos);
+      const meshID = mesh.uuid; // Use unique ID for the mesh
+
+      if (distance <= AUDIO_PLAY_DISTANCE) {
+          if (video.paused) {
+              // Check how long they have been gone
+              const timeSinceExit = (Date.now() - (lastExitTimes[meshID] || 0)) / 1000; // seconds
+              
+              // If they were gone for more than 5 seconds, restart. 
+              // Otherwise, just continue.
+              if (timeSinceExit > 5.0) {
+                  video.currentTime = 0;
+              }
+              
+              video.play().catch(e => {});
+          }
+      } else {
+          if (!video.paused) {
+              video.pause();
+              // Record exactly when they left
+              lastExitTimes[meshID] = Date.now();
+          }
+      }
+    }
   }
+}
+
+function updatePropVisibility() {
+    // Only run this check every 30 frames (0.5 seconds)
+    if (LOD_SETTINGS.frames % 30 !== 0) return;
+
+    const maxDistSq = 5 * 5; // 40 meters squared
+
+    // Iterate over detailed objects (e.g., your pictureFramesArray)
+    for (const frame of pictureFramesArray) {
+        const distSq = frame.position.distanceToSquared(camera.position);
+        
+        // If FPS is struggling (<45), hide distant frames aggressively
+        const effectiveDist = LOD_SETTINGS.currentBias > LOD_SETTINGS.MEDIUM ? 2 * 2 : maxDistSq;
+        
+        frame.visible = distSq < effectiveDist;
+    }
 }
 
 
@@ -1740,20 +1838,11 @@ function animate() {
     // render CSS3D (if you use it)
   if (css3dRenderer) css3dRenderer.render(scene, camera);
 
-  updateSpatialAudio(scene);
-
-
-  // render CSS2D (labels)
-  if (cssRenderer) cssRenderer.render(scene, camera);
-
-  const frameDelta = Math.min(0.05, clock.getDelta());
-  physicsTimeAccumulator += frameDelta;
-  const FIXED_TIMESTEP = 1 / 60;
   const now = performance.now();
   prevTime = now;
   let prevFPS = 0;
 
-  // --- LOD Performance Monitoring (Add this block) ---
+    // --- LOD Performance Monitoring (Add this block) ---
   LOD_SETTINGS.frames++;
   if (now - LOD_SETTINGS.startTime >= LOD_SETTINGS.FPS_CHECK_INTERVAL_MS) {
       const currentFPS = LOD_SETTINGS.frames / ((now - LOD_SETTINGS.startTime) / 1000);
@@ -1769,6 +1858,19 @@ function animate() {
       LOD_SETTINGS.frames = 0;
       LOD_SETTINGS.startTime = now;
   }
+  updatePropVisibility();
+  updateSpatialAudio(scene);
+
+
+  // render CSS2D (labels)
+  if (cssRenderer) cssRenderer.render(scene, camera);
+
+  const frameDelta = Math.min(0.05, clock.getDelta());
+  physicsTimeAccumulator += frameDelta;
+  const FIXED_TIMESTEP = 1 / 60;
+
+
+
 
   // update remote players (multiplayer)
   if (typeof window.updateRemotePlayers === "function") {
@@ -1805,11 +1907,30 @@ function animate() {
         continue; // Skip to the next agent
     }
 
+    const distToCam = camera.position.distanceTo(model.position);
+
+    // --- OPTIMIZATION: LOGIC CULLING ---
+    // If far away, only update physics/logic every 3 frames
+    if (distToCam > 40 && (LOD_SETTINGS.frames + npcIndex) % 3 !== 0) {
+        // Interpolate visually to keep it smooth, but skip the heavy math
+        continue; 
+    }
+
     entry.state = entry.state || { mode: 'idle', requestedGait: null };
 
     const anim = model.userData?.animCtrl ?? model.userData?.animationCtrl ?? null;
-    if (anim && anim.mixer && camera.position.distanceTo(model.position) < NPC_MIXER_DISTANCE) {
-      anim.mixer.update(frameDelta );
+    // if (anim && anim.mixer && camera.position.distanceTo(model.position) < NPC_MIXER_DISTANCE) {
+    //   anim.mixer.update(frameDelta );
+    // }
+
+    if (anim && anim.mixer) {
+        if (distToCam < NPC_MIXER_DISTANCE) {
+             // Full update for close NPCs
+             anim.mixer.update(frameDelta);
+        } else if (distToCam < NPC_MIXER_DISTANCE * 1.5) {
+             // Half-rate update for medium distance (saves CPU)
+             if (LOD_SETTINGS.frames % 2 === 0) anim.mixer.update(frameDelta * 2);
+        }
     }
 
     // --- agent position ---
