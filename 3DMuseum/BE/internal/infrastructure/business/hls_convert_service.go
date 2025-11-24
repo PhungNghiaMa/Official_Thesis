@@ -9,25 +9,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+	applicationDTO "main/internal/application/dto"
 )
 
+type HLSConvertRepo struct {}
 
+func NewHLSConvertRepo() *HLSConvertRepo {
+	return &HLSConvertRepo{}
+}
 
 type VideoResolution struct{
 	Width int `json:"width"`
 	Height int `json:"height"`
 }
 
-type VideoConversionResult struct {
-	FolderPath string `json:"folder_path"`
-	M3U8 string `json:"m3u8"`
-	Segments []string `json:"segments"`
-	Duration int `json:"duration"`
-	Resolution []string `json:"resolution"` 
-}
 
+
+// Helper function to get uploaded video resolution 
 func DetectVideoResolution(inputPath string)(*VideoResolution, error){
 	cmd := exec.Command(
         "ffprobe",
@@ -56,7 +55,7 @@ func DetectVideoResolution(inputPath string)(*VideoResolution, error){
 	return &VideoResolution{Width: width, Height: height}, nil
 }
 
-// HasAudioStream checks whether the input file contains at least one audio stream
+// Helper function to detect if uploaded video has audio stream 
 func HasAudioStream(inputPath string) (bool, error) {
     cmd := exec.Command(
         "ffprobe",
@@ -77,9 +76,48 @@ func HasAudioStream(inputPath string) (bool, error) {
     return strings.TrimSpace(out.String()) != "", nil
 }
 
-var mu sync.Mutex
+// Helper function to get video duration in seconds 
+func GetVideoDuration(inputPath string)(int, error){
+	cmd := exec.Command(
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+		inputPath,
+    )
+	
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+        return 0, fmt.Errorf("[GetVideoDuration] Failed to get video duration: %w", err);
+    }
+	durStr := strings.TrimSpace(out.String())
+    durFloat, _ := strconv.ParseFloat(durStr, 64)
+    return int(durFloat), nil
+}
 
-func ConvertToHLS(ctx context.Context, inputPath string) (*VideoConversionResult, error) {
+// Helper function to extract resolution from .meu8 file 
+func ExtractResolutionsFromM3U8(masterPath string) ([]string, error) {
+    data, err := os.ReadFile(masterPath)
+    if err != nil {
+        return nil, err
+    }
+    var variants []string
+    lines := strings.Split(string(data), "\n")
+    for _, line := range lines {
+        if strings.HasPrefix(line, "#EXT-X-STREAM-INF") {
+            // Example: #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+            if strings.Contains(line, "RESOLUTION=") {
+                parts := strings.Split(line, "RESOLUTION=")
+                res := strings.Split(parts[1], ",")[0]
+                variants = append(variants, res)
+            }
+        }
+    }
+    return variants, nil
+}
+
+func(r *HLSConvertRepo) ConvertToHLS(ctx context.Context, inputPath string) (*applicationDTO.VideoConversionResult, error) {
     tempDirectory := filepath.Join(os.TempDir(), fmt.Sprintf("video_%d", time.Now().UnixNano()))
     if err := os.MkdirAll(tempDirectory, 0755); err != nil {
         return nil, fmt.Errorf("failed to create temp dir: %w", err)
@@ -203,10 +241,8 @@ func ConvertToHLS(ctx context.Context, inputPath string) (*VideoConversionResult
     if manifestName == "master.m3u8" {
         resolutions, _ = ExtractResolutionsFromM3U8(filepath.Join(tempDirectory, "master.m3u8"))
     }
-    mu.Lock()
-    defer mu.Unlock()
 
-    return &VideoConversionResult{
+    return &applicationDTO.VideoConversionResult{
         FolderPath: tempDirectory,
         M3U8:       manifestName,
         Segments:   segments,
@@ -214,45 +250,3 @@ func ConvertToHLS(ctx context.Context, inputPath string) (*VideoConversionResult
         Resolution: resolutions,
     }, nil
 }
-
-
-
-func GetVideoDuration(inputPath string)(int, error){
-	cmd := exec.Command(
-        "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-		inputPath,
-    )
-	
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-        return 0, fmt.Errorf("[GetVideoDuration] Failed to get video duration: %w", err);
-    }
-	durStr := strings.TrimSpace(out.String())
-    durFloat, _ := strconv.ParseFloat(durStr, 64)
-    return int(durFloat), nil
-}
-
-func ExtractResolutionsFromM3U8(masterPath string) ([]string, error) {
-    data, err := os.ReadFile(masterPath)
-    if err != nil {
-        return nil, err
-    }
-    var variants []string
-    lines := strings.Split(string(data), "\n")
-    for _, line := range lines {
-        if strings.HasPrefix(line, "#EXT-X-STREAM-INF") {
-            // Example: #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
-            if strings.Contains(line, "RESOLUTION=") {
-                parts := strings.Split(line, "RESOLUTION=")
-                res := strings.Split(parts[1], ",")[0]
-                variants = append(variants, res)
-            }
-        }
-    }
-    return variants, nil
-}
-
