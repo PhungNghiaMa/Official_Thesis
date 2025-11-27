@@ -19,15 +19,25 @@ func RegisterAssetRoutes(router *gin.Engine, database *gorm.DB, PinataAuth *busi
 	ttsRepository := business.NewTTSRepo()
 	imgConverRepository := business.NewImageConvertRepo()
 	videoConvertRepository := business.NewHLSConvertRepo()
-	websocketRepository := websocket.NewWebSocketRepo()
-	assetService := services.NewService(assetRepository, pinataRepository, ttsRepository, websocketRepository, imgConverRepository, videoConvertRepository)
+
+    // 1. Create the SINGLE Shared Hub
+	sharedHub := websocket.NewWebSocketRepo() 
+
+    // 2. Pass Shared Hub to Service
+	assetService := services.NewService(assetRepository, pinataRepository, ttsRepository, sharedHub, imgConverRepository, videoConvertRepository)
 	assetHandler := handler.NewHandler(assetService)
+
+    // 3. Pass Shared Hub to WebSocket Handler
+    wsHandler := handler.NewWebsocketHandler(sharedHub)
+
 	assetRoutes := router.Group("/")
 	{
 		assetRoutes.GET("/hello", assetHandler.Hello)
 		assetRoutes.POST("/upload", assetHandler.UploadAsset)
 		assetRoutes.GET("/list/:roomID", assetHandler.GetAsset)
 	}
-	router.GET("/ws", handler.HandleWS)
+
+    // 4. Use the new handler method
+	router.GET("/ws", wsHandler.HandleWS) 
 	router.POST("/join", SFU.HandleJoin)
 }

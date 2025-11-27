@@ -15,6 +15,7 @@ import (
 	websocket "main/internal/infrastructure/websocket"
 
 	applicationDTO "main/internal/application/dto"
+	applicationRepository "main/internal/application/repo"
 
 	"golang.org/x/exp/slices"
 )
@@ -245,7 +246,7 @@ func (r *PinataRepo) UploadAssetToPinata(fileBuffer []byte, originalFileName str
     return assetInfo, nil
 }
 // UploadAudioToPinata — same JWT logic as above
-func (r *PinataRepo) UploadAudioToPinata(GlobalHub *websocket.WebSocketHub, audioData []byte, fileName string, progressChannel string, assetCID string, language string) (applicationDTO.AudioStruct, error) {
+func (r *PinataRepo) UploadAudioToPinata(websocketRepo applicationRepository.WebsocketRepository, audioData []byte, fileName string, progressChannel string, assetCID string, language string) (applicationDTO.AudioStruct, error) {
     apiURL := "https://api.pinata.cloud/pinning/pinFileToIPFS"
     pr, pw := io.Pipe()
     writer := multipart.NewWriter(pw)
@@ -261,7 +262,7 @@ func (r *PinataRepo) UploadAudioToPinata(GlobalHub *websocket.WebSocketHub, audi
             Total: int64(len(audioData)),
             ReportFunc: func(percent int) {
                 if progressChannel != "" {
-                    GlobalHub.BroadCastProgress(progressChannel, map[string]interface{}{
+                    websocketRepo.BroadCastProgress(progressChannel, map[string]interface{}{
                         "type":      "tts",
                         "stage":     "upload",
                         "status":    "in_progress",
@@ -311,7 +312,7 @@ func (r *PinataRepo) UploadAudioToPinata(GlobalHub *websocket.WebSocketHub, audi
 
     // ✅ Final broadcast
     if progressChannel != "" {
-        GlobalHub.BroadCastProgress(progressChannel, map[string]interface{}{
+        websocketRepo.BroadCastProgress(progressChannel, map[string]interface{}{
             "type":      "tts",
             "stage":     "upload",
             "status":    "completed",
@@ -327,7 +328,7 @@ func (r *PinataRepo) UploadAudioToPinata(GlobalHub *websocket.WebSocketHub, audi
     return audioResp, nil
 }
 
-func (r *PinataRepo) UploadVideoToPinata(GlobalHub *websocket.WebSocketHub, folderPath string, progressChannel string, assetCID string) (applicationDTO.AssetStruct, error) {
+func (r *PinataRepo) UploadVideoToPinata(websocketRepo applicationRepository.WebsocketRepository, folderPath string, progressChannel string, assetCID string) (applicationDTO.AssetStruct, error) {
     apiURL := "https://api.pinata.cloud/pinning/pinFileToIPFS"
 
     var uploaded int64 = 0
@@ -384,7 +385,7 @@ func (r *PinataRepo) UploadVideoToPinata(GlobalHub *websocket.WebSocketHub, fold
             Written: &uploaded,
             Total: totalSize,
             ReportFunc: func(percent int) {
-                GlobalHub.BroadCastProgress(progressChannel, map[string]interface{}{
+                websocketRepo.BroadCastProgress(progressChannel, map[string]interface{}{
                     "stage":     "upload",
                     "status":    "in_progress",
                     "progress":  percent,
@@ -446,7 +447,7 @@ func (r *PinataRepo) UploadVideoToPinata(GlobalHub *websocket.WebSocketHub, fold
     }
 
     if progressChannel != "" {
-        GlobalHub.BroadCastProgress(progressChannel, map[string]interface{}{
+        websocketRepo.BroadCastProgress(progressChannel, map[string]interface{}{
             "stage":     "upload",
             "status":    "completed",
             "progress":  100,
