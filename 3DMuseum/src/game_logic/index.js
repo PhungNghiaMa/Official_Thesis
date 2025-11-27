@@ -1776,7 +1776,7 @@ async function loadModel() {
         tpViewExisted = true;
         tpViewLoadLate = true;
         tpView._cameraSnapped = false;
-        if (window._HOST_ASSIGNED === true){
+        if (window._IS_HOST === true){
           tpView.isHost = true;
           tpView.remoteControlled = false;
         }else{
@@ -2363,7 +2363,7 @@ async function activateThirdPerson() {
 
     if (!tpViewExisted && character) {
       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
-      if(window._HOST_ASSIGNED === true){
+      if(window._IS_HOST === true){
         tpView.isHost = true;
         tpView.remoteControlled = false;
       }else{
@@ -3163,6 +3163,11 @@ export function initializeGame(targetContainerId = 'model-container') {
                 gait: 'walk',
                 targetsMap: tourTargetsMap
               });
+
+              if (window._IS_HOST && typeof window.hostStartTour === 'function') {
+                console.log("Broadcasting Tour Invite...");
+                window.hostStartTour(npc.model);
+              }
 
               // --- Always prepare TP agent, even if not active now ---
               if (tpView && tpView.model) {
