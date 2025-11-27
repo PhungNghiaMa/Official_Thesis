@@ -7,7 +7,7 @@ import { addRemotePlayer, updateRemotePlayerState, removeRemotePlayer, updateRem
   from './index.js';
 const API_BASE = "http://localhost:3001"// default to backend:3001
 const PEER_ID = (window.WEBRTC_PEER_ID) ? window.WEBRTC_PEER_ID : Math.random().toString(36).substring(2, 10);
-
+window.hostStartTour = hostStartTour;
 let pc = null;
 let dc = null;
 let sendTimer = null;
@@ -34,7 +34,7 @@ let npcSentPackets = 0;
 let npcLastInstrumentationTime = performance.now();
 
 // Host flag
-let isHost = false;
+let isHost = window._IS_HOST || false;
 
 // ===== NPC send loop state (ensure declared once globally in webRTC.js) =====
 let _npc_lastPos = null;
@@ -679,12 +679,6 @@ export async function startLocalRoomTourMode(npcName) {
 
 
 
-// Export small helpers for console/debug
-window._HOST_ASSIGNED = false;
-
-
-
-
   // in webRTC.js
   Object.assign(window.gameAPI, { addRemotePlayer, updateRemotePlayerState, removeRemotePlayer, updateRemotePlayers });
 
@@ -875,7 +869,7 @@ async function createAndSendOffer(pc, joinUrl) {
 // Called when DataChannel is open
 function onDataOpen() {
   console.log("[WebRTC] Data channel open");
-  isHost = window._HOST_ASSIGNED;
+  isHost = window._IS_HOST;
   console.warn(`[WebRTC] Data channel open — you are ${isHost ? "HOST" : "CLIENT"}`);
 
 
@@ -1009,6 +1003,8 @@ function onDataMessage(raw) {
       }
       break;
     }
+
+
 
     case "tour_joined":
       // Host receives confirmations from participants

@@ -204,8 +204,9 @@
 
       // Render landing page quickly with template
       import landingPageHTML from './template/landingpage_template.js';
-      import {updateLobbyState} from './src/game_logic/webRTC.js';
+      // import {updateLobbyState} from './src/game_logic/webRTC.js';
       let isMultiplayerMode = false;
+      window._IS_HOST = true;
 
       document.getElementById('landingpage').innerHTML = landingPageHTML;
       localStorage.setItem('language', 'vi');
@@ -315,8 +316,9 @@
           inputElement.style.color = 'black';
           console.log("Automatically joining room:", roomIDValue);
           window.WEBRTC_ROOM_ID = roomIDValue;
-          // Call your webRTC function
-          updateLobbyState(roomIDValue); 
+          window._IS_HOST = false;
+          // // Call your webRTC function
+          // updateLobbyState(roomIDValue); 
           history.pushState(null, '', `?room=${roomIDValue}`);
         }else if (roomIDValue.length < 6 && roomIDValue.length > 0){
           alertContent.textContent ="Invalid Room ID !  Please check again !";
