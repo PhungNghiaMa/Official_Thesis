@@ -1,6 +1,6 @@
 // src/game_logic/index.js
 
-import "../../main.css";
+// import "../../main.css";
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -28,6 +28,7 @@ import { initRecastIfNeeded  , getNavQuery , LoadExternalNavMesh } from "./recas
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { updateCrowd , addAgent, initCrowd, setAgentTarget, startAgentTour , updateAgentTours , stopAgentTour , addThirdPersonToCrowd, getAgents  } from "./CrowdManager.js";
 import { createAnimController } from "./createAnimationController.js";
+import Hls from 'hls.js';
 
 
 THREE.Cache.enabled = true; // Enable caching for better performance
@@ -88,6 +89,13 @@ let agent = null;
 window.THREE = THREE; // expose for debugging
 window.getAgents = getAgents();
 
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+window.audioCtx = audioCtx
+
+// Keep references for updates
+const spatialSources = new Map(); // key: meshName -> { panner, source, video }
+const listener = audioCtx.listener;
 
 
 
@@ -268,7 +276,7 @@ function showAnnotations() {
 }
 
 // Audio instance 
-export const audioCache = new Map();
+export const  audioCache = new Map();
 export const audioRawCache = new Map();       // CID -> ArrayBuffer (raw)
 let audioContext = null;
 let currentSourceNode = null; // Keep track of the currently playing source for potential stopping
@@ -305,7 +313,11 @@ function getAudioContext() {
 
 export async function prefetchAudio(audioCID) {
   if (!audioCID) return null;
-  if (audioCache.has(audioCID) || audioRawCache.has(audioCID)) return; // already cached
+  if (audioCache.has(audioCID) || audioRawCache.has(audioCID)){
+    return;
+  } 
+
+
 
   try {
     const url = `https://${PINATA_URL}${audioCID}`;
@@ -402,47 +414,248 @@ document.addEventListener("click", () => {
 // NOTE: Make sure ktx2Loader and renderer are defined and accessible in the scope.
 function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgURL for clarity
 
-    // Use the KTX2Loader instance
-    ktx2Loader.load(imgURL,
-        (loadedTexture) => {
-            // Most of these settings are managed by the KTX2Loader/Basis Transcoder, 
-            // but we might keep some for safety or specific overrides.
-            loadedTexture.needsUpdate = true;
-            
-            // KTX2 often handles its own colorspace and filtering internally based on the file.
-            // You can remove most explicit texture properties (like flipY, filters, mipmaps).
+  // Use the KTX2Loader instance
+  ktx2Loader.load(imgURL,
+      (loadedTexture) => {
+          // Most of these settings are managed by the KTX2Loader/Basis Transcoder, 
+          // but we might keep some for safety or specific overrides.
+          loadedTexture.needsUpdate = true;
+          
+          // KTX2 often handles its own colorspace and filtering internally based on the file.
+          // You can remove most explicit texture properties (like flipY, filters, mipmaps).
 
-            const material = new THREE.MeshStandardMaterial({
-                map: loadedTexture,
-                side: THREE.DoubleSide,
-                roughness: 0.5,
-                metalness: 0.0,
-            });
+          const material = new THREE.MeshStandardMaterial({
+              map: loadedTexture,
+              side: THREE.DoubleSide,
+              roughness: 0.5,
+              metalness: 0.0,
+          });
 
-            let mesh = scene.getObjectByName(meshName)
-            if (mesh && mesh.isMesh) {
-                // Safely dispose of the old material's texture to free memory
-                if (mesh.material.map) {
-                    mesh.material.map.dispose();
-                }
-                mesh.material.dispose();
-                
-                mesh.material = material;
-                mesh.material.needsUpdate = true;
-                // UV update is rarely needed here unless the geometry itself changed
-            } else {
-                console.warn(`Cannot find mesh for ${meshName}`)
-            }
-        },
-        undefined, // Progress is optional
-        (error) => {
-            console.error('Error loading KTX2 texture:', error);
-        }
-    );
+          let mesh = scene.getObjectByName(meshName)
+          if (mesh && mesh.isMesh) {
+              // Safely dispose of the old material's texture to free memory
+              if (mesh.material.map) {
+                  mesh.material.map.dispose();
+              }
+              mesh.material.dispose();
+              
+              mesh.material = material;
+              mesh.material.needsUpdate = true;
+              // UV update is rarely needed here unless the geometry itself changed
+          } else {
+              console.warn(`Cannot find mesh for ${meshName}`)
+          }
+      },
+      undefined, // Progress is optional
+      (error) => {
+          console.error('Error loading KTX2 texture:', error);
+      }
+  );
 }
 
 
+async function destroyVideoAndHls(hls, video) {
+  try {
+    if (hls) {
+      try { hls.stopLoad(); } catch (e) {}
+      try { hls.detachMedia(); } catch (e) {}
+      try { hls.destroy(); } catch (e) {}
+    }
+  } catch (e) {
+    console.warn('Error while destroying Hls:', e);
+  }
 
+  if (video) {
+    try {
+      video.pause();
+      // Remove src & load to free MediaSource
+      if (video.src) {
+        try { video.removeAttribute('src'); } catch (e) {}
+      }
+      try { video.load(); } catch (e) {}
+      // remove from DOM
+      if (video.parentNode) video.parentNode.removeChild(video);
+    } catch (e) {
+      console.warn('Error cleaning video element:', e);
+    }
+  }
+}
+
+window.addEventListener('beforeunload', () => {
+  if (mesh.userData?.hls || mesh.userData?.videoElement) {
+    destroyVideoAndHls(mesh.userData.hls, mesh.userData.videoElement);
+  }
+});
+
+
+
+// Function to set HLS video to mesh 
+function setVideoToMeshHLS(scene, meshName, hlsURL) {
+  // 1. Find the mesh
+  const mesh = scene.getObjectByName(meshName);
+  if (!mesh || !mesh.isMesh) {
+    console.warn(`❌ Cannot find mesh for ${meshName}`);
+    return;
+  }
+
+  // 2. CLEANUP: Destroy old HLS instance and video if they exist on this mesh
+  if (mesh.userData.hlsInstance) {
+    console.log("🧹 Cleaning up old HLS instance for:", meshName);
+    try {
+      mesh.userData.hlsInstance.destroy();
+    } catch (e) {
+      console.warn("⚠️ Error destroying old HLS:", e);
+    }
+    mesh.userData.hlsInstance = null;
+  }
+  
+  if (mesh.userData.videoElement) {
+    console.log("🧹 Removing old video element for:", meshName);
+    try {
+      const oldVideo = mesh.userData.videoElement;
+      oldVideo.pause();
+      oldVideo.removeAttribute('src'); // Detach source
+      oldVideo.load(); // Force unload
+      oldVideo.remove(); // Remove from DOM (though it wasn't attached, good practice)
+    } catch (e) {
+      console.warn("⚠️ Error cleaning video element:", e);
+    }
+    mesh.userData.videoElement = null;
+  }
+
+  // 3. Create new video element
+  const video = document.createElement('video');
+  video.autoplay = false; // We control play manually
+  video.pause();
+  video.muted = false; // Needed for spatial audio
+  video.loop = true;   // Good for background videos
+  video.playsInline = true;
+  video.crossOrigin = 'anonymous';
+  video.style.display = 'none';
+  
+  // Store reference for later cleanup
+  mesh.userData.videoElement = video;
+
+  console.log("🎬 HLS URL Base:", hlsURL);
+
+  let hls;
+  let masterURL = hlsURL + "/master.m3u8";
+
+  if (Hls.isSupported()) {
+    const hlsConfig = {
+      startLevel: 0,             // Start at lowest quality for fast load
+      autoStartLoad: true,
+      capLevelToPlayerSize: true,
+      lowLatencyMode: false,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      maxBufferHole: 0.5,        // Tolerate small gaps (CRITICAL for your issue)
+      nudgeOffset: 0.1,          // Helper to jump gaps
+      nudgeMaxRetry: 10,
+      enableWorker: true,        // Use web worker for performance
+    };
+
+    hls = new Hls(hlsConfig);
+    mesh.userData.hlsInstance = hls; // Store for cleanup
+
+    hls.loadSource(masterURL);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      console.log("✅ Manifest parsed, starting playback");
+      // Only try to play once manifest is ready
+      video.play().catch(e => console.warn("Autoplay prevented:", e));
+    });
+
+    hls.on(Hls.Events.ERROR, function (event, data) {
+      // Filter out non-fatal buffer errors that hls.js can often recover from automatically
+      if (data.details === 'bufferSeekOverHole' || data.details === 'bufferStalledError') {
+         console.warn(`⚠️ HLS Buffer Warning: ${data.details}. Attempting auto-recovery.`);
+         return; 
+      }
+
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            console.warn("HLS Network error, trying to recover...");
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            console.warn("HLS Media error, trying to recover...");
+            hls.recoverMediaError();
+            break;
+          default:
+            console.error("❌ Unrecoverable HLS error, destroying instance.");
+            hls.destroy();
+            break;
+        }
+      }
+    });
+
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari Native HLS
+    video.src = masterURL;
+    video.play().catch(e => console.warn("Native play error:", e));
+  } else {
+    console.error('❌ HLS not supported');
+    return;
+  }
+
+  // 4. Texture & Material Setup (Only once video has data)
+  const onCanPlay = () => {
+    console.log("📺 Video has enough data to render texture");
+    
+    const videoTexture = new THREE.VideoTexture(video);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    videoTexture.format = THREE.RGBAFormat; // Use RGBA for safety
+    videoTexture.colorSpace = THREE.SRGBColorSpace; // Match your renderer
+
+    const material = new THREE.MeshBasicMaterial({ map: videoTexture });
+
+    // Clean up old material properties
+    if (mesh.material) {
+        if (mesh.material.map) mesh.material.map.dispose();
+        mesh.material.dispose();
+    }
+
+    mesh.material = material;
+    mesh.material.needsUpdate = true;
+
+    // 5. Spatial Audio Setup
+    if (!spatialSources.has(meshName)) {
+      // Ensure AudioContext is running
+      if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+      }
+
+      const source = audioCtx.createMediaElementSource(video);
+      const panner = audioCtx.createPanner();
+      const gain = audioCtx.createGain();
+
+      panner.panningModel = "HRTF";
+      panner.distanceModel = "inverse";
+      panner.refDistance = 2.0;
+      panner.maxDistance = 10.0;
+      panner.rolloffFactor = 0.5;
+      panner.coneInnerAngle = 360;
+
+      source.connect(panner);
+      panner.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      // Set initial position
+      const pos = mesh.position;
+      panner.setPosition(pos.x, pos.y, pos.z);
+
+      spatialSources.set(meshName, { source, panner, gain, video, mesh });
+    }
+  };
+
+  // Use 'loadedmetadata' or 'canplay' instead of 'canplaythrough' for faster feedback
+  video.addEventListener('canplay', onCanPlay, { once: true });
+}
+// Listen for custom upload events to update annotations
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
 
@@ -451,7 +664,7 @@ document.body.addEventListener("uploadevent", (event) => {
         annotationMesh[asset_mesh_name].title = title;
         annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
         annotationMesh[asset_mesh_name].eng_des = english_description;
-        setImageToMeshKTX2(currentScene,asset_mesh_name, img_url);
+        // setImageToMeshKTX2(currentScene,asset_mesh_name, img_url);
     }
 });
 
@@ -597,6 +810,115 @@ function checkPlayerPosition() {
         }
     }
 }
+
+function checkCurrentPosition() {
+  let playerPosition = null;
+  let playerQuaternion = null;
+  let player = null;
+  const video = document.getElementsByName("video")
+  video.autoplay = false;
+
+  if (activePlayer === 'tp' && tpView) {
+    player = tpView
+    playerPosition = tpView.getPlayerPosition();
+    playerQuaternion = tpView.getPlayerQuaternion();
+  } else if (activePlayer === 'fp' && fpView) {
+    player = fpView
+    playerPosition = fpView.getPlayerPosition();
+    playerQuaternion = fpView.getPlayerQuaternion();
+  }
+
+  if (playerPosition && playerQuaternion) {
+    listener.setPosition(playerPosition.x, playerPosition.y, playerPosition.z);
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(playerQuaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(playerQuaternion);
+
+    listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+  }
+}
+
+const lastAudioPos = new THREE.Vector3();
+const lastAudioQuat = new THREE.Quaternion();
+function updateSpatialAudio(scene) {
+  // Check if camera moved enough to warrant an update
+  if (camera.position.distanceToSquared(lastAudioPos) < 0.01 && 
+      camera.quaternion.angleTo(lastAudioQuat) < 0.01) {
+      return; 
+  }
+
+  // Update cache
+  lastAudioPos.copy(camera.position);
+  lastAudioQuat.copy(camera.quaternion);
+
+  // Update listener (player position)
+  checkCurrentPosition();
+
+  // Define the distance at which audio should start playing
+  const AUDIO_PLAY_DISTANCE = 5.0; // meters
+
+  // Iterate through all spatial sources
+  for (const [meshName, node] of spatialSources.entries()) {
+    // Destructure 'video' from the node (assuming you saved it there in setVideoToMeshHLS)
+    const { panner, mesh, video } = node; 
+    if (!mesh) continue;
+
+    const pos = mesh.position;
+    panner.setPosition(pos.x, pos.y, pos.z);
+
+    // Orientation logic
+    if (mesh.rotation) {
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion);
+      panner.setOrientation(fwd.x, fwd.y, fwd.z);
+    }
+
+    // --- 🔊 DISTANCE CHECK LOGIC ---
+    const lastExitTimes = {}; 
+
+    if (video) {
+      const distance = camera.position.distanceTo(pos);
+      const meshID = mesh.uuid; // Use unique ID for the mesh
+
+      if (distance <= AUDIO_PLAY_DISTANCE) {
+          if (video.paused) {
+              // Check how long they have been gone
+              const timeSinceExit = (Date.now() - (lastExitTimes[meshID] || 0)) / 1000; // seconds
+              
+              // If they were gone for more than 5 seconds, restart. 
+              // Otherwise, just continue.
+              if (timeSinceExit > 5.0) {
+                  video.currentTime = 0;
+              }
+              
+              video.play().catch(e => {});
+          }
+      } else {
+          if (!video.paused) {
+              video.pause();
+              // Record exactly when they left
+              lastExitTimes[meshID] = Date.now();
+          }
+      }
+    }
+  }
+}
+
+function updatePropVisibility() {
+    // Only run this check every 30 frames (0.5 seconds)
+    if (LOD_SETTINGS.frames % 30 !== 0) return;
+
+    const maxDistSq = 5 * 5; // 40 meters squared
+
+    // Iterate over detailed objects (e.g., your pictureFramesArray)
+    for (const frame of pictureFramesArray) {
+        const distSq = frame.position.distanceToSquared(camera.position);
+        
+        // If FPS is struggling (<45), hide distant frames aggressively
+        const effectiveDist = LOD_SETTINGS.currentBias > LOD_SETTINGS.MEDIUM ? 2 * 2 : maxDistSq;
+        
+        frame.visible = distSq < effectiveDist;
+    }
+}
+
 
 // Material Tuning Function
 // function tuneMaterial(material) {
@@ -1173,11 +1495,7 @@ async function loadModel() {
         // Use the GLTFLoader instance from your game logic.
             loader.load(
                 ModelPaths[currentMuseumId],
-                (gltf) => {
-                    // Calculate the bandwidth
-                    const endTime = new Date().getTime();
-                    const elapsedTime = endTime - startTime;
-                    
+                (gltf) => {                    
                     // Set target to 100 and start animation
                     targetProgress = 100;
                     animateProgress();
@@ -1230,6 +1548,7 @@ async function loadModel() {
         // 3. Wait for BOTH promises to complete simultaneously.
         const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
         // const [gltf] = await Promise.all([loadModelPromise]);
+
 
         // Clear map before use 
         AssetDataMap.clear()
@@ -1311,6 +1630,10 @@ async function loadModel() {
             // }
 
             if (child.isMesh) {
+              // Setup the metadata for video texture handling
+                child.userData.hlsInstance = null; // initialize hlsInstance to null
+                child.userData.videoElement = null; // initialize videoElement to null
+
                 console.log('CHILD MESH NAME:', child.name);
                 child.userData.navWalkable = false;
                 child.userData.navObstacle = true;
@@ -1453,7 +1776,7 @@ async function loadModel() {
         tpViewExisted = true;
         tpViewLoadLate = true;
         tpView._cameraSnapped = false;
-        if (window._HOST_ASSIGNED === true){
+        if (window._IS_HOST === true){
           tpView.isHost = true;
           tpView.remoteControlled = false;
         }else{
@@ -1493,12 +1816,16 @@ async function loadModel() {
         (Array.isArray(items) ? items : []).forEach(item => {
             console.warn(item)
             if (!item) return;
-            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid  } = item;
+            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
             if (annotationMesh[asset_mesh_name]) {
                 annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
                 annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
-
-                setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                if (category === "Image"){
+                  setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                }else if (category === "Video"){
+                  setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                }
+                
             }
         });
 
@@ -1599,18 +1926,11 @@ function animate() {
     // render CSS3D (if you use it)
   if (css3dRenderer) css3dRenderer.render(scene, camera);
 
-
-  // render CSS2D (labels)
-  if (cssRenderer) cssRenderer.render(scene, camera);
-
-  const frameDelta = Math.min(0.05, clock.getDelta());
-  physicsTimeAccumulator += frameDelta;
-  const FIXED_TIMESTEP = 1 / 60;
   const now = performance.now();
   prevTime = now;
   let prevFPS = 0;
 
-  // --- LOD Performance Monitoring (Add this block) ---
+    // --- LOD Performance Monitoring (Add this block) ---
   LOD_SETTINGS.frames++;
   if (now - LOD_SETTINGS.startTime >= LOD_SETTINGS.FPS_CHECK_INTERVAL_MS) {
       const currentFPS = LOD_SETTINGS.frames / ((now - LOD_SETTINGS.startTime) / 1000);
@@ -1626,6 +1946,19 @@ function animate() {
       LOD_SETTINGS.frames = 0;
       LOD_SETTINGS.startTime = now;
   }
+  updatePropVisibility();
+  updateSpatialAudio(scene);
+
+
+  // render CSS2D (labels)
+  if (cssRenderer) cssRenderer.render(scene, camera);
+
+  const frameDelta = Math.min(0.05, clock.getDelta());
+  physicsTimeAccumulator += frameDelta;
+  const FIXED_TIMESTEP = 1 / 60;
+
+
+
 
   // update remote players (multiplayer)
   if (typeof window.updateRemotePlayers === "function") {
@@ -1662,11 +1995,30 @@ function animate() {
         continue; // Skip to the next agent
     }
 
+    const distToCam = camera.position.distanceTo(model.position);
+
+    // --- OPTIMIZATION: LOGIC CULLING ---
+    // If far away, only update physics/logic every 3 frames
+    if (distToCam > 40 && (LOD_SETTINGS.frames + npcIndex) % 3 !== 0) {
+        // Interpolate visually to keep it smooth, but skip the heavy math
+        continue; 
+    }
+
     entry.state = entry.state || { mode: 'idle', requestedGait: null };
 
     const anim = model.userData?.animCtrl ?? model.userData?.animationCtrl ?? null;
-    if (anim && anim.mixer && camera.position.distanceTo(model.position) < NPC_MIXER_DISTANCE) {
-      anim.mixer.update(frameDelta );
+    // if (anim && anim.mixer && camera.position.distanceTo(model.position) < NPC_MIXER_DISTANCE) {
+    //   anim.mixer.update(frameDelta );
+    // }
+
+    if (anim && anim.mixer) {
+        if (distToCam < NPC_MIXER_DISTANCE) {
+             // Full update for close NPCs
+             anim.mixer.update(frameDelta);
+        } else if (distToCam < NPC_MIXER_DISTANCE * 1.5) {
+             // Half-rate update for medium distance (saves CPU)
+             if (LOD_SETTINGS.frames % 2 === 0) anim.mixer.update(frameDelta * 2);
+        }
     }
 
     // --- agent position ---
@@ -1997,7 +2349,7 @@ function animate() {
   }
   updateAudioListener(camera)
 
-  checkPlayerPosition();
+  // checkPlayerPosition();
   composer.render();
 }
 
@@ -2011,7 +2363,7 @@ async function activateThirdPerson() {
 
     if (!tpViewExisted && character) {
       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
-      if(window._HOST_ASSIGNED === true){
+      if(window._IS_HOST === true){
         tpView.isHost = true;
         tpView.remoteControlled = false;
       }else{
@@ -2666,7 +3018,7 @@ export function initializeGame(targetContainerId = 'model-container') {
         return;
     }
     container.innerHTML = ''; 
-
+    
     camera = new THREE.PerspectiveCamera(70, container.clientWidth / container.clientHeight, 0.1, 1000);
     camera.rotation.order = 'YXZ';
 
@@ -2811,6 +3163,11 @@ export function initializeGame(targetContainerId = 'model-container') {
                 gait: 'walk',
                 targetsMap: tourTargetsMap
               });
+
+              if (window._IS_HOST && typeof window.hostStartTour === 'function') {
+                console.log("Broadcasting Tour Invite...");
+                window.hostStartTour(npc.model);
+              }
 
               // --- Always prepare TP agent, even if not active now ---
               if (tpView && tpView.model) {
@@ -2977,7 +3334,6 @@ export function initializeGame(targetContainerId = 'model-container') {
     initUploadModal(ktx2Loader);
     initMenu();
     loadModel();
-    // initPostProcessing();
     setGameScene(scene);
 
     if (animationFrameId === null) {

@@ -460,6 +460,12 @@ export default class FirstPersonPlayer {
     return this.playerCollider?.end?.clone() ?? new THREE.Vector3();
   }
 
+  getPlayerQuaternion() {
+    if (this.model && this.model.quaternion) return this.model.quaternion.clone();
+    if (this.tempQuaternion) return this.tempQuaternion.clone();
+    return new THREE.Quaternion();
+  }
+
   dispose() {
     this.bvhMeshes = null;
   }

@@ -1,4 +1,3 @@
-// import "tailwindcss"
 export default 
 `<div id="landing_page" class="LandingPageContainer w-full overflow-hidden top-0">
       <div class="LandingPageWrapContainer w-full h-auto flex flex-row-reverse overlfow-hidden">
@@ -14,14 +13,13 @@ export default
             </div>
           </div>
           <div class="LandingPageFunctionContainer w-full h-8/12">
-            <div class="StartBtnContainer w-full h-full">
-              <div class="StartBtn w-full h-fit overflow-hidden flex items-start justify-end pt-16">
-                <button type="button" id="start_button" class="button h-auto overflow-hidden flex items-center justify-center">
+            <div class="InitBtnContainer w-full h-full">
+              <div id="InitButton" class="InitBtn w-full h-fit overflow-hidden flex justify-end-safe pt-16">
+                <button type="button" id="init_button" class="button h-auto overflow-hidden flex items-center justify-center">
                     <div class="wrap">
-                      <p data-i18n="LandingPage.StartBtn">
+                      <p data-i18n="LandingPage.InitBtn">
                         <span>✧</span>
                         <span>✦</span>
-                        Start
                       </p>
                     </div>
                 </button>
@@ -30,13 +28,15 @@ export default
           </div>
         </div>
         <div class="SecondCol w-3/12 h-full">
-          <div class="ContentWrapperContainer w-full h-screen flex flex-col items-start justify-center">
-            <div class="Graph_1_Container w-full max-h-1/2 px-6 py-5">
-              <h1 data-i18n= "LandingPage.Des1" class="Description_1 text-sm font-normal italic text-blue-100"></h1>
+          <div class="ContentWrapperContainer w-full h-screen flex flex-col items-start justify-center gap-2 mx-5">
+            <div class="Graph_1_Container w-full max-h-1/2 px-8 py-8 bg-white/1 backdrop-blur-xs rounded-2xl border border-white/1 overflow-auto">
+              <h1 data-i18n="LandingPage.Des1" class="Description_1 text-sm font-medium font-stretch-75% italic text-orange-50 drop-shadow-md"></h1>
             </div>
-            <div class="Graph_2_Container w-full max-h-1/2 px-6 py-2 mx-auto flex flex-wrap-reverse items-end justify-center">
-              <h1 data-i18n = "LandingPage.Des2" class="Description_2 text-start text-sm font-normal italic whitespace-pre-wrap text-blue-100"></h1>
-            </div>
+
+          <div class="Graph_2_Container w-full max-h-1/2 px-8 py-8 mx-auto flex flex-wrap-reverse items-end justify-center bg-black/5 backdrop-blur-xs rounded-2xl border border-white/1 overflow-auto">
+            <h1 data-i18n="LandingPage.Des2" class="Description_2 text-start text-sm font-medium font-stretch-75% italic whitespace-pre-wrap text-orange-50 drop-shadow-md"></h1>
+          </div>
+
           </div>
         </div>
       </div>

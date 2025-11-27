@@ -4,6 +4,12 @@ const BACKEND_URL =
     ? import.meta.env.VITE_PROD_BACKEND_URL // Use VITE_ prefix
     : import.meta.env.VITE_BACKEND_URL;     // Use VITE_ prefix
 
+const BACKEND_BASE = 
+    import.meta.env.MODE === "production"
+    ? import.meta.env.VITE_PROD_BACKEND_BASE // Use VITE_ prefix
+    : import.meta.env.VITE_BACKEND_BASE;     // Use VITE_ prefix
+
+
 // API FETCH ALL INFORMATION FOR SPECIFIC ROOM
 export async function GetRoomAsset(roomID) {
     const url = `${BACKEND_URL}/list/${roomID}`
@@ -72,71 +78,118 @@ const _subscribed = new Set()
 let _reconnectTimer = null 
 
 function wsURL(){
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    return `${protocol}://${BACKEND_URL}/ws`;
+    let protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${protocol}://${BACKEND_BASE}/ws`;
 }
 
-export function StartWebSocket(){
-    if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return _ws;
-    _ws = new WebSocket(wsURL())
+export function StartWebSocket() {
+  if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return _ws;
+  _ws = new WebSocket(wsURL());
 
-    // Open ws connection 
-    _ws.onopen = () => {
-        console.info("[WS] CONNECTED")
-        // re-subcribed previously requested channels
-        for (const channel of Array.from(_subscribed)){
-            try {_ws.send(JSON.stringify({action: "subsribe", channel: channel}));}
-            catch (e){console.error("ERROR IN SUBSRIBE TO CHANNEL: ",e)}
-        }
-    };
-
-    _ws.onmessage = (evt) =>{
-        try {
-            const message = JSON.parse(evt.data)
-            // re-dispatch as a CustomeEvent for app to listen to 
-            window.dispatchEvent(new CustomeEvent("ws:progress", {detail: message}));
-            // auto subscribe to asset channel when we have asset__cid
-            if (message && message.asset_cid){
-                const assetChannel = `asset:${message.asset_cid}`;
-                // set up so program not spam the subsribe if we already have it 
-                if (!_subscribed.has(assetChannel)) SubscribeChannel(assetChannel)
-            }
-        }catch (e){
-            console.error("[WS] INVALIDE MESSAGE: ",e)
-        }
+  _ws.onopen = () => {
+    console.info("[WS] CONNECTED");
+    for (const channel of Array.from(_subscribed)) {
+      try {
+        _ws.send(JSON.stringify({ action: "subscribe", channel }));
+      } catch (e) {
+        console.error("ERROR IN SUBSCRIBE:", e);
+      }
     }
+  };
 
-    _ws.onclose = () => {
-        console.log("[WS] DISCONNECTED")
-        _ws = null ;
-        // try to reconnect with the backoff
-        if (_reconnectTimer == null){
-            _reconnectTimer = setTimeout(() => {
-                _reconnectTimer = null ;
-                StartWebSocket();
-            } , 2000)
-        }
+  _ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log("RAW WEBSOCKET MESSAGE:", data);
+
+    // Normalize message type
+    const inferredType = data.type || inferTypeFromStage(data.stage);
+
+    // DEBUG TRACE
+    console.groupCollapsed(`[WS] 🔹 Incoming message (${inferredType})`);
+    console.log("Stage:", data.stage);
+    console.log("Status:", data.status);
+    console.log("Progress:", data.progress);
+    console.log("Channel:", data.channel);
+    console.groupEnd();
+
+    // Normalize: forward all to same event
+    window.dispatchEvent(
+      new CustomEvent("ws:upload-progress", { detail: { ...data, type: inferredType } })
+    );
+  };
+
+
+  // ✅ Debug: log all incoming WebSocket messages
+  _ws.addEventListener("message", (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.groupCollapsed(`[WS] 🔹 Incoming message (${data?.type || "unknown"})`);
+      console.log("Full payload:", data);
+      console.groupEnd();
+    } catch (err) {
+      console.warn("[WS] Non-JSON message:", event.data);
     }
+  });
 
-    _ws.onerror = (e) => {
-        console.error("[WS] ERROR: ",e)
+  // ✅ Debug: log all sent messages (subscribe, unsubscribe, etc.)
+  const _oldSend = _ws.send.bind(_ws);
+  _ws.send = (data) => {
+    console.groupCollapsed("[WS] ⬆️ Outgoing message");
+    console.log(data);
+    console.groupEnd();
+    return _oldSend(data);
+  };
+
+
+  _ws.onclose = () => {
+    console.log("[WS] DISCONNECTED");
+    _ws = null;
+    if (_reconnectTimer == null) {
+      _reconnectTimer = setTimeout(() => {
+        _reconnectTimer = null;
+        StartWebSocket();
+      }, 2000);
     }
+  };
 
-    return _ws;
+  _ws.onerror = (e) => console.error("[WS] ERROR:", e);
+  return _ws;
 }
 
-export function  SubscribeChannel(channel){
-    StartWebSocket();
-    if (!channel) return;
-    if (_subscribed.has(channel)) return;
-    // Push channel want to subcribe to the _subscribe set 
-    _subscribed.add(channel);
-    try{
-        _ws.send(JSON.stringify({action:"subscribe", channel}))
-    }catch(e){
-        console.error("[WS] FAIL TO SUBSRIBE TO CHANNLE: ", e)
-    }
+function inferTypeFromStage(stage) {
+  if (!stage) return "unknown";
+  if (/tts/i.test(stage)) return "tts";
+  if (/upload|convert|webp|database|pipeline/i.test(stage)) return "upload";
+  return "unknown";
 }
+
+export function SubscribeChannel(channel) {
+  if (!channel) return;
+  if (_subscribed.has(channel)) return;
+  _subscribed.add(channel);
+
+  const sendSubscribe = () => {
+    try {
+      _ws.send(JSON.stringify({ action: "subscribe", channel }));
+      console.info("[WS] Subscribed:", channel);
+    } catch (e) {
+      console.error("[WS] FAIL TO SUBSCRIBE:", e);
+    }
+  };
+
+  if (!_ws || _ws.readyState !== WebSocket.OPEN) {
+    // Wait for socket to open
+    const interval = setInterval(() => {
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        clearInterval(interval);
+        sendSubscribe();
+      }
+    }, 200);
+  } else {
+    sendSubscribe();
+  }
+}
+
 
 export function unsubscribeChannel(channel) {
   if (!_ws) return;
@@ -151,5 +204,6 @@ export function closeWebSocket() {
   _ws = null;
   _subscribed.clear();
 }
+
 
 

@@ -28,6 +28,9 @@ let uploadProperties = {
     asset_mesh_name: null
 };
 let gameScene = null;
+let assetProgressState = new Map();
+
+
 
 export function toastMessage(message) {
     toastAlert.style.display = "flex";
@@ -53,14 +56,332 @@ export function displayUploadModal(_aspectRatio, uploadProps) {
 
 
     // Ensure websocket running and subscribe to room channel so we receive progress updates 
-    // StartWebSocket();
-    // // Subscribe the room asset is the 
-    // if (uploadProps?.roomID) {
-    //     const roomCh = `room:${uploadProps.roomID}`;
-    //     SubscribeChannel(roomCh);
-    // }
+    StartWebSocket();
+    // Subscribe the room asset is the 
+    if (uploadProps?.roomID) {
+        const roomCh = `room:${uploadProps.roomID}`;
+        SubscribeChannel(roomCh);
+    }
 
 }
+
+// --- Upload progress dashboard setup ---
+function ensureDashboard() {
+  uploadModal.style.display = "none";
+  let dash = document.getElementById("upload-dashboard");
+  if (!dash) {
+    dash = document.createElement("div");
+    dash.id = "upload-dashboard";
+    dash.style.position = "fixed";
+    dash.style.bottom = "10px";
+    dash.style.right = "10px";
+    dash.style.width = "320px";
+    dash.style.maxHeight = "400px";
+    dash.style.overflowY = "auto";
+    dash.style.background = "#1e1e1e";
+    dash.style.color = "#fff";
+    dash.style.padding = "10px";
+    dash.style.borderRadius = "10px";
+    dash.style.fontSize = "13px";
+    dash.style.zIndex = "9999";
+    dash.style.boxShadow = "0 2px 10px rgba(0,0,0,0.4)";
+    document.body.appendChild(dash);
+  }
+  return dash;
+}
+
+function getOrCreateAssetCard(cid, assetTitle) {
+  const dash = ensureDashboard();
+  let card = document.getElementById(`asset-card-${cid}`);
+  
+  // Initialize state if not present
+  if (!assetProgressState.has(cid)) {
+    assetProgressState.set(cid, {
+        overallProgress: 0,
+        image: { stage: 'Awaiting', status: 'pending', progress: 0, message: '' },
+        tts_en: { stage: 'Awaiting', status: 'pending', progress: 0, message: '' },
+        tts_vi: { stage: 'Awaiting', status: 'pending', progress: 0, message: '' },
+    });
+  }
+
+  if (!card) {
+    card = document.createElement("div");
+    card.id = `asset-card-${cid}`;
+    card.style.marginBottom = "10px";
+    card.style.border = "1px solid #333";
+    card.style.padding = "10px";
+    card.style.borderRadius = "8px";
+    card.style.background = "#2a2a2a";
+    card.style.transition = "opacity 0.5s ease-out";
+    
+    // Initial card structure
+    card.innerHTML = `
+      <div style="font-weight:bold; margin-bottom:6px; color:#4caf50;">Asset: ${assetTitle || cid}</div>
+      
+      <!-- Overall Progress Bar -->
+      <div style="font-size:11px; margin-bottom:4px; color:#aaa;">Overall Progress: <span id="asset-stage-msg-${cid}">Starting...</span></div>
+      <div style="background:#444; border-radius:5px; height:10px; overflow:hidden; margin-bottom:10px;">
+        <div id="asset-progress-${cid}" style="height:10px; width:0%; background:#4caf50; transition:width 0.3s;"></div>
+      </div>
+
+      <!-- Sub-task Statuses -->
+      <div style="margin-bottom:4px; font-weight:600; color:#ddd;">Asset Generation Status:</div>
+      <div id="sub-task-container-${cid}">
+        ${createSubTaskRow(cid, 'image', 'Image Upload (KTX2/WebP)')}
+        ${createSubTaskRow(cid, 'tts_en', 'Audio (English)')}
+        ${createSubTaskRow(cid, 'tts_vi', 'Audio (Vietnamese)')}
+      </div>
+    `;
+    dash.prepend(card);
+  }
+  return card;
+}
+
+/** Helper to generate the HTML for a single sub-task row */
+function createSubTaskRow(cid, taskKey, taskLabel) {
+    return `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="font-size:12px; color:#ccc;">${taskLabel}:</div>
+            <div id="task-status-${cid}-${taskKey}" style="font-size:11px; font-weight:600; color:#ffc107;">Awaiting</div>
+        </div>
+        <div style="background:#333; border-radius:3px; height:4px; overflow:hidden; margin-bottom:8px;">
+            <div id="task-progress-${cid}-${taskKey}" style="height:4px; width:0%; background:#1e88e5; transition:width 0.3s;"></div>
+        </div>
+    `;
+}
+
+/** Helper to update a specific sub-task row's status and progress */
+function updateSubTask(cid, taskKey, status, progress, message) {
+  if (!taskKey) return;
+  const card = document.getElementById(`asset-card-${cid}`);
+  if (!card) return;
+
+  if (!card && assetProgressState.lastPendingCid && cid !== assetProgressState.lastPendingCid) {
+      cid = assetProgressState.lastPendingCid;
+  }
+
+  const statusElem = card.querySelector(`#task-status-${cid}-${taskKey}`);
+  const progressElem = card.querySelector(`#task-progress-${cid}-${taskKey}`);
+
+  if (statusElem) {
+      statusElem.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+      statusElem.style.color = 
+          status === 'completed' ? '#00c853' : 
+          status === 'failed' ? '#f44336' : 
+          status === 'starting' || status === 'processing' || status === 'uploading' ? '#ffc107' : '#aaa';
+  }
+
+  if (progressElem) {
+      progressElem.style.width = `${progress}%`;
+      progressElem.style.background = 
+          status === 'completed' ? '#00c853' : 
+          status === 'failed' ? '#f44336' : 
+          '#1e88e5';
+  }
+  
+  // Update global state
+  // if (assetProgressState.has(cid)) {
+  //     const state = assetProgressState.get(cid);
+  //     state[taskKey] = { stage: taskKey, status, progress, message };
+  //     assetProgressState.set(cid, state);
+  // }
+}
+
+
+function showCompletionAnimation(card) {
+  card.innerHTML = `
+    <div style="display:flex; justify-content:center; align-items:center; height:60px;">
+      <div class="checkmark-circle" style="
+        width:40px; height:40px; border-radius:50%; background:#4caf50;
+        display:flex; align-items:center; justify-content:center;
+        position:relative; animation: popIn 0.3s ease-out;">
+        <svg viewBox="0 0 52 52" style="width:26px; height:26px;">
+          <path d="M14 27 l7 7 l16 -16" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+            <animate attributeName="stroke-dasharray" from="0,50" to="50,0" dur="0.4s" fill="freeze" />
+          </path>
+        </svg>
+      </div>
+    </div>
+  `;
+  // remove after 1 second
+  setTimeout(() => {
+    card.style.opacity = "0";
+    setTimeout(() => card.remove(), 500);
+  }, 1000);
+}
+
+// Listen to progress messages from backend
+// Listen to progress messages from backend
+window.addEventListener("ws:upload-progress", (e) => {
+  const msg = e.detail;
+
+  if (msg.type === "upload") {
+    console.log("🖼️ Image pipeline update detected:", msg.stage, msg.status, msg.progress);
+  } else if (msg.type === "tts") {
+    console.log("🎵 Audio pipeline update detected:", msg.language, msg.status, msg.progress);
+  }
+
+
+  // DEBUG
+  console.log("RAW WEBSOCKET MESSAGE:", msg);
+    // 🔍 Debug trace to confirm message flow
+  // console.groupCollapsed(`[UI] Received ws:upload-progress (${msg.type || "unknown"})`);
+  // console.log("Stage:", msg.stage);
+  // console.log("Status:", msg.status);
+  // console.log("Progress:", msg.progress);
+  // console.log("Asset CID:", msg.asset_cid);
+  // console.log("Full message:", msg);
+  // console.groupEnd();
+
+  // --- STEP 1: Resolve CID correctly ---
+  let cid = msg.asset_cid || msg.cid || "pending";
+
+  // 🔹 Auto-link pending card to real CID when known
+  if (cid && cid !== "pending" && assetProgressState.lastPendingCid && cid !== assetProgressState.lastPendingCid) {
+    const pendingId = assetProgressState.lastPendingCid;
+    const oldCard = document.getElementById(`asset-card-${pendingId}`);
+    if (oldCard) {
+      // Rename card + internal element IDs
+      oldCard.id = `asset-card-${cid}`;
+      oldCard.querySelectorAll("[id]").forEach((el) => {
+        el.id = el.id.replace(pendingId, cid);
+      });
+
+      // Move existing progress state
+      const state = assetProgressState.get(pendingId);
+      if (state) {
+        assetProgressState.delete(pendingId);
+        assetProgressState.set(cid, state);
+      }
+
+      assetProgressState.lastPendingCid = cid;
+      console.log(`✅ Renamed pending card ${pendingId} → ${cid}`);
+    }
+  }
+
+  // 🔹 Fallback to last pending if still "pending"
+  if (!cid || cid === "pending" || cid === "unknown") {
+    cid = assetProgressState.lastPendingCid;
+  }
+  if (!cid) return;
+
+  // --- STEP 2: Identify task type ---
+  let taskKey = "";
+  if (
+    ["upload", "convert", "database", "pipeline"].includes(msg.type) ||
+    (msg.stage && /(upload|convert|database|webp)/i.test(msg.stage))
+  ) {
+    taskKey = "image";
+  } else if (msg.type === "tts" || (msg.stage && msg.stage.startsWith("tts"))) {
+    taskKey = msg.language === "en" ? "tts_en" : "tts_vi";
+  }
+
+  // --- STEP 3: Create or get the card ---
+  const cardTitle = uploadTitle?.value || "New Asset";
+  const card = getOrCreateAssetCard(cid, cardTitle);
+  const progressElem = card.querySelector(`#asset-progress-${cid}`);
+  const stageMsgElem = card.querySelector(`#asset-stage-msg-${cid}`);
+
+  // --- STEP 4: Update sub-task progress ---
+  const progress = msg.progress ?? 0;
+  const status = msg.status || "processing";
+  const message = msg.message || "";
+
+  updateSubTask(cid, taskKey, status, progress, message);
+
+
+  // --- STEP 5: Update STATE and Compute Overall Progress ---
+  if (assetProgressState.has(cid)) {
+    const state = assetProgressState.get(cid);
+
+    // 1. Update the state map FIRST
+    if (taskKey === "image") {
+      // ⬇️ --- START FIX 1 --- ⬇️
+        // ONLY update the state's main progress from pipeline steps (starting, completed, failed).
+        // The real-time "uploading" messages should NOT affect the overall state,
+        // as they only apply to the sub-task bar (which STEP 4 already updated).
+        if (status !== "uploading") {
+            state.image.progress = progress;
+        }
+        // Always update status and message
+        state.image.status = status;
+        state.image.message = message;
+    } else if (taskKey === "tts_en") {
+        state.tts_en.progress = progress;
+        state.tts_en.status = status;
+        state.tts_en.message = message;
+    } else if (taskKey === "tts_vi") {
+        state.tts_vi.progress = progress;
+        state.tts_vi.status = status;
+        state.tts_vi.message = message;
+    }
+
+    // 2. Recalculate weighted average EVERY time
+    const imgProg = state.image.progress || 0;
+    const enProg = state.tts_en.progress || 0;
+    const viProg = state.tts_vi.progress || 0;
+
+    // Weighting: Image pipeline is 95%, TTS is 5%
+    const totalProgress = (imgProg * 0.95) + (((enProg + viProg) / 2) * 0.05);
+    
+    state.overallProgress = Math.min(100, totalProgress);
+    assetProgressState.set(cid, state);
+
+    // 3. Update the Overall UI
+    if (progressElem) {
+        progressElem.style.width = `${state.overallProgress}%`;
+    }
+    if (stageMsgElem) {
+        // Use the message from the most recent task
+        stageMsgElem.textContent = message; 
+    }
+
+  } // --- End of STEP 5
+
+  // ... (rest of function, STEP 6 and 7, are fine) ...
+
+  // --- STEP 6: Completion handler ---
+  if (msg.status === "completed") {
+    // if (msg.stage === "pipeline") {
+    //   // Entire pipeline complete (image + scheduling TTS)
+    //   showCompletionAnimation(card);
+    //   return;
+    // }
+
+    // If TTS individual job completes, check if all done
+    const st = assetProgressState.get(cid);
+    if (st && st.tts_en.status === "completed" && st.tts_vi.status === "completed" && st.image.status === "completed") {
+      if (progressElem) progressElem.style.width = "100%";
+      if (stageMsgElem) stageMsgElem.textContent = "All tasks complete.";
+      showCompletionAnimation(card);
+    }
+  }
+
+  // --- STEP 7: Failure handler ---
+  if (msg.status === "failed") {
+    if (progressElem) progressElem.style.background = "#f44336";
+    if (stageMsgElem) stageMsgElem.textContent = `Failed: ${msg.message}`;
+    setTimeout(() => {
+      card.style.opacity = "0";
+      setTimeout(() => card.remove(), 500);
+    }, 4000);
+  }
+});
+
+
+
+// CSS animation for checkmark pop-in
+const effect = document.createElement("style");
+effect.textContent = `
+@keyframes popIn {
+  0% { transform: scale(0); opacity: 0; }
+  80% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); }
+}
+`;
+document.head.appendChild(effect);
+
+
 
 export function initUploadModal(ktx2Loader) {
     console.log("init");
@@ -77,49 +398,65 @@ export function initUploadModal(ktx2Loader) {
     };
 
     const submitCallback = () => {
+        const { roomID , asset_mesh_name } = uploadProperties;
+        // ⬇️ --- START FIX --- ⬇️
+        // SUBSCRIBE FIRST!
+        // Subscribe to the room channel *before* making the API call.
+        // This ensures we catch all 'type: "upload"' messages from the start.
+        SubscribeChannel(`room:${roomID}`);
         if (!file) return toastMessage("Select an image.");
 
-        uploadSpinner.style.display = 'block';
-        uploadSubmit.disabled = true;
+        // uploadSpinner.style.display = 'block';
+        // uploadSubmit.disabled = true;
+        // Display dashboard
+        const pendingCID = "pending-" + Date.now();
+        getOrCreateAssetCard(pendingCID, uploadTitle.value || "New Asset");
+        ensureDashboard();
+        assetProgressState.lastPendingCid = pendingCID;
 
-        const { roomID , asset_mesh_name } = uploadProperties;
 
 
-        UploadItem(file, asset_mesh_name , uploadTitle.value, uploadVietDes.value, uploadEnDes.value, roomID)
-            .then((res) => {
-                uploadSpinner.style.display = 'none';
-                uploadSubmit.disabled = false;
+      UploadItem(file, asset_mesh_name, uploadTitle.value, uploadVietDes.value, uploadEnDes.value, roomID)
+      .then((response) => {
 
-                // if server returns asset_cid, auto-subscribe to detailed asset channel
-                // if (res && res.asset_cid) {
-                //     SubscribeChannel(`asset:${res.asset_cid}`);
-                // }
+        console.warn("RESPONSE: ", response);
+        const realCID = response?.asset_cid;
+        if (realCID) {
+            SubscribeChannel(`asset:${realCID}`);
+        }
+        SubscribeChannel(`room:${roomID}`)
+        const webpCID = response?.webp_cid;
+        const pendingCID = assetProgressState.lastPendingCid;
 
-                const uploadEvent = new CustomEvent("uploadevent", {
-                    detail: {
-                        ...uploadProperties,
-                        title: uploadTitle.value,
-                        vietnamese_description: uploadVietDes.value,
-                        english_description: uploadEnDes.value,
-                        img_url: URL.createObjectURL(file)
-                    }
-                });
 
-                document.body.dispatchEvent(uploadEvent);
+        // update map first
+        if (assetProgressState.has(pendingCID)) {
+          const state = assetProgressState.get(pendingCID);
+          assetProgressState.delete(pendingCID);
+          assetProgressState.set(realCID, state);
+        }
 
-                if (res.success) closeUploadModal();
-                // --- HOT UPDATE CALL ---
-                // response.data should contain the key mapping information
-                const {asset_cid , webp_cid} = res;
-                const meshName = uploadProperties.asset_mesh_name;
-                updatePictureFrameTexture(ktx2Loader , meshName , asset_cid, webp_cid);
-            })
-            .catch((error) => {
-                console.log("error 2: ", error);
-                // toastMessage(error.message || error.toString());
-                uploadSpinner.style.display = 'none';
-                uploadSubmit.disabled = false;
-            });
+
+        const uploadEvent = new CustomEvent("uploadevent", {
+          detail: {
+            ...uploadProperties,
+            title: uploadTitle.value,
+            vietnamese_description: uploadVietDes.value,
+            english_description: uploadEnDes.value,
+            img_url: URL.createObjectURL(file),
+          },
+        });
+        document.body.dispatchEvent(uploadEvent);
+
+        if (response.success) closeUploadModal();
+
+        updatePictureFrameTexture(ktx2Loader, asset_mesh_name, realCID, webpCID);
+      })
+      .catch((err) => {
+        console.error("Upload failed:", err);
+        uploadSpinner.style.display = "none";
+        uploadSubmit.disabled = false;
+      });
     };
 
     uploadContainer.addEventListener('click', openInput);
@@ -146,7 +483,7 @@ export function initUploadModal(ktx2Loader) {
 
 
 function handleFile(file) {
-    if (file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/webP')) {
+    if (file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/webp' || file.type === 'video/mp4' || file.type === 'video/quicktime' || file.type === 'video/webm' || file.type === 'video/avi')) {
         const reader = new FileReader();
         reader.onload = function (e) {
             uploadPreview.src = e.target.result;

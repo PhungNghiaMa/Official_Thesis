@@ -57,7 +57,7 @@ func (Handler *Handler) UploadAsset(context *gin.Context) {
 	input.FileBuffer = buffer
 
 	// Now the 'input' struct is fully populated and can be passed to the service layer.
-	response, err := Handler.AssetService.UploadAsset(context.Request.Context(), input)
+	assetResponse , err := Handler.AssetService.UploadAsset(context.Request.Context(), input)
 	if err != nil {
 		if errors.Is(err, ErrorAssetExist) {
 			context.JSON(http.StatusConflict, gin.H{"error": err.Error(), "success": false})
@@ -66,8 +66,7 @@ func (Handler *Handler) UploadAsset(context *gin.Context) {
 		context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "success": false})
 		return
 	}
-
-	context.JSON(http.StatusOK, response)
+	context.JSON(http.StatusOK, assetResponse)
 }
 
 func (Handler *Handler) GetAsset(context *gin.Context) {

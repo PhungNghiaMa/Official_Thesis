@@ -9,4 +9,6 @@ type ResponseMetadataInfor struct {
 	EnglishDescription    string `json:"en_des" gorm:"column:english_description"`
 	VietAudioCID          string `json:"viet_audio_cid" gorm:"column:viet_audio_cid"`
 	EngAudioCID           string `json:"eng_audio_cid" gorm:"column:eng_audio_cid"`
+	Category              string `json:"category" gorm:"column:category"`
+
 }
