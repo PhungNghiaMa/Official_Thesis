@@ -3,14 +3,13 @@ package applicationRepository
 import (
 	"context"
 	applicationDTO "main/internal/application/dto"
-	websocket "main/internal/infrastructure/websocket"
 )
 
 // PinataRepository interface for Pinata operations
 type PinataRepository interface {
 	UploadAssetToPinata(fileBuffer []byte, originalFileName string, progressChannel string, assetCID string , pw *applicationDTO.ProgressWriter) (applicationDTO.AssetStruct, error)
-	UploadAudioToPinata(GlobalHub *websocket.WebSocketHub,fileBuffer []byte, fileName string, progressChannel string, assetCID string , language string) (applicationDTO.AudioStruct, error)
-	UploadVideoToPinata(GlobalHub *websocket.WebSocketHub,folderPath string , progressChannel string, assetCID string) (applicationDTO.AssetStruct, error);
+	UploadAudioToPinata(websocketRepo WebsocketRepository,fileBuffer []byte, fileName string, progressChannel string, assetCID string , language string) (applicationDTO.AudioStruct, error)
+	UploadVideoToPinata(websocketRepo WebsocketRepository,folderPath string , progressChannel string, assetCID string) (applicationDTO.AssetStruct, error);
 }
 
 // ImageConvertRepository interface for image conversion operations

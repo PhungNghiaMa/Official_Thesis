@@ -29,7 +29,6 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { updateCrowd , addAgent, initCrowd, setAgentTarget, startAgentTour , updateAgentTours , stopAgentTour , addThirdPersonToCrowd, getAgents  } from "./CrowdManager.js";
 import { createAnimController } from "./createAnimationController.js";
 import Hls from 'hls.js';
-import { distance } from 'three/src/nodes/TSL.js';
 
 
 THREE.Cache.enabled = true; // Enable caching for better performance
@@ -277,7 +276,7 @@ function showAnnotations() {
 }
 
 // Audio instance 
-export const audioCache = new Map();
+export const  audioCache = new Map();
 export const audioRawCache = new Map();       // CID -> ArrayBuffer (raw)
 let audioContext = null;
 let currentSourceNode = null; // Keep track of the currently playing source for potential stopping
@@ -314,7 +313,11 @@ function getAudioContext() {
 
 export async function prefetchAudio(audioCID) {
   if (!audioCID) return null;
-  if (audioCache.has(audioCID) || audioRawCache.has(audioCID)) return; // already cached
+  if (audioCache.has(audioCID) || audioRawCache.has(audioCID)){
+    return;
+  } 
+
+
 
   try {
     const url = `https://${PINATA_URL}${audioCID}`;
@@ -450,128 +453,209 @@ function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgU
   );
 }
 
+
+async function destroyVideoAndHls(hls, video) {
+  try {
+    if (hls) {
+      try { hls.stopLoad(); } catch (e) {}
+      try { hls.detachMedia(); } catch (e) {}
+      try { hls.destroy(); } catch (e) {}
+    }
+  } catch (e) {
+    console.warn('Error while destroying Hls:', e);
+  }
+
+  if (video) {
+    try {
+      video.pause();
+      // Remove src & load to free MediaSource
+      if (video.src) {
+        try { video.removeAttribute('src'); } catch (e) {}
+      }
+      try { video.load(); } catch (e) {}
+      // remove from DOM
+      if (video.parentNode) video.parentNode.removeChild(video);
+    } catch (e) {
+      console.warn('Error cleaning video element:', e);
+    }
+  }
+}
+
+window.addEventListener('beforeunload', () => {
+  if (mesh.userData?.hls || mesh.userData?.videoElement) {
+    destroyVideoAndHls(mesh.userData.hls, mesh.userData.videoElement);
+  }
+});
+
+
+
 // Function to set HLS video to mesh 
 function setVideoToMeshHLS(scene, meshName, hlsURL) {
+  // 1. Find the mesh
+  const mesh = scene.getObjectByName(meshName);
+  if (!mesh || !mesh.isMesh) {
+    console.warn(`❌ Cannot find mesh for ${meshName}`);
+    return;
+  }
+
+  // 2. CLEANUP: Destroy old HLS instance and video if they exist on this mesh
+  if (mesh.userData.hlsInstance) {
+    console.log("🧹 Cleaning up old HLS instance for:", meshName);
+    try {
+      mesh.userData.hlsInstance.destroy();
+    } catch (e) {
+      console.warn("⚠️ Error destroying old HLS:", e);
+    }
+    mesh.userData.hlsInstance = null;
+  }
+  
+  if (mesh.userData.videoElement) {
+    console.log("🧹 Removing old video element for:", meshName);
+    try {
+      const oldVideo = mesh.userData.videoElement;
+      oldVideo.pause();
+      oldVideo.removeAttribute('src'); // Detach source
+      oldVideo.load(); // Force unload
+      oldVideo.remove(); // Remove from DOM (though it wasn't attached, good practice)
+    } catch (e) {
+      console.warn("⚠️ Error cleaning video element:", e);
+    }
+    mesh.userData.videoElement = null;
+  }
+
+  // 3. Create new video element
   const video = document.createElement('video');
-  video.autoplay = false;
+  video.autoplay = false; // We control play manually
   video.pause();
-  video.muted = false;
-  video.loop = false;
+  video.muted = false; // Needed for spatial audio
+  video.loop = true;   // Good for background videos
   video.playsInline = true;
   video.crossOrigin = 'anonymous';
   video.style.display = 'none';
+  
+  // Store reference for later cleanup
+  mesh.userData.videoElement = video;
 
-  console.log("HSL URL: ", hlsURL)
+  console.log("🎬 HLS URL Base:", hlsURL);
 
   let hls;
-  hlsURL = hlsURL + "/master.m3u8"
+  let masterURL = hlsURL + "/master.m3u8";
+
   if (Hls.isSupported()) {
     const hlsConfig = {
-      startLevel: 0,             // Force start at lowest quality (index 0)
-      autoStartLoad: true,       // Start loading immediately
-      capLevelToPlayerSize: true,// Don't load 4K if mesh is small
-      lowLatencyMode: false,     // Disable low latency for better buffering
-      maxBufferLength: 30,       // Max seconds to buffer ahead
-      maxMaxBufferLength: 600,   
-      maxBufferHole: 0.5,        // Tolerance for small gaps (fix for bufferSeekOverHole)
-      nudgeOffset: 0.1,          // Helper for skipping holes
-      nudgeMaxRetry: 5,
+      startLevel: 0,             // Start at lowest quality for fast load
+      autoStartLoad: true,
+      capLevelToPlayerSize: true,
+      lowLatencyMode: false,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      maxBufferHole: 0.5,        // Tolerate small gaps (CRITICAL for your issue)
+      nudgeOffset: 0.1,          // Helper to jump gaps
+      nudgeMaxRetry: 10,
+      enableWorker: true,        // Use web worker for performance
     };
 
     hls = new Hls(hlsConfig);
-    hls.loadSource(hlsURL);
+    mesh.userData.hlsInstance = hls; // Store for cleanup
+
+    hls.loadSource(masterURL);
     hls.attachMedia(video);
 
-    // Add Robust Error Recovery
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      console.log("✅ Manifest parsed, starting playback");
+      // Only try to play once manifest is ready
+      video.play().catch(e => console.warn("Autoplay prevented:", e));
+    });
+
     hls.on(Hls.Events.ERROR, function (event, data) {
+      // Filter out non-fatal buffer errors that hls.js can often recover from automatically
+      if (data.details === 'bufferSeekOverHole' || data.details === 'bufferStalledError') {
+         console.warn(`⚠️ HLS Buffer Warning: ${data.details}. Attempting auto-recovery.`);
+         return; 
+      }
+
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            console.warn("Network error, trying to recover...");
+            console.warn("HLS Network error, trying to recover...");
             hls.startLoad();
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
-            console.warn("Media error, trying to recover...");
+            console.warn("HLS Media error, trying to recover...");
             hls.recoverMediaError();
             break;
           default:
-            console.error("Unrecoverable HLS error");
+            console.error("❌ Unrecoverable HLS error, destroying instance.");
             hls.destroy();
             break;
         }
       }
     });
+
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = hlsURL;
+    // Safari Native HLS
+    video.src = masterURL;
+    video.play().catch(e => console.warn("Native play error:", e));
   } else {
-    console.error('HLS not supported in this browser');
+    console.error('❌ HLS not supported');
     return;
   }
 
-  // Wait until video can render a frame
-  video.addEventListener('canplaythrough', () => {
-    video.play();
-
+  // 4. Texture & Material Setup (Only once video has data)
+  const onCanPlay = () => {
+    console.log("📺 Video has enough data to render texture");
+    
     const videoTexture = new THREE.VideoTexture(video);
     videoTexture.minFilter = THREE.LinearFilter;
     videoTexture.magFilter = THREE.LinearFilter;
-    videoTexture.format = THREE.RGBFormat;
+    videoTexture.format = THREE.RGBAFormat; // Use RGBA for safety
+    videoTexture.colorSpace = THREE.SRGBColorSpace; // Match your renderer
 
     const material = new THREE.MeshBasicMaterial({ map: videoTexture });
 
-    const mesh = scene.getObjectByName(meshName);
-    if (mesh && mesh.isMesh) {
-      if (mesh.material.map) mesh.material.map.dispose();
-      mesh.material.dispose();
-
-      mesh.material = material;
-      mesh.material.needsUpdate = true;
-
-      // 2) Spatial audio graph
-      if (!spatialSources.has(meshName)) {
-        const source = audioCtx.createMediaElementSource(video);
-        const panner = audioCtx.createPanner();
-        const gain = audioCtx.createGain();
-
-        // Configure panner
-        panner.panningModel = "HRTF";
-        panner.distanceModel = "inverse";
-        panner.refDistance = 2.0;
-        panner.maxDistance = 5.0;
-        panner.rolloffFactor = 1.0;
-        panner.coneInnerAngle = 360.0;
-
-
-
-        // Connect graph: source -> panner -> gain -> destination
-        source.connect(panner);
-        panner.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        // Initial position
-        const pos = mesh.position;
-        panner.setPosition(pos.x, pos.y, pos.z);
-
-        // Save reference so we don’t recreate it
-        spatialSources.set(meshName, { source, panner, gain, video, mesh });
-      }
-    } else {
-      console.warn(`Cannot find mesh for ${meshName}`);
+    // Clean up old material properties
+    if (mesh.material) {
+        if (mesh.material.map) mesh.material.map.dispose();
+        mesh.material.dispose();
     }
-  }, { once: true });
 
-  // Optional: log HLS errors
-  if (hls) {
-    hls.on(Hls.Events.ERROR, (event, data) => {
-      console.error("HLS.js error:", data);
-    });
-  }
+    mesh.material = material;
+    mesh.material.needsUpdate = true;
+
+    // 5. Spatial Audio Setup
+    if (!spatialSources.has(meshName)) {
+      // Ensure AudioContext is running
+      if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+      }
+
+      const source = audioCtx.createMediaElementSource(video);
+      const panner = audioCtx.createPanner();
+      const gain = audioCtx.createGain();
+
+      panner.panningModel = "HRTF";
+      panner.distanceModel = "inverse";
+      panner.refDistance = 2.0;
+      panner.maxDistance = 10.0;
+      panner.rolloffFactor = 0.5;
+      panner.coneInnerAngle = 360;
+
+      source.connect(panner);
+      panner.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      // Set initial position
+      const pos = mesh.position;
+      panner.setPosition(pos.x, pos.y, pos.z);
+
+      spatialSources.set(meshName, { source, panner, gain, video, mesh });
+    }
+  };
+
+  // Use 'loadedmetadata' or 'canplay' instead of 'canplaythrough' for faster feedback
+  video.addEventListener('canplay', onCanPlay, { once: true });
 }
-
-
-
-
-
+// Listen for custom upload events to update annotations
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
 
@@ -1546,6 +1630,10 @@ async function loadModel() {
             // }
 
             if (child.isMesh) {
+              // Setup the metadata for video texture handling
+                child.userData.hlsInstance = null; // initialize hlsInstance to null
+                child.userData.videoElement = null; // initialize videoElement to null
+
                 console.log('CHILD MESH NAME:', child.name);
                 child.userData.navWalkable = false;
                 child.userData.navObstacle = true;
@@ -2930,7 +3018,7 @@ export function initializeGame(targetContainerId = 'model-container') {
         return;
     }
     container.innerHTML = ''; 
-
+    
     camera = new THREE.PerspectiveCamera(70, container.clientWidth / container.clientHeight, 0.1, 1000);
     camera.rotation.order = 'YXZ';
 

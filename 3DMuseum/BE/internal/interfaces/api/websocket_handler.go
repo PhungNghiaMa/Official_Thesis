@@ -5,22 +5,32 @@ import (
 	"fmt"
 	"net/http"
 
+	applicationRepository "main/internal/application/repo"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	WS "main/internal/infrastructure/websocket"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-var WebSocketHub *WS.WebSocketHub = WS.NewWebSocketHub();
+
+type WebsocketHandler struct {
+	Hub applicationRepository.WebsocketRepository
+}
+
+func NewWebsocketHandler (hub applicationRepository.WebsocketRepository) *WebsocketHandler {
+	return &WebsocketHandler{
+		Hub: hub,
+	}
+}
 
 // HandleWS upgrades a Gin request to a websocket and processes subscribe/unsubscribe messages.
 // Expected client messages:
 //  { "action": "subscribe", "channel": "asset:<CID>" }
 //  { "action": "unsubscribe", "channel": "asset:<CID>" }
-func HandleWS(c *gin.Context) {
+func (h *WebsocketHandler) HandleWS(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		fmt.Println("[WebSocket] upgrade failed:", err)
@@ -28,8 +38,8 @@ func HandleWS(c *gin.Context) {
 		return
 	}
 	// register connection
-	WebSocketHub.Register(conn)
-	defer WebSocketHub.UnRegister(conn)
+	h.Hub.Register(conn)
+	defer h.Hub.UnRegister(conn)
 
 	for {
 		_, msg, err := conn.ReadMessage()
@@ -49,11 +59,11 @@ func HandleWS(c *gin.Context) {
 		switch payload.Action {
 		case "subscribe":
 			if payload.Channel != "" {
-				WebSocketHub.Subscribe(conn, payload.Channel)
+				h.Hub.Subscribe(conn, payload.Channel)
 			}
 		case "unsubscribe":
 			if payload.Channel != "" {
-				WebSocketHub.Unsubscribe(conn, payload.Channel)
+				h.Hub.Unsubscribe(conn, payload.Channel)
 			}
 		default:
 			// unknown action - ignore or extend later

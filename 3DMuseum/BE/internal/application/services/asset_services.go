@@ -214,7 +214,7 @@ func (s *AssetService) UploadAsset(ctx context.Context, info model.DetailUploadI
 
 		// 2. Upload conversion HLS to Pinata 
 		reportProgress("upload", "starting", 90, "Uploading KTX2 to Pinata...", map[string]interface{}{"asset_cid": "pending"})
-		uploadVideoResponse , err := s.PinataRepo.UploadVideoToPinata(GlobalHub ,VideoConversionResult.FolderPath , roomChannel , "");
+		uploadVideoResponse , err := s.PinataRepo.UploadVideoToPinata(s.WebsocketRepo ,VideoConversionResult.FolderPath , roomChannel , "");
 		if err != nil {
 			reportProgress("upload", "failed", 0, "Failed to upload Video to Pinata", map[string]interface{}{"error": err.Error(), "asset_cid": "pending"})
 			return &AssetUploadResult{}, fmt.Errorf("pinata upload failed: %w", err)
@@ -345,7 +345,7 @@ func (s *AssetService) ProcessAudioJobs(assetCID string, detail model.DetailUplo
 			progressMsg(70, fmt.Sprintf("Uploading %s TTS audio to Pinata...", j.Lang))
 
 			// 4️⃣ Upload to Pinata
-			resp, err := s.PinataRepo.UploadAudioToPinata(GlobalHub , audioData, fileName, assetChannel, assetCID, j.Lang)
+			resp, err := s.PinataRepo.UploadAudioToPinata(s.WebsocketRepo , audioData, fileName, assetChannel, assetCID, j.Lang)
 			if err != nil {
 				attempts++
 				_ = s.AssetRepo.UpdateAudio(ctx, assetCID, j.Lang, "failed", "", attempts)
