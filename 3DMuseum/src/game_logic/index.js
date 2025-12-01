@@ -74,6 +74,7 @@ let targetProgress = 0;
 let ambientLight , hemiLight , spot1 , spot2 , sun;
 
 // NPC 
+let npcModel = null;
 
 // instance for post-processing
 let composer , outlinePass , renderPass;
@@ -232,7 +233,7 @@ let interactedDoor;
 export const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_21.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_34.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -1065,14 +1066,29 @@ function ensureUV2ForAO(geometry) {
 }
 
 // FUNCTION TO INIT NPC
-export function initNPC(scene, navQuery, bvhMeshes) {
+export async function initNPC(scene, navQuery, bvhMeshes) {
   if (!navQuery) {
     console.warn("initNPC: Nav query not ready yet — NPC init may fail.");
   }
+  if (characterModel && !npcModel){
+    // Clone base character model
+    npcModel = SkeletonUtils.clone(characterModel);
+  }else if (!characterModel && !npcModel){
+    async function reloadNpcModel() {
+      for (let i = 0 ; i<=3 ; i++){
+        setTimeout(() => {
+          if (characterModel && !npcModel){
+            npcModel = SkeletonUtils.clone(characterModel);
+          }
+        }, i*1000);
+      }
+    }
+    reloadNpcModel();
+  }
 
-  // Clone base character model
-  const npcModel = SkeletonUtils.clone(characterModel);
+  console.warn ("NPC MODEL BEFORE ADDING TO SCENE:", npcModel);
   npcModel.updateMatrixWorld(true);
+
 
   // 🐛 --- DEBUG MODIFICATION START ---
   // Create one debug material to reuse
@@ -1083,6 +1099,7 @@ export function initNPC(scene, navQuery, bvhMeshes) {
 
   npcModel.traverse((child) => {
     if (child.isMesh) {
+      child.frustumCulled = true;
       child.castShadow = true;
       child.receiveShadow = true;
       if (Array.isArray(child.material)) {
@@ -1526,37 +1543,53 @@ async function loadModel() {
         // 3. Load third view character
         const loadModelCharacterPromise = characterLoader.loadAsync('optimizedModel/ANIMATED_1.glb');
         // Try to load the characterModel in background, but don't block scene loading on it.
-        loadModelCharacterPromise.then((gltf) => {
-            characterGLTF = gltf;
-            characterModel = gltf.scene;
-            characterModelReady = true;
-            if(tpView){
-                tpViewExisted = true;
-                tpViewLoadLate = false;
-                tpView.handleAnimation(characterModel, characterGLTF);
-                console.info("Finish handle character model using handleAnimation() function in ThirdPersonPlayer.js")
-            }else{
-                tpViewExisted = false;
-                tpViewLoadLate = true;
-                // Store to call in the activateThirdPerson()
-                character = {model: characterModel, gltf: characterGLTF}
-            }
-        }).catch((error) => {
-            console.error('Error loading character model:', error);
-        });
+        // loadModelCharacterPromise.then((gltf) => {
+        //     characterGLTF = gltf;
+        //     characterModel = gltf.scene;
+        //     characterModelReady = true;
+        //     if(tpView){
+        //         tpViewExisted = true;
+        //         tpViewLoadLate = false;
+        //         tpView.handleAnimation(characterModel, characterGLTF);
+        //         console.info("Finish handle character model using handleAnimation() function in ThirdPersonPlayer.js")
+        //     }else{
+        //         tpViewExisted = false;
+        //         tpViewLoadLate = true;
+        //         // Store to call in the activateThirdPerson()
+        //         character = {model: characterModel, gltf: characterGLTF}
+        //     }
+        // }).catch((error) => {
+        //     console.error('Error loading character model:', error);
+        // });
 
         // 3. Wait for BOTH promises to complete simultaneously.
-        const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
-        // const [gltf] = await Promise.all([loadModelPromise]);
+        // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
+        const [gltf , charGLTF] = await Promise.all([loadModelPromise , loadModelCharacterPromise]);
+
+        // ✅ ASSIGN CHARACTER VARIABLES IMMEDIATELY
+        characterGLTF = charGLTF;
+        characterModel = charGLTF.scene;
+        characterModelReady = true;
+
+        // Update tpView logic since we now know the character is ready
+        if (tpView) {
+            tpViewExisted = true;
+            tpViewLoadLate = false;
+            tpView.handleAnimation(characterModel, characterGLTF);
+        } else {
+            tpViewExisted = false;
+            tpViewLoadLate = true; // Setup for activateThirdPerson later
+            character = { model: characterModel, gltf: characterGLTF };
+        }
 
 
         // Clear map before use 
-        AssetDataMap.clear()
-        // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
-        // // image mesh name
-        for (const item of items){
-          AssetDataMap.set(item.asset_mesh_name , item)
-        }
+        // AssetDataMap.clear()
+        // // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
+        // // // image mesh name
+        // for (const item of items){
+        //   AssetDataMap.set(item.asset_mesh_name , item)
+        // }
 
         // let URL = "QmV55VNUfsGpCqv18Ak2B2VMHRxpaeupFedBMBJQVZ61zq"
         // await prefetchAudio(URL)
@@ -1607,111 +1640,115 @@ async function loadModel() {
             console.log('Found TourTarget:', child.name, '=> maps to', frameName);
           }
             
-            child.updateMatrixWorld(true);
-            bvhMeshList.push(child);
+          child.updateMatrixWorld(true);
+          bvhMeshList.push(child);
 
-            child.receiveShadow = true;
-            child.updateMatrixWorld(true);
+          child.receiveShadow = true;
+          child.updateMatrixWorld(true);
 
-            if (Array.isArray(child.material)) {
-                child.material = child.material.map(tuneMaterial);
-            } else {
-                child.material = tuneMaterial(child.material); 
-            }
+          if (Array.isArray(child.material)) {
+              child.material = child.material.map(tuneMaterial);
+          } else {
+              child.material = tuneMaterial(child.material); 
+          }
 
-            ensureUV2ForAO(child.geometry);
+          ensureUV2ForAO(child.geometry);
 
-            if(child.userData && child.userData.navWalkable || child.userData.navObstacle){
-                navInputMeshes.push(child);
-            }
+          if(child.userData && child.userData.navWalkable || child.userData.navObstacle){
+              navInputMeshes.push(child);
+          }
 
             // if (child.isObject3D) {
             //   console.log("Found an empty object of type Object3D:", child.name);
             // }
 
-            if (child.isMesh) {
-              // Setup the metadata for video texture handling
-                child.userData.hlsInstance = null; // initialize hlsInstance to null
-                child.userData.videoElement = null; // initialize videoElement to null
+          if (child.isMesh) {
+            // Setup the metadata for video texture handling
+              child.userData.hlsInstance = null; // initialize hlsInstance to null
+              child.userData.videoElement = null; // initialize videoElement to null
+              child.frustumCulled = true;
 
-                console.log('CHILD MESH NAME:', child.name);
-                child.userData.navWalkable = false;
-                child.userData.navObstacle = true;
+              console.log('CHILD MESH NAME:', child.name);
+              child.userData.navWalkable = false;
+              child.userData.navObstacle = true;
+              
+              if(child.name.toLowerCase() === "stair"){
+                child.visible = false;
+                child.userData.navWalkable = true;
+                child.userData.navObstacle = false;
+              }
 
-                if (child.name.toLowerCase().includes("floor")) {
-                    child.userData.navWalkable = true;
-                    child.userData.navObstacle = false;
-                } else {
-                    // By default, every other mesh is considered an obstacle.
-                    child.userData.navWalkable = false;
-                    child.userData.navObstacle = true;
-                }
+              if (child.name.toLowerCase().includes("visual_stair")){
+                return; // skip visual_stair from navmesh consideration
+              }
 
-                // Second, now that properties are set, check if it should be part of the navmesh.
-                if (child.userData.navWalkable || child.userData.navObstacle) {
-                    navInputMeshes.push(child);
-                }
-                // --- END OF CORRECTED LOGIC ---
+              // Second, now that properties are set, check if it should be part of the navmesh.
+              if (child.userData.navWalkable || child.userData.navObstacle) {
+                  navInputMeshes.push(child);
+              }
+              // --- END OF CORRECTED LOGIC ---
 
-                // DEBUG FUNCTION
-                const pos = new THREE.Vector3();
-                child.getWorldPosition(pos);
-                child.receiveShadow = true;
-                if (pos.y < fallbackY) {
-                    fallbackY = pos.y;
-                    fallbackX = pos.x;
-                    fallbackZ = pos.z;
-                }
+              // DEBUG FUNCTION
+              const pos = new THREE.Vector3();
+              child.getWorldPosition(pos);
+              child.receiveShadow = true;
+              if (pos.y < fallbackY) {
+                  fallbackY = pos.y;
+                  fallbackX = pos.x;
+                  fallbackZ = pos.z;
+              }
 
 
-                if (child.name.toLowerCase().includes("floor")) {
-                    child.receiveShadow = true;
-                    // console.log("Floor bbox: ", child.geometry.boundingBox)
-                    // console.log("FLOOR POSITION IS: ",child.position.x, child.position.y, child.position.z)
-                    const box = new THREE.Box3().setFromObject(child);
-                    const size = box.getSize(new THREE.Vector3());
-                    const area = size.x * size.z;
-                    if (area > maxArea) {
-                        maxArea = area;
-                        floorMesh = { box, center: box.getCenter(new THREE.Vector3()) };
-                        floorBoxMaxY = box.max.y;
-                    }
-                }
+              if (child.name.toLowerCase().includes("floor")) {
+                  child.userData.navWalkable = true;
+                  child.userData.navObstacle = false;
+                  child.receiveShadow = true;
+                  // console.log("Floor bbox: ", child.geometry.boundingBox)
+                  // console.log("FLOOR POSITION IS: ",child.position.x, child.position.y, child.position.z)
+                  const box = new THREE.Box3().setFromObject(child);
+                  const size = box.getSize(new THREE.Vector3());
+                  const area = size.x * size.z;
+                  if (area > maxArea) {
+                      maxArea = area;
+                      floorMesh = { box, center: box.getCenter(new THREE.Vector3()) };
+                      floorBoxMaxY = box.max.y;
+                  }
+              }
 
-                // if (child.parent?.name === "Door") {
-                //     doorBoundingBox = new THREE.Box3().setFromObject(child);
+              // if (child.parent?.name === "Door") {
+              //     doorBoundingBox = new THREE.Box3().setFromObject(child);
+              // }
+              
+              // if (child.name === "Handle") {
+              //     child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
+              // }
+
+              if (child.name.toLowerCase().includes("pictureframe")){
+                // if (child.name === "PictureFrame003"){
+                //   child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
                 // }
-                
-                // if (child.name === "Handle") {
-                //     child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
+                pictureFramesArray.push(child);
+              }
+
+              if (/^ImageMesh\d+$/.test(child.name)) {
+                // if (child.name === "ImageMesh004"){
+                //   child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
                 // }
+                  imageMeshesArray.push(child);
+                  const imagePlane = child;
+                  if (imagePlane.geometry?.attributes.uv) imagePlane.geometry.attributes.uv.needsUpdate = true;
+                  const box = new THREE.Box3().setFromObject(imagePlane);
+                  const center = box.getCenter(new THREE.Vector3());
+                  const annotationDiv = new AnnotationDiv(count++, imagePlane);
+                  const label = new CSS2DObject(annotationDiv.getElement());
+                  label.position.copy(center);
+                  scene.add(label);
+                  annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
+                  // Attach to DOM so it can be seen
+                  annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
+              }
 
-                if (child.name.toLowerCase().includes("pictureframe")){
-                  // if (child.name === "PictureFrame003"){
-                  //   child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
-                  // }
-                  pictureFramesArray.push(child);
-                }
-
-                if (/^ImageMesh\d+$/.test(child.name)) {
-                  // if (child.name === "ImageMesh004"){
-                  //   child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
-                  // }
-                    imageMeshesArray.push(child);
-                    const imagePlane = child;
-                    if (imagePlane.geometry?.attributes.uv) imagePlane.geometry.attributes.uv.needsUpdate = true;
-                    const box = new THREE.Box3().setFromObject(imagePlane);
-                    const center = box.getCenter(new THREE.Vector3());
-                    const annotationDiv = new AnnotationDiv(count++, imagePlane);
-                    const label = new CSS2DObject(annotationDiv.getElement());
-                    label.position.copy(center);
-                    scene.add(label);
-                    annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
-                    // Attach to DOM so it can be seen
-                    annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
-                }
-
-            }
+          }
         });
 
         await initRecastIfNeeded();
@@ -1753,7 +1790,7 @@ async function loadModel() {
 
         // --- PLAYER SETUP (capsule aligned so feet are on the floor) ---
         const RADIUS = 0.35;
-        const TOTAL_HEIGHT = 1.8;           // desired overall capsule height
+        const TOTAL_HEIGHT = 1;           // desired overall capsule height
         const SEGMENT = TOTAL_HEIGHT - 2*RADIUS; // the inner line segment length
 
         const startY = playerStart.y + RADIUS + 0.02; // bottom sphere center
@@ -1793,7 +1830,7 @@ async function loadModel() {
             // console.log("Nav query: ", navQuery)
         }
         // Call initNPC function to init NPC 
-        const npcEntry = initNPC(scene, navQuery, bvhMeshList);
+        const npcEntry =  await initNPC(scene, navQuery, bvhMeshList);
        
         if (npcEntry){
           npcEntry.state = {mode: 'idle'};
@@ -1813,21 +1850,21 @@ async function loadModel() {
         }
 
         // --- POPULATE SCENE WITH DATA ---
-        (Array.isArray(items) ? items : []).forEach(item => {
-            console.warn(item)
-            if (!item) return;
-            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
-            if (annotationMesh[asset_mesh_name]) {
-                annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
-                annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
-                if (category === "Image"){
-                  setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
-                }else if (category === "Video"){
-                  setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
-                }
+        // (Array.isArray(items) ? items : []).forEach(item => {
+        //     console.warn(item)
+        //     if (!item) return;
+        //     const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
+        //     if (annotationMesh[asset_mesh_name]) {
+        //         annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
+        //         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
+        //         if (category === "Image"){
+        //           setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+        //         }else if (category === "Video"){
+        //           setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+        //         }
                 
-            }
-        });
+        //     }
+        // });
 
         hasEnteredNewScene = false;
         document.getElementById('loading-container').style.display = 'none';
@@ -2243,7 +2280,7 @@ function animate() {
         // ====================================================================
         let cameraLookTarget = playerLookAtPoint.clone();
 
-        const idealOffset = new THREE.Vector3(0, 0, -3.0).applyQuaternion(tpView.model.quaternion);
+        const idealOffset = new THREE.Vector3(0, 1.15, -2.8).applyQuaternion(tpView.model.quaternion);
         const idealPos = playerLookAtPoint.clone().add(idealOffset);
         let finalPos = idealPos.clone();
 
@@ -2256,7 +2293,7 @@ function animate() {
         const raycaster = new THREE.Raycaster(playerLookAtPoint, idealOffset.clone().normalize(), 1e-14, idealOffset.length());
         const intersects = raycaster.intersectObjects(tpView.bvhMeshes, true);
         if (intersects.length > 0) {
-          finalPos.copy(intersects[0].point).sub(raycaster.ray.direction.clone().multiplyScalar(camRadius + 0.05));
+          finalPos.copy(intersects[0].point).sub(raycaster.ray.direction.clone().multiplyScalar(camRadius + 0.25));
         }
         
         if (tpView.isTouring && tpView.isViewingPicture){
@@ -2363,6 +2400,7 @@ async function activateThirdPerson() {
 
     if (!tpViewExisted && character) {
       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
+      npcModel = character.model;
       if(window._IS_HOST === true){
         tpView.isHost = true;
         tpView.remoteControlled = false;
@@ -2381,6 +2419,7 @@ async function activateThirdPerson() {
       tpViewLoadLate = false;
     } else if (tpViewExisted && character) {
       if (!tpView.model) tpView.attachModel(character.model);
+      if (!npcModel) npcModel = character.model;
       tpView.handleAnimation(character.model, character.gltf);
       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
