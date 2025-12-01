@@ -220,7 +220,7 @@ setDestination(worldTarget) {
 
     for (const mesh of this.bvhMeshes) {
       const bvh = mesh.geometry?.boundsTree;
-      if (mesh.name === 'Floor') continue;
+      if (mesh.name.toLowerCase().includes('floor')) continue;
       if (!bvh) continue;
       if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(worldSegBox)) continue;
 

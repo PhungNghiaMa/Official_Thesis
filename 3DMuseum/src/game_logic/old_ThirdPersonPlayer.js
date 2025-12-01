@@ -8,7 +8,7 @@ import { createAnimController } from './createAnimationController';
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-const GRAVITY = 30;
+const GRAVITY = 50;
 
 export default class ThirdPersonPlayer {
   constructor(camera, scene, playerCollider, characterModel) {
@@ -331,24 +331,18 @@ export default class ThirdPersonPlayer {
 
   update(delta) {
     if (!this.bvhReady || !this.model) return;
-    const friction = this.playerOnFloor ? 8 : 3;
-    let groundNormal = new THREE.Vector3(0, 1, 0); 
 
     // --- gravity + damping (stable) ---
     if (!this.playerOnFloor) {
       this.playerVelocity.y -= this.gravity * delta;
-      // this.playerVelocity.multiplyScalar(Math.exp(-1.5 * delta));
-      this.playerVelocity.x -= this.playerVelocity.x * friction * delta;
-      this.playerVelocity.z -= this.playerVelocity.z * friction * delta;
+      this.playerVelocity.multiplyScalar(Math.exp(-1.5 * delta));
     } else {
       this.playerVelocity.y = 0;
-      // this.playerVelocity.multiplyScalar(Math.exp(-10 * delta));
-      this.playerVelocity.x -= this.playerVelocity.x * friction * delta;
-      this.playerVelocity.z -= this.playerVelocity.z * friction * delta;
+      this.playerVelocity.multiplyScalar(Math.exp(-10 * delta));
     }
 
     // --- input forces ---
-    const baseSpeed = this.playerOnFloor ? 11 : 10;
+    const baseSpeed = this.playerOnFloor ? 1 : 18;
     // Increase speed when the run button is pressed
     const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
     const speedDelta = delta * finalSpeed;
@@ -436,30 +430,13 @@ export default class ThirdPersonPlayer {
             const pushDir = capPoint.sub(triPoint).normalize();
             this.tempSegment.start.addScaledVector(pushDir, depth);
             this.tempSegment.end.addScaledVector(pushDir, depth);
-            if (pushDir.y > 0.1){
-              this.playerOnFloor = true;
-              groundNormal.copy(pushDir);
-            } 
+            if (pushDir.y > 0.1) this.playerOnFloor = true;
           }
         }
       });
 
       this.playerCollider.start.copy(this.tempSegment.start).applyMatrix4(mesh.matrixWorld);
       this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
-
-      // --- After updating playerCollider.start/end with shapecast result ---
-      const correctedMovement = this.tempSegment.start.clone().applyMatrix4(mesh.matrixWorld)
-          .sub(this.playerCollider.start);
-
-      if (correctedMovement.lengthSq() > 0) {
-          // remove velocity component into collision surface
-          const pushDir = correctedMovement.clone().normalize();
-          const vDot = this.playerVelocity.dot(pushDir);
-          if (vDot < 0) {
-              this.playerVelocity.addScaledVector(pushDir, -vDot);
-          }
-      }
-
     }
 
     // clamp extremely small horizontal velocity to zero to avoid micro-drift
@@ -468,33 +445,13 @@ export default class ThirdPersonPlayer {
       this.playerVelocity.x = 0;
       this.playerVelocity.z = 0;
     }
-
-    // ... inside update(delta) ...
-
-    // --- 8. Visual Sync & Floating Fix ---
-    const smoothing = 1.0 - Math.exp(-20 * delta); // Strong smoothing for position
-    this._smoothedPlayerPosition.lerp(this.playerCollider.start, smoothing);
-
-    // 🛠️ TUNING: Global vertical offset. 
-    // If character floats on FLAT ground, decrease this (-0.02, -0.05).
-    // If feet sink into ground, increase this.
-    const BASE_OFFSET = -0.05; 
-
-    // 🛠️ TUNING: Extra offset for SLOPES/STAIRS
-    // Ramps often need more "downward" correction because the collider tangent is higher than the visual pivot.
-    let slopeOffset = 0;
-    if (this.playerOnFloor && groundNormal.y < 0.98) { // Trigger on any non-flat surface
-        slopeOffset = -0.02 * groundNormal.y; // Stronger push down for stairs
-    }
-
+    const smoothing = 1.0 - Math.exp(-10 * delta); // dynamic smoothing
+    this._smoothedPlayerPosition.lerp(this.playerCollider.end, smoothing); // tune 0.12-0.25
     this.model.position.set(
       this._smoothedPlayerPosition.x,
-      // Formula: Collider Bottom Y + Foot Offset + Manual Tweaks
-      this.playerCollider.start.y - this.playerCollider.radius + this.footOffset + BASE_OFFSET + slopeOffset,
+      this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
       this._smoothedPlayerPosition.z
     );
-
-    // smooth model rotation for camera
     this.tempQuaternion.slerp(this.model.quaternion, 1.0 - Math.exp(-5 * delta));
 
     // play/pause walk (mixer is advanced once per frame in animate())
@@ -609,7 +566,7 @@ export default class ThirdPersonPlayer {
     const bottomY = this.model.position.y + this.playerCollider.radius + 0.02;
     this.playerCollider.start.set(this.model.position.x, bottomY, this.model.position.z);
     this.playerCollider.end.set(this.model.position.x, bottomY + segLen, this.model.position.z);
-    this._smoothedPlayerPosition.copy(this.playerCollider.start);
+    this._smoothedPlayerPosition.copy(this.playerCollider.end);
   }
   // Call this each frame if following an agent
   updateFollow(delta) {
