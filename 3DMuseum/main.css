@@ -222,9 +222,11 @@ body {
         font-size: 2.5rem;
     }
     .Graph_1_Container h1 , .Graph_2_Container h1{
-        font-size: larger;
+        font-size: x-small;
         padding-left: 1vw;
         font-weight: 500;
+        overflow: auto;
+        scrollbar-width: none;
     }
     .InitBtn{
         display: flex;
