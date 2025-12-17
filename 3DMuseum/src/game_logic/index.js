@@ -233,7 +233,8 @@ let interactedDoor;
 export const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_34.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_41.glb",
+    // [Museum.ART_GALLERY] : "ENHANCE_MODEL_LENOVO.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -922,65 +923,6 @@ function updatePropVisibility() {
 
 
 // Material Tuning Function
-// function tuneMaterial(material) {
-//     if (!material) return null; 
-
-//     // --- Force upgrade non-PBR materials (MeshBasic, Lambert, etc.) ---
-//     if (!(material instanceof THREE.MeshStandardMaterial) && !(material instanceof THREE.MeshPhysicalMaterial)) {
-//         material = new THREE.MeshStandardMaterial({
-//             map: material.map || null,
-//             color: (material.color && material.color.clone()) || new THREE.Color(0xffffff),
-//             roughness: 1.0,
-//             metalness: 0.0,
-//             transparent: !!material.transparent,
-//             opacity: material.opacity !== undefined ? material.opacity : 1.0,
-//         });
-//     }
-
-//     // --- Ensure shadows are enabled ---
-//     material.shadowSide = THREE.FrontSide;   // Fix shadow rendering
-//     material.needsUpdate = true;
-
-//     // Clamp safe values
-//     if (material.roughness !== undefined) {
-//         material.roughness = Math.min(Math.max(material.roughness, 0.0), 1.0);
-//     }
-//     if (material.metalness !== undefined) {
-//         material.metalness = Math.min(Math.max(material.metalness, 0.0), 1.0);
-//     }
-
-//     // Scene environment reflection
-//     if ('envMapIntensity' in material) {
-//         material.envMapIntensity = 0.5;
-//     }
-
-//     // ✅ Important: use FrontSide (so walls don’t render inside)
-//     material.side = THREE.DoubleSide;
-
-//     // Update all maps
-//     const mapNames = ['map', 'emissiveMap', 'aoMap', 'metalnessMap', 'roughnessMap', 'normalMap', 'bumpMap'];
-//     for (const name of mapNames) {
-//         const texture = material[name];
-//         if (!texture) continue;
-
-//         if (name === 'map' || name === 'emissiveMap') {
-//             texture.colorSpace = THREE.SRGBColorSpace;
-//         } else {
-//             texture.colorSpace = THREE.LinearSRGBColorSpace;
-//         }
-
-//         texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-//         texture.minFilter = THREE.LinearMipMapLinearFilter;
-//         texture.magFilter = THREE.LinearFilter;
-//         texture.needsUpdate = true;
-//     }
-
-//     if (material.normalMap && !material.normalScale) {
-//         material.normalScale = new THREE.Vector2(1, 1);
-//     }
-
-//     return material;
-// }
 function tuneMaterial(material) {
     if (!material) return null; 
 
@@ -1028,11 +970,11 @@ function tuneMaterial(material) {
         const texture = material[name];
         if (!texture) continue;
 
-        if (name === 'map' || name === 'emissiveMap') {
-            texture.colorSpace = THREE.SRGBColorSpace;
-        } else {
-            texture.colorSpace = THREE.LinearSRGBColorSpace;
-        }
+        // if (name === 'map' || name === 'emissiveMap') {
+        //     texture.colorSpace = THREE.SRGBColorSpace;
+        // } else {
+        //     texture.colorSpace = THREE.LinearSRGBColorSpace;
+        // }
 
         // --- DYNAMIC LOD/PERFORMANCE APPLICATION ---
         // Apply the dynamic mipmap bias based on current FPS/network conditions
@@ -1477,15 +1419,15 @@ async function loadModel() {
 
 
 // environment map
-    const pmremGen = new THREE.PMREMGenerator(renderer);
-    pmremGen.compileEquirectangularShader();
-    new EXRLoader().load('/assets/HDRI_1.exr', (exrTex) => {
-        const envMap = pmremGen.fromEquirectangular(exrTex).texture;
-        scene.environment = envMap;
-        scene.background = envMap; // optional
-        exrTex.dispose();
-        pmremGen.dispose();
-    });
+    // const pmremGen = new THREE.PMREMGenerator(renderer);
+    // pmremGen.compileEquirectangularShader();
+    // new EXRLoader().load('/assets/HDRI_1.exr', (exrTex) => {
+    //     const envMap = pmremGen.fromEquirectangular(exrTex).texture;
+    //     scene.environment = envMap;
+    //     scene.background = envMap; // optional
+    //     exrTex.dispose();
+    //     pmremGen.dispose();
+    // });
 
     // const pmremGen = new THREE.PMREMGenerator(renderer);
     // pmremGen.compileEquirectangularShader();
@@ -1509,10 +1451,15 @@ async function loadModel() {
         // 1. Create a promise for the model load. loader.loadAsync is a built-in
         // promise-based version of loader.load that we can await.
         const loadModelPromise = new Promise((resolve, reject) => {
+          const start = performance.now(); 
         // Use the GLTFLoader instance from your game logic.
             loader.load(
                 ModelPaths[currentMuseumId],
-                (gltf) => {                    
+                (gltf) => {                
+                    const end = performance.now();
+                    const loadTime = Math.max(0, end - start); // safety clamp
+
+                    console.log(`⏱ GLB Load Time: ${loadTime.toFixed(2)} ms`);   
                     // Set target to 100 and start animation
                     targetProgress = 100;
                     animateProgress();
@@ -1672,11 +1619,11 @@ async function loadModel() {
               child.userData.navWalkable = false;
               child.userData.navObstacle = true;
               
-              if(child.name.toLowerCase() === "stair"){
-                child.visible = false;
-                child.userData.navWalkable = true;
-                child.userData.navObstacle = false;
-              }
+              // if(child.name.toLowerCase() === "stair"){
+              //   child.visible = false;
+              //   child.userData.navWalkable = true;
+              //   child.userData.navObstacle = false;
+              // }
 
               if (child.name.toLowerCase().includes("visual_stair")){
                 return; // skip visual_stair from navmesh consideration
