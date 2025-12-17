@@ -75,6 +75,7 @@ let ambientLight , hemiLight , spot1 , spot2 , sun;
 
 // NPC 
 let npcModel = null;
+const floorCache = new Map();
 
 // instance for post-processing
 let composer , outlinePass , renderPass;
@@ -234,7 +235,6 @@ export const FrameToImageMeshMap = {};
 
 const ModelPaths = {
     [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_41.glb",
-    // [Museum.ART_GALLERY] : "ENHANCE_MODEL_LENOVO.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -726,52 +726,36 @@ function applyTextureLODInitial(material , mipMapBias){
   }
 }
 
-function applyTextureLOD(mipMapBias) {
-    if (!scene || !renderer) return; // Ensure scene/renderer are available
 
-    scene.traverse((object) => {
-        if (object.isMesh) {
-            const material = object.material;
-            // Handle both single material and array of materials
-            const materials = Array.isArray(material) ? material : [material];
 
-            materials.forEach(mat => {
-                // We only care about main texture maps that are loaded (like user uploads)
-                if (mat.map && mat.map.isTexture) {
-                    // Check if the texture is a KTX2/compressed texture (by format)
-                    if (mat.map.format) {
-                        mat.map.mipMapBias = mipMapBias;
-                        
-                        // Also adjust anisotropy (texture filtering quality)
-                        // Lower bias for high quality, higher bias for performance
-                        mat.map.anisotropy = (mipMapBias > 0) ? 4 : window.renderer.capabilities.getMaxAnisotropy();
-                        
-                        mat.map.needsUpdate = true;
-                    }
-                }
-            });
-        }
-    });
-}
+function adjustRuntimeLOD(fps) {
+  let newTier = currentLODTier;
 
-function checkAndAdjustLOD(currentFPS){
-  let newBias = LOD_SETTINGS.currentBias;
-  const BIAS_STEP = 0.5;
-  const {minAcceptableFPS , targetFPS , HIGH , LOW} = LOD_SETTINGS
-  // FPS DROP --> DEGRADE MATERIAL QUALITY
-  // Try to tune the newBias so it can dynamically catch up with the network status
-  // If the FPS is low then the acceptable FPS , mean that network still low and therefore set the low standard at newbias 
-  if (minAcceptableFPS > currentFPS){
-    newBias = Math.min(newBias , newBias + BIAS_STEP);
-  }else{ // Else set the newbias higher so it can exactly reflect the network enhancement 
-    newBias = Math.max(newBias , newBias + BIAS_STEP);
+  if (fps < LOD_SETTINGS.minAcceptableFPS) {
+    newTier = LOD_SETTINGS.LOW;
+  } else if (fps < LOD_SETTINGS.targetFPS) {
+    newTier = LOD_SETTINGS.MEDIUM;
+  } else {
+    newTier = LOD_SETTINGS.HIGH;
   }
-  // If the newBias different ( can be lower or higher then initial LOD_SETTING.currentBias then try to announce to the program to dynamically tune the material )
-  if (newBias != LOD_SETTINGS.currentBias){
-    LOD_SETTINGS.currentBias = newBias;
-    applyTextureLOD(newBias);
+
+  if (newTier !== currentLODTier) {
+    currentLODTier = newTier;
+    applyRuntimeLOD(newTier);
   }
 }
+
+function applyRuntimeLOD(tier) {
+  const distSq =
+    tier === LOD_SETTINGS.HIGH ? 25 :
+    tier === LOD_SETTINGS.MEDIUM ? 16 :
+    9;
+
+  for (const frame of pictureFramesArray) {
+    frame.userData.lodDistSq = distSq;
+  }
+}
+
 
 function clearSceneObjects(obj) {
     if (mixer) {
@@ -842,6 +826,7 @@ function checkCurrentPosition() {
 const lastAudioPos = new THREE.Vector3();
 const lastAudioQuat = new THREE.Quaternion();
 function updateSpatialAudio(scene) {
+
   // Check if camera moved enough to warrant an update
   if (camera.position.distanceToSquared(lastAudioPos) < 0.01 && 
       camera.quaternion.angleTo(lastAudioQuat) < 0.01) {
@@ -923,6 +908,65 @@ function updatePropVisibility() {
 
 
 // Material Tuning Function
+// function tuneMaterial(material) {
+//     if (!material) return null; 
+
+//     // --- Force upgrade non-PBR materials (MeshBasic, Lambert, etc.) ---
+//     if (!(material instanceof THREE.MeshStandardMaterial) && !(material instanceof THREE.MeshPhysicalMaterial)) {
+//         material = new THREE.MeshStandardMaterial({
+//             map: material.map || null,
+//             color: (material.color && material.color.clone()) || new THREE.Color(0xffffff),
+//             roughness: 1.0,
+//             metalness: 0.0,
+//             transparent: !!material.transparent,
+//             opacity: material.opacity !== undefined ? material.opacity : 1.0,
+//         });
+//     }
+
+//     // --- Ensure shadows are enabled ---
+//     material.shadowSide = THREE.FrontSide;   // Fix shadow rendering
+//     material.needsUpdate = true;
+
+//     // Clamp safe values
+//     if (material.roughness !== undefined) {
+//         material.roughness = Math.min(Math.max(material.roughness, 0.0), 1.0);
+//     }
+//     if (material.metalness !== undefined) {
+//         material.metalness = Math.min(Math.max(material.metalness, 0.0), 1.0);
+//     }
+
+//     // Scene environment reflection
+//     if ('envMapIntensity' in material) {
+//         material.envMapIntensity = 0.5;
+//     }
+
+//     // ✅ Important: use FrontSide (so walls don’t render inside)
+//     material.side = THREE.DoubleSide;
+
+//     // Update all maps
+//     const mapNames = ['map', 'emissiveMap', 'aoMap', 'metalnessMap', 'roughnessMap', 'normalMap', 'bumpMap'];
+//     for (const name of mapNames) {
+//         const texture = material[name];
+//         if (!texture) continue;
+
+//         if (name === 'map' || name === 'emissiveMap') {
+//             texture.colorSpace = THREE.SRGBColorSpace;
+//         } else {
+//             texture.colorSpace = THREE.LinearSRGBColorSpace;
+//         }
+
+//         texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+//         texture.minFilter = THREE.LinearMipMapLinearFilter;
+//         texture.magFilter = THREE.LinearFilter;
+//         texture.needsUpdate = true;
+//     }
+
+//     if (material.normalMap && !material.normalScale) {
+//         material.normalScale = new THREE.Vector2(1, 1);
+//     }
+
+//     return material;
+// }
 function tuneMaterial(material) {
     if (!material) return null; 
 
@@ -970,11 +1014,11 @@ function tuneMaterial(material) {
         const texture = material[name];
         if (!texture) continue;
 
-        // if (name === 'map' || name === 'emissiveMap') {
-        //     texture.colorSpace = THREE.SRGBColorSpace;
-        // } else {
-        //     texture.colorSpace = THREE.LinearSRGBColorSpace;
-        // }
+        if (name === 'map' || name === 'emissiveMap') {
+            texture.colorSpace = THREE.SRGBColorSpace;
+        } else {
+            texture.colorSpace = THREE.LinearSRGBColorSpace;
+        }
 
         // --- DYNAMIC LOD/PERFORMANCE APPLICATION ---
         // Apply the dynamic mipmap bias based on current FPS/network conditions
@@ -1419,15 +1463,15 @@ async function loadModel() {
 
 
 // environment map
-    // const pmremGen = new THREE.PMREMGenerator(renderer);
-    // pmremGen.compileEquirectangularShader();
-    // new EXRLoader().load('/assets/HDRI_1.exr', (exrTex) => {
-    //     const envMap = pmremGen.fromEquirectangular(exrTex).texture;
-    //     scene.environment = envMap;
-    //     scene.background = envMap; // optional
-    //     exrTex.dispose();
-    //     pmremGen.dispose();
-    // });
+    const pmremGen = new THREE.PMREMGenerator(renderer);
+    pmremGen.compileEquirectangularShader();
+    new EXRLoader().load('/assets/HDRI_1.exr', (exrTex) => {
+        const envMap = pmremGen.fromEquirectangular(exrTex).texture;
+        scene.environment = envMap;
+        scene.background = envMap; // optional
+        exrTex.dispose();
+        pmremGen.dispose();
+    });
 
     // const pmremGen = new THREE.PMREMGenerator(renderer);
     // pmremGen.compileEquirectangularShader();
@@ -1442,6 +1486,13 @@ async function loadModel() {
 
     scene.background = new THREE.Color("#f0f0f0"); // Set a neutral background color
 
+    // // Set up geometry LOD 
+    // const lod = new THREE.LOD();
+    // lod.addLevel(highMesh, 0);
+    // lod.addLevel(medMesh, 10);
+    // lod.addLevel(lowMesh, 20);
+    // scene.add(lod);
+
 
     try {
         // MEASURE BANDWIDTH
@@ -1451,15 +1502,10 @@ async function loadModel() {
         // 1. Create a promise for the model load. loader.loadAsync is a built-in
         // promise-based version of loader.load that we can await.
         const loadModelPromise = new Promise((resolve, reject) => {
-          const start = performance.now(); 
         // Use the GLTFLoader instance from your game logic.
             loader.load(
                 ModelPaths[currentMuseumId],
-                (gltf) => {                
-                    const end = performance.now();
-                    const loadTime = Math.max(0, end - start); // safety clamp
-
-                    console.log(`⏱ GLB Load Time: ${loadTime.toFixed(2)} ms`);   
+                (gltf) => {                    
                     // Set target to 100 and start animation
                     targetProgress = 100;
                     animateProgress();
@@ -1511,7 +1557,7 @@ async function loadModel() {
 
         // 3. Wait for BOTH promises to complete simultaneously.
         // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
-        const [gltf , charGLTF , items] = await Promise.all([loadModelPromise , loadModelCharacterPromise , getAssetsPromise]);
+        const [gltf , charGLTF] = await Promise.all([loadModelPromise , loadModelCharacterPromise]);
 
         // ✅ ASSIGN CHARACTER VARIABLES IMMEDIATELY
         characterGLTF = charGLTF;
@@ -1531,12 +1577,12 @@ async function loadModel() {
 
 
         // Clear map before use 
-        AssetDataMap.clear()
-        // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
-        // // image mesh name
-        for (const item of items){
-          AssetDataMap.set(item.asset_mesh_name , item)
-        }
+        // AssetDataMap.clear()
+        // // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
+        // // // image mesh name
+        // for (const item of items){
+        //   AssetDataMap.set(item.asset_mesh_name , item)
+        // }
 
         // let URL = "QmV55VNUfsGpCqv18Ak2B2VMHRxpaeupFedBMBJQVZ61zq"
         // await prefetchAudio(URL)
@@ -1619,11 +1665,10 @@ async function loadModel() {
               child.userData.navWalkable = false;
               child.userData.navObstacle = true;
               
-              // if(child.name.toLowerCase() === "stair"){
-              //   child.visible = false;
-              //   child.userData.navWalkable = true;
-              //   child.userData.navObstacle = false;
-              // }
+              if(child.name.toLowerCase() === "stair"){
+                child.userData.navWalkable = true;
+                child.userData.navObstacle = false;
+              }
 
               if (child.name.toLowerCase().includes("visual_stair")){
                 return; // skip visual_stair from navmesh consideration
@@ -1797,21 +1842,21 @@ async function loadModel() {
         }
 
         // --- POPULATE SCENE WITH DATA ---
-        (Array.isArray(items) ? items : []).forEach(item => {
-            console.warn(item)
-            if (!item) return;
-            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
-            if (annotationMesh[asset_mesh_name]) {
-                annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
-                annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
-                if (category === "Image"){
-                  setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
-                }else if (category === "Video"){
-                  setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
-                }
+        // (Array.isArray(items) ? items : []).forEach(item => {
+        //     console.warn(item)
+        //     if (!item) return;
+        //     const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
+        //     if (annotationMesh[asset_mesh_name]) {
+        //         annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
+        //         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
+        //         if (category === "Image"){
+        //           setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+        //         }else if (category === "Video"){
+        //           setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+        //         }
                 
-            }
-        });
+        //     }
+        // });
 
         hasEnteredNewScene = false;
         document.getElementById('loading-container').style.display = 'none';
@@ -1901,6 +1946,16 @@ function updateAudioListener(camera) {
   listener.upZ.setValueAtTime(up.z, window.audioCtx.currentTime);
 }
 
+function updateFrameVisibility() {
+  if (!camera) return;
+
+  for (const frame of pictureFramesArray) {
+    if (!frame.userData.lodDistSq) continue;
+
+    const d = frame.position.distanceToSquared(camera.position);
+    frame.visible = d < frame.userData.lodDistSq;
+  }
+}
 
 
 
@@ -1912,25 +1967,21 @@ function animate() {
 
   const now = performance.now();
   prevTime = now;
-  let prevFPS = 0;
 
     // --- LOD Performance Monitoring (Add this block) ---
+  // run every frame
   LOD_SETTINGS.frames++;
   if (now - LOD_SETTINGS.startTime >= LOD_SETTINGS.FPS_CHECK_INTERVAL_MS) {
-      const currentFPS = LOD_SETTINGS.frames / ((now - LOD_SETTINGS.startTime) / 1000);
-      if (currentFPS > currentFPS + 1 || currentFPS < currentFPS - 1 || currentFPS === prevFPS){
-        prevFPS = currentFPS;
-        LOD_SETTINGS.frames = 0;
-        LOD_SETTINGS.startTime = now;
-        return;
-      }
-      checkAndAdjustLOD(currentFPS); // Call the dynamic adjustment function
-      prevFPS = currentFPS;
-      // Reset counters
-      LOD_SETTINGS.frames = 0;
-      LOD_SETTINGS.startTime = now;
+    const fps =
+      (LOD_SETTINGS.frames * 1000) /
+      (now - LOD_SETTINGS.startTime);
+
+    adjustRuntimeLOD(fps);
+
+    LOD_SETTINGS.frames = 0;
+    LOD_SETTINGS.startTime = now;
   }
-  updatePropVisibility();
+
   updateSpatialAudio(scene);
 
 
@@ -1940,6 +1991,8 @@ function animate() {
   const frameDelta = Math.min(0.05, clock.getDelta());
   physicsTimeAccumulator += frameDelta;
   const FIXED_TIMESTEP = 1 / 60;
+
+  updateFrameVisibility();
 
 
 
@@ -2170,9 +2223,9 @@ function animate() {
         tpView.syncFromCrowd();
       }
     } else {
-      for (let i = 0; i < STEPS_PER_FRAME; i++) {
-        tpView.update(frameDelta);
-      }
+      // ✅ FIX: Remove the double loop. Pass the full frame delta.
+      // Velocity-based movement in ThirdPersonPlayer handles variable time robustly.
+      tpView.update(frameDelta);
     }
 
     // --- Step 3: Camera update ---
@@ -2270,9 +2323,8 @@ function animate() {
 
   // ---------------- FP VIEW ----------------
   if (physiscsReady && activePlayer === 'fp' && fpView) {
-    for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      fpView.update(frameDelta, camYaw, camPitch);
-    }
+    // ✅ FIX: Remove the double loop. Pass the full frame delta.
+    fpView.update(frameDelta, camYaw, camPitch);
     if (fpView.isTouring && fpView.followAgent) {
       const npcEntry = fpView.followAgent;
       // Prefer the agent's interpolated position when available (most accurate)
@@ -2333,6 +2385,7 @@ function animate() {
   }
   updateAudioListener(camera)
 
+
   // checkPlayerPosition();
   composer.render();
 }
@@ -2347,7 +2400,6 @@ async function activateThirdPerson() {
 
     if (!tpViewExisted && character) {
       tpView = new ThirdPersonPlayer(camera, scene, playerCollider, character.model);
-      npcModel = character.model;
       if(window._IS_HOST === true){
         tpView.isHost = true;
         tpView.remoteControlled = false;
@@ -3336,5 +3388,4 @@ export function stopGame() {
     clearSceneObjects(scene);
     renderer?.dispose();
     container?.remove();
-
 }

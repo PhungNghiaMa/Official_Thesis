@@ -32,6 +32,12 @@ export default class ThirdPersonPlayer {
     this.isRunning = false ;
     this.isWalking = false ;  
 
+    // ADD THESE for physics optimization:
+    this._inputVector = new THREE.Vector3();
+    this._forward = new THREE.Vector3();
+    this._yawAxis = new THREE.Vector3(0, 1, 0);
+    this._dummyVec = new THREE.Vector3();
+
     // Start position inside building (adjust as needed)
     const start = new THREE.Vector3(0, 1, 0);
     this.playerCollider = playerCollider ?? new Capsule(
@@ -331,72 +337,223 @@ export default class ThirdPersonPlayer {
 
   update(delta) {
     if (!this.bvhReady || !this.model) return;
-    const friction = this.playerOnFloor ? 8 : 3;
-    let groundNormal = new THREE.Vector3(0, 1, 0); 
 
-    // --- gravity + damping (stable) ---
-    if (!this.playerOnFloor) {
-      this.playerVelocity.y -= this.gravity * delta;
-      // this.playerVelocity.multiplyScalar(Math.exp(-1.5 * delta));
-      this.playerVelocity.x -= this.playerVelocity.x * friction * delta;
-      this.playerVelocity.z -= this.playerVelocity.z * friction * delta;
-    } else {
-      this.playerVelocity.y = 0;
-      // this.playerVelocity.multiplyScalar(Math.exp(-10 * delta));
-      this.playerVelocity.x -= this.playerVelocity.x * friction * delta;
-      this.playerVelocity.z -= this.playerVelocity.z * friction * delta;
+    // Single-step physics update with variable delta (capped for safety)
+    const safeDelta = Math.min(delta, 0.1);
+    this._physicsStep(safeDelta);
+  }
+
+  // _physicsStep(dt) {
+  //   // ✅ VELOCITY-BASED MOVEMENT (instead of force-based)
+  //   // This prevents the "rocket launch" effect when frames drop
+    
+  //   const ACCELERATION = 20.0;  // How fast you reach top speed
+  //   const DECELERATION = 10.0;  // How fast you stop
+  //   const WALK_SPEED = 4.0;
+  //   const RUN_SPEED = 10.0;
+
+  //   // --- 1. Calculate desired Horizontal Velocity based on Inputs ---
+  //   const targetSpeed = this.input.run ? RUN_SPEED : WALK_SPEED;
+  //   const inputVector = new THREE.Vector3();
+
+  //   // Get forward direction relative to model
+  //   const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.model.quaternion).setY(0).normalize();
+
+  //   // Tank controls (turning)
+  //   const yawAxis = new THREE.Vector3(0, 1, 0);
+  //   if (this.input.left) {
+  //     this.model.rotateOnWorldAxis(yawAxis, this.turnRate * dt);
+  //   }
+  //   if (this.input.right) {
+  //     this.model.rotateOnWorldAxis(yawAxis, -this.turnRate * dt);
+  //   }
+
+  //   // Determine target direction
+  //   if (this.input.forward) {
+  //     inputVector.add(forward);
+  //   }
+  //   if (this.input.backward) {
+  //     inputVector.add(forward.clone().multiplyScalar(-0.5)); // Move backward slower
+  //   }
+
+  //   // Normalize input to ensure consistent speed
+  //   const isMoving = inputVector.lengthSq() > 0;
+  //   if (isMoving) inputVector.normalize();
+
+  //   const targetVelocity = inputVector.multiplyScalar(targetSpeed);
+
+  //   // --- 2. Smoothly interpolate Current Velocity -> Target Velocity ---
+  //   // This replaces the "addScaledVector" + "damping" logic
+  //   const factor = isMoving ? ACCELERATION : DECELERATION;
+  //   const lerpAlpha = 1.0 - Math.exp(-factor * dt);
+
+  //   this.playerVelocity.x = THREE.MathUtils.lerp(this.playerVelocity.x, targetVelocity.x, lerpAlpha);
+  //   this.playerVelocity.z = THREE.MathUtils.lerp(this.playerVelocity.z, targetVelocity.z, lerpAlpha);
+
+  //   // --- 3. Apply Gravity ---
+  //   if (!this.playerOnFloor) {
+  //     // Apply gravity when falling
+  //     this.playerVelocity.y -= this.gravity * dt;
+  //     // Clamp maximum fall speed to prevent overshoot (prevents tunneling)
+  //     this.playerVelocity.y = Math.max(this.playerVelocity.y, -10);
+  //   } else {
+  //     // When on floor, stop downward velocity
+  //     this.playerVelocity.y = 0;
+  //   }
+
+  //   // --- 4. Integrate Position ---
+  //   const deltaPos = this.playerVelocity.clone().multiplyScalar(dt);
+  //   this.playerCollider.translate(deltaPos);
+
+  //   // --- 5. Collision Resolution (BVH Shapecast) ---
+  //   this.playerOnFloor = false;
+  //   let hasCollided = false;
+
+  //   // Compute world AABB of the capsule
+  //   this._tmpMin.set(
+  //     Math.min(this.playerCollider.start.x, this.playerCollider.end.x) - this.playerCollider.radius,
+  //     Math.min(this.playerCollider.start.y, this.playerCollider.end.y) - this.playerCollider.radius,
+  //     Math.min(this.playerCollider.start.z, this.playerCollider.end.z) - this.playerCollider.radius
+  //   );
+  //   this._tmpMax.set(
+  //     Math.max(this.playerCollider.start.x, this.playerCollider.end.x) + this.playerCollider.radius,
+  //     Math.max(this.playerCollider.start.y, this.playerCollider.end.y) + this.playerCollider.radius,
+  //     Math.max(this.playerCollider.start.z, this.playerCollider.end.z) + this.playerCollider.radius
+  //   );
+  //   this._capsuleWorldBox.set(this._tmpMin, this._tmpMax);
+
+
+
+  //   for (const mesh of this.bvhMeshes) {
+  //     const bvh = mesh.geometry.boundsTree;
+  //     if (!bvh) continue;
+  //     if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(this._capsuleWorldBox)) continue;
+
+  //     this.tempBox.makeEmpty();
+  //     this.tempMat.copy(mesh.userData.invWorld);
+
+  //     this.tempSegment.copy(this.playerCollider);
+  //     this.tempSegment.start.applyMatrix4(this.tempMat);
+  //     this.tempSegment.end.applyMatrix4(this.tempMat);
+  //     this.tempBox.expandByPoint(this.tempSegment.start);
+  //     this.tempBox.expandByPoint(this.tempSegment.end);
+  //     this.tempBox.min.addScalar(this.playerCollider.radius * -1);
+  //     this.tempBox.max.addScalar(this.playerCollider.radius);
+
+  //     bvh.shapecast({
+  //       intersectsBounds: (box) => box.intersectsBox(this.tempBox),
+  //       intersectsTriangle: (tri) => {
+  //         const triPoint = new THREE.Vector3();
+  //         const capPoint = new THREE.Vector3();
+  //         const dist = tri.closestPointToSegment(this.tempSegment, triPoint, capPoint);
+  //         if (dist < this.playerCollider.radius) {
+  //           hasCollided = true;
+  //           const depth = this.playerCollider.radius - dist;
+  //           const pushDir = capPoint.sub(triPoint).normalize();
+  //           // Only push if depth is significant (avoid micro-corrections)
+  //           if (depth > 0) {
+  //             this.tempSegment.start.addScaledVector(pushDir, depth);
+  //             this.tempSegment.end.addScaledVector(pushDir, depth);
+  //           }
+  //           // Detect ground: only if pushing upward significantly
+  //           if (pushDir.y > 0.5) {
+  //             this.playerOnFloor = true;
+  //           }
+  //         }
+  //       }
+  //     });
+
+  //     this.playerCollider.start.copy(this.tempSegment.start).applyMatrix4(mesh.matrixWorld);
+  //     this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
+  //   }
+
+  //   // --- 6. Sync Visual Model ---
+  //   // Use smoothing to prevent jerky position updates from collision corrections
+  //   const targetY = this.playerCollider.start.y - this.playerCollider.radius + this.footOffset;
+  //   const positionSmoothFactor = 0.2; // Smooth out collision corrections
+    
+  //   this.model.position.x += (this.playerCollider.start.x - this.model.position.x) * positionSmoothFactor;
+  //   this.model.position.y += (targetY - this.model.position.y) * positionSmoothFactor;
+  //   this.model.position.z += (this.playerCollider.start.z - this.model.position.z) * positionSmoothFactor;
+
+  //   // Update smoothed position variable just for the camera to use
+  //   this._smoothedPlayerPosition.copy(this.model.position);
+
+  //   // Sync camera smoothing quaternion
+  //   this.tempQuaternion.copy(this.model.quaternion);
+
+  //   // --- 7. Update Animation ---
+  //   const speed = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z).length();
+  //   this.updateAnimationState(speed, this.input);
+  // }
+
+  // ThirdPersonPlayer.js — inside class ThirdPersonPlayer
+  
+  _physicsStep(dt) {
+    // Constants
+    const ACCELERATION = 20.0;
+    const DECELERATION = 10.0;
+    const WALK_SPEED = 4.0;
+    const RUN_SPEED = 10.0;
+
+    // --- 1. Calculate desired Horizontal Velocity ---
+    const targetSpeed = this.input.run ? RUN_SPEED : WALK_SPEED;
+    
+    // Reset reusable vector
+    this._inputVector.set(0, 0, 0);
+
+    // Get forward/right from model quaternion (optimized)
+    this._forward.set(0, 0, 1).applyQuaternion(this.model.quaternion).setY(0).normalize();
+
+    // Turn Logic
+    if (this.input.left) {
+      this.model.rotateOnWorldAxis(this._yawAxis, this.turnRate * dt);
+    }
+    if (this.input.right) {
+      this.model.rotateOnWorldAxis(this._yawAxis, -this.turnRate * dt);
     }
 
-    // --- input forces ---
-    const baseSpeed = this.playerOnFloor ? 11 : 10;
-    // Increase speed when the run button is pressed
-    const finalSpeed = this.input.run ? baseSpeed * 2.5 : baseSpeed; // Adjust multiplier (2.5) for desired speed
-    const speedDelta = delta * finalSpeed;
-
-    // Use model-forward for movement
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.model.quaternion).setY(0).normalize();
+    // Move Logic
     if (this.input.forward) {
-      this.playerVelocity.addScaledVector(forward, speedDelta);
+      this._inputVector.add(this._forward);
     }
     if (this.input.backward) {
-      this.playerVelocity.addScaledVector(forward, -speedDelta * 0.6); // slower backwards
+      // Create a temporary clone only if needed, or compute backward manually
+      this._dummyVec.copy(this._forward).multiplyScalar(-0.5); 
+      this._inputVector.add(this._dummyVec);
     }
 
-    // --- TURNING: rotate the model AND rotate horizontal velocity so momentum follows the facing direction
-    const yawAxis = new THREE.Vector3(0, 1, 0);
+    // Normalize
+    const isMoving = this._inputVector.lengthSq() > 0;
+    if (isMoving) this._inputVector.normalize();
 
-    if (this.input.left) {
-      const yawDelta = this.turnRate * delta;
-      // rotate model visually
-      this.model.rotateOnWorldAxis(yawAxis, yawDelta);
+    const targetVelocityX = this._inputVector.x * targetSpeed;
+    const targetVelocityZ = this._inputVector.z * targetSpeed;
 
-      // rotate horizontal velocity vector by same yaw so momentum stays aligned to model
-      const tmpVel = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z);
-      const yawQuat = new THREE.Quaternion().setFromAxisAngle(yawAxis, yawDelta);
-      tmpVel.applyQuaternion(yawQuat);
-      this.playerVelocity.x = tmpVel.x;
-      this.playerVelocity.z = tmpVel.z;
+    // --- 2. Smoothly interpolate Velocity ---
+    const factor = isMoving ? ACCELERATION : DECELERATION;
+    const lerpAlpha = 1.0 - Math.exp(-factor * dt);
+
+    this.playerVelocity.x = THREE.MathUtils.lerp(this.playerVelocity.x, targetVelocityX, lerpAlpha);
+    this.playerVelocity.z = THREE.MathUtils.lerp(this.playerVelocity.z, targetVelocityZ, lerpAlpha);
+
+    // --- 3. Apply Gravity ---
+    if (!this.playerOnFloor) {
+      this.playerVelocity.y -= this.gravity * dt;
+      this.playerVelocity.y = Math.max(this.playerVelocity.y, -15); // Increased terminal velocity slightly
+    } else {
+      this.playerVelocity.y = 0;
     }
 
-    if (this.input.right) {
-      const yawDelta = -this.turnRate * delta;
-      this.model.rotateOnWorldAxis(yawAxis, yawDelta);
+    // --- 4. Integrate Position ---
+    // Translate collider directly using reuse variable
+    this._dummyVec.set(this.playerVelocity.x * dt, this.playerVelocity.y * dt, this.playerVelocity.z * dt);
+    this.playerCollider.translate(this._dummyVec);
 
-      const tmpVel = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z);
-      const yawQuat = new THREE.Quaternion().setFromAxisAngle(yawAxis, yawDelta);
-      tmpVel.applyQuaternion(yawQuat);
-      this.playerVelocity.x = tmpVel.x;
-      this.playerVelocity.z = tmpVel.z;
-    }
-
-    // --- integrate position ---
-    const deltaPos = this.playerVelocity.clone().multiplyScalar(delta);
-    this.playerCollider.translate(deltaPos);
-
-    // --- collisions (your existing shapecast; make sure it sets playerOnFloor) ---
+    // --- 5. Collision Resolution (BVH) ---
     this.playerOnFloor = false;
-
-    // compute world AABB of the capsule
+    
+    // Update Capsule World Box
     this._tmpMin.set(
       Math.min(this.playerCollider.start.x, this.playerCollider.end.x) - this.playerCollider.radius,
       Math.min(this.playerCollider.start.y, this.playerCollider.end.y) - this.playerCollider.radius,
@@ -434,86 +591,39 @@ export default class ThirdPersonPlayer {
           if (dist < this.playerCollider.radius) {
             const depth = this.playerCollider.radius - dist;
             const pushDir = capPoint.sub(triPoint).normalize();
-            this.tempSegment.start.addScaledVector(pushDir, depth);
-            this.tempSegment.end.addScaledVector(pushDir, depth);
-            if (pushDir.y > 0.1){
+            if (depth > 0) {
+              this.tempSegment.start.addScaledVector(pushDir, depth);
+              this.tempSegment.end.addScaledVector(pushDir, depth);
+            }
+            if (pushDir.y > 0.5) {
               this.playerOnFloor = true;
-              groundNormal.copy(pushDir);
-            } 
+            }
           }
         }
       });
 
       this.playerCollider.start.copy(this.tempSegment.start).applyMatrix4(mesh.matrixWorld);
       this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
-
-      // --- After updating playerCollider.start/end with shapecast result ---
-      const correctedMovement = this.tempSegment.start.clone().applyMatrix4(mesh.matrixWorld)
-          .sub(this.playerCollider.start);
-
-      if (correctedMovement.lengthSq() > 0) {
-          // remove velocity component into collision surface
-          const pushDir = correctedMovement.clone().normalize();
-          const vDot = this.playerVelocity.dot(pushDir);
-          if (vDot < 0) {
-              this.playerVelocity.addScaledVector(pushDir, -vDot);
-          }
-      }
-
     }
 
-    // clamp extremely small horizontal velocity to zero to avoid micro-drift
-    const horiz = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
-    if (horiz < 0.001) {
-      this.playerVelocity.x = 0;
-      this.playerVelocity.z = 0;
-    }
-
-    // ... inside update(delta) ...
-
-    // --- 8. Visual Sync & Floating Fix ---
-    const smoothing = 1.0 - Math.exp(-20 * delta); // Strong smoothing for position
-    this._smoothedPlayerPosition.lerp(this.playerCollider.start, smoothing);
-
-    // 🛠️ TUNING: Global vertical offset. 
-    // If character floats on FLAT ground, decrease this (-0.02, -0.05).
-    // If feet sink into ground, increase this.
-    const BASE_OFFSET = -0.05; 
-
-    // 🛠️ TUNING: Extra offset for SLOPES/STAIRS
-    // Ramps often need more "downward" correction because the collider tangent is higher than the visual pivot.
-    let slopeOffset = 0;
-    if (this.playerOnFloor && groundNormal.y < 0.98) { // Trigger on any non-flat surface
-        slopeOffset = -0.02 * groundNormal.y; // Stronger push down for stairs
-    }
-
+    // --- 6. Sync Visual Model (THE CRITICAL FIX) ---
+    // Do NOT lerp/smooth the model position. The collider is the source of truth.
+    // Snap directly to it. The "smoothness" comes from the velocity lerp in Step 2.
+    
     this.model.position.set(
-      this._smoothedPlayerPosition.x,
-      // Formula: Collider Bottom Y + Foot Offset + Manual Tweaks
-      this.playerCollider.start.y - this.playerCollider.radius + this.footOffset + BASE_OFFSET + slopeOffset,
-      this._smoothedPlayerPosition.z
+        this.playerCollider.start.x,
+        this.playerCollider.start.y - this.playerCollider.radius + this.footOffset,
+        this.playerCollider.start.z
     );
 
-    // smooth model rotation for camera
-    this.tempQuaternion.slerp(this.model.quaternion, 1.0 - Math.exp(-5 * delta));
+    // Update smoothed position variable used by Camera
+    this._smoothedPlayerPosition.copy(this.model.position);
+    this.tempQuaternion.copy(this.model.quaternion);
 
-    // play/pause walk (mixer is advanced once per frame in animate())
-    // --- Animation state handling ---
-    const speed = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z).length();
-
-    if (!this.input.forward && !this.input.backward && !this.input.left && !this.input.right) {
-      const horiz2 = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
-      if (horiz2 < 0.02) { // tiny threshold to kill float error
-        this.playerVelocity.x = 0;
-        this.playerVelocity.z = 0;
-      }
-    }
-
-    // reuse central logic
+    // --- 7. Update Animation ---
+    const speed = new THREE.Vector2(this.playerVelocity.x, this.playerVelocity.z).length();
     this.updateAnimationState(speed, this.input);
   }
-
-  // ThirdPersonPlayer.js — inside class ThirdPersonPlayer
   
   startFollowAgent(npcEntry, options = {}) {
     this.isTouring = true;

@@ -338,7 +338,7 @@ export default class FirstPersonPlayer {
     const head = this.playerCollider.end;
 
     // Offset camera slightly behind head, creates arc swing
-    const camOffset = new THREE.Vector3(0, 0.1, -0.2).applyQuaternion(this._orientQuat);
+    const camOffset = new THREE.Vector3(0, 0.5, -0.2).applyQuaternion(this._orientQuat);
     const finalPos = head.clone().add(camOffset);
 
     if (!this._cameraSnapped) {
