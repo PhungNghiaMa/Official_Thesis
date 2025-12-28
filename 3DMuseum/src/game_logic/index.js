@@ -1,9 +1,4 @@
 // src/game_logic/index.js
-// This file handles the core game logic for the 3D museum experience.
-// It manages player controls, NPC interactions, multiplayer synchronization,
-// audio and video playback, level of detail (LOD) adjustments, and scene rendering.
-// The code integrates Three.js for 3D graphics, handles physics with colliders,
-// and supports both first-person and third-person camera views.
 
 // import "../../main.css";
 
@@ -79,27 +74,23 @@ let targetProgress = 0;
 let ambientLight , hemiLight , spot1 , spot2 , sun;
 
 // NPC 
-let npcModel = null;
-let agent = null;
-window.THREE = THREE; // expose for debugging
-window.getAgents = getAgents();
 
 // instance for post-processing
 let composer , outlinePass , renderPass;
+let currentlyHoveredObject = null;
 
 // put these once near your input setup in index.js
 let camYaw = 0;
 let camPitch = 0;
 
-// Audio instance and caches
-export const  audioCache = new Map(); // CID -> AudioBuffer
-const audioRawCache = new Map(); 
-let audioContext = null;
-let currentSourceNode = null; // Keep track of the currently playing source for potential stopping
-const lastAudioPos = new THREE.Vector3();
-const lastAudioQuat = new THREE.Quaternion();
+// NPC instance 
+let museumNPC = null;
+let agent = null;
+window.THREE = THREE; // expose for debugging
+window.getAgents = getAgents();
 
-const audioCtx = new window.AudioContext();
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 window.audioCtx = audioCtx
 
 // Keep references for updates
@@ -120,6 +111,7 @@ let navMesh = null;
 let crowd = null;
 const npcAgents = [];
 
+const navInputSet = new Set();   // meshes to feed into recast (floor + obstacles)
 const bvhMeshList = [];          // meshes used for BVH raycasts (ground snap + capsule checks)
 const navInputMeshes = [];   // meshes we will pass to recast
 let  pictureFramesArray = [];
@@ -240,7 +232,7 @@ let interactedDoor;
 export const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_21.glb",
+    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_NEW_5.glb",
     [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
@@ -256,15 +248,12 @@ let container, cssRenderer, css3dRenderer, renderer, camera;
 let animationFrameId = null;
 
 
-// This function adjusts the camera and renderers when the window is resized.
-// It updates the camera's aspect ratio, projection matrix, and resizes all renderers
-// to match the new container dimensions, ensuring the scene looks correct on different screen sizes.
 function onWindowResize() {
     if (!container || !camera || !renderer || !cssRenderer || !css3dRenderer) return;
 
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
-    // camera.position.set(0,0,0);
+    camera.position.set(0,0,0);
 
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setClearColor(new THREE.Color("#f0f0f0"), 1); // Color and full opacity
@@ -274,28 +263,24 @@ function onWindowResize() {
     if (outlinePass) outlinePass.setSize(container.clientWidth, container.clientHeight);
 }
 
-// This function hides all annotation labels by setting their opacity to 0.
-// Useful when the player needs a clear view without UI elements obstructing the scene.
 function hideAnnotations() {
     Object.values(annotationMesh).forEach(({ label }) => {
         if (label && label.element) label.element.style.opacity = "0";
     });
 }
 
-// This function shows all annotation labels by setting their opacity to 100%.
-// Called when annotations should be visible again, such as after releasing a key.
 function showAnnotations() {
     Object.values(annotationMesh).forEach(({ label }) => {
         if (label && label.element) label.element.style.opacity = "100";
     });
 }
 
-// This function initializes and returns the Web Audio API context.
-// It tries to create an AudioContext or webkitAudioContext for browser compatibility.
-// If creation fails, it logs an error and returns null.
-// This function initializes and returns the Web Audio API context.
-// It tries to create an AudioContext or webkitAudioContext for browser compatibility.
-// If creation fails, it logs an error and returns null.
+// Audio instance 
+export const  audioCache = new Map();
+export const audioRawCache = new Map();       // CID -> ArrayBuffer (raw)
+let audioContext = null;
+let currentSourceNode = null; // Keep track of the currently playing source for potential stopping
+
 function getAudioContext() {
     if (audioContext === null) {
         // 1. Get the correct constructor: use the standard one, 
@@ -326,10 +311,6 @@ function getAudioContext() {
 // document.body.appendChild(hostBtn);
 
 
-// This function prefetches audio data for a given CID (Content Identifier).
-// It fetches the audio file from IPFS, decodes it in the background using requestIdleCallback,
-// and stores the decoded buffer in audioCache for quick playback later.
-// If already cached, it skips fetching.
 export async function prefetchAudio(audioCID) {
   if (!audioCID) return null;
   if (audioCache.has(audioCID) || audioRawCache.has(audioCID)){
@@ -365,10 +346,6 @@ export async function prefetchAudio(audioCID) {
   }
 }
 
-// This function plays the audio associated with a given CID.
-// It retrieves the decoded audio buffer from cache, creates a source node,
-// connects it to the audio context destination, and starts playback.
-// If the context is suspended, it resumes it. Stops any currently playing audio first.
 export async function playAudio(audioCID) {
   const context = getAudioContext();
   if (!context) return;
@@ -416,9 +393,6 @@ export async function playAudio(audioCID) {
   currentSourceNode = source;
 }
 
-// This function stops the currently playing audio source node.
-// It disconnects and stops the source, then sets it to null.
-// Logs a message confirming the audio has been stopped.
 export function stopAudio() {
     if (currentSourceNode) {
         currentSourceNode.stop();
@@ -427,9 +401,6 @@ export function stopAudio() {
     }
 }
 
-// This event listener resumes the audio context on the first user click.
-// Many browsers require user interaction to start audio playback.
-// It removes itself after the first execution to avoid repeated calls.
 document.addEventListener("click", () => {
     const context = getAudioContext();
     if (context && context.state !== 'running') {
@@ -441,10 +412,6 @@ document.addEventListener("click", () => {
 
 
 // NOTE: Make sure ktx2Loader and renderer are defined and accessible in the scope.
-// This function loads a KTX2 compressed texture and applies it to a mesh in the scene.
-// It finds the mesh by name, disposes of the old material and texture,
-// creates a new MeshStandardMaterial with the loaded texture, and updates the mesh.
-// Handles errors during loading and logs them.
 function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgURL for clarity
 
   // Use the KTX2Loader instance
@@ -487,10 +454,6 @@ function setImageToMeshKTX2(scene, meshName, imgURL) { // Renamed imgUrl to imgU
 }
 
 
-// This function cleans up HLS video resources.
-// It stops loading, detaches the media, destroys the HLS instance,
-// pauses the video, removes the src, loads it to free resources, and removes it from DOM.
-// Handles errors gracefully and logs warnings.
 async function destroyVideoAndHls(hls, video) {
   try {
     if (hls) {
@@ -518,9 +481,6 @@ async function destroyVideoAndHls(hls, video) {
   }
 }
 
-// This event listener cleans up video and HLS resources when the page is unloaded.
-// It ensures that ongoing video playback is properly stopped and resources are freed
-// to prevent memory leaks or background activity.
 window.addEventListener('beforeunload', () => {
   if (mesh.userData?.hls || mesh.userData?.videoElement) {
     destroyVideoAndHls(mesh.userData.hls, mesh.userData.videoElement);
@@ -530,11 +490,6 @@ window.addEventListener('beforeunload', () => {
 
 
 // Function to set HLS video to mesh 
-// This function sets up HLS video playback on a mesh in the scene.
-// It finds the mesh by name, cleans up any existing HLS and video,
-// creates a new video element with HLS configuration, attaches the media,
-// sets up spatial audio with panner nodes, and applies the video texture to the mesh material.
-// Handles manifest parsing, error recovery, and automatic playback.
 function setVideoToMeshHLS(scene, meshName, hlsURL) {
   // 1. Find the mesh
   const mesh = scene.getObjectByName(meshName);
@@ -577,6 +532,7 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
   video.playsInline = true;
   video.crossOrigin = 'anonymous';
   video.style.display = 'none';
+
   
   // Store reference for later cleanup
   mesh.userData.videoElement = video;
@@ -585,7 +541,8 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
 
   let hls;
   let masterURL = hlsURL + "/master.m3u8";
-
+  let streamURL = hlsURL + "/stream.m3u8";
+  let isLoadingMaster = true;
   if (Hls.isSupported()) {
     const hlsConfig = {
       startLevel: 0,             // Start at lowest quality for fast load
@@ -603,7 +560,7 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
     hls = new Hls(hlsConfig);
     mesh.userData.hlsInstance = hls; // Store for cleanup
 
-    hls.loadSource(masterURL);
+    hls.loadSource(masterURL)
     hls.attachMedia(video);
 
     hls.on(Hls.Events.MANIFEST_PARSED, function() {
@@ -623,7 +580,17 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
             console.warn("HLS Network error, trying to recover...");
-            hls.startLoad();
+            if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
+                // Try reloading the stream URL on network errors
+                if (hls.url != streamURL) {
+                  hls.loadSource(streamURL);
+                  hls.startLoad();
+                }else{
+                  console.error("❌ Failed to load HLS stream after master. Destroying instance.");
+                }     
+            }else{
+              hls.startLoad(); // Retry other network errors
+            }
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
             console.warn("HLS Media error, trying to recover...");
@@ -701,10 +668,6 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
   video.addEventListener('canplay', onCanPlay, { once: true });
 }
 // Listen for custom upload events to update annotations
-// This event listener handles custom upload events to update annotations.
-// When an asset is uploaded, it updates the corresponding annotation div
-// with new title, descriptions, and potentially the image URL.
-// Listens for "uploadevent" on the document body.
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
 
@@ -717,8 +680,6 @@ document.body.addEventListener("uploadevent", (event) => {
     }
 });
 
-// Initialize the main WebGL renderer with antialiasing, alpha support, and high-performance settings.
-// This renderer handles the 3D scene rendering with proper color space and tone mapping.
 renderer = new THREE.WebGLRenderer({ antialias: true, alpha:true, powerPreference: 'high-performance'});
 
 // DRACO LOADER + KTX2 LOADER 
@@ -733,19 +694,16 @@ const ktx2Loader = new KTX2Loader();
 ktx2Loader.setTranscoderPath('/basis/');
 ktx2Loader.detectSupport(renderer);
 
-// Main model loader with Draco and KTX2 support
+// Main model loader 
 const loader = new GLTFLoader(LoadingManager).setPath('/assets/');
 loader.setDRACOLoader(dracoLoader);
 loader.setKTX2Loader(ktx2Loader);
 
-// Character model loader with Draco and KTX2 support
+// Character model loader 
 const characterLoader = new GLTFLoader().setPath('/assets/');
 characterLoader.setDRACOLoader(dracoLoader);
 characterLoader.setKTX2Loader(ktx2Loader);
 
-// This function detects the initial Level of Detail (LOD) based on network conditions.
-// It checks for slow networks, data saver mode, and downlink speed to set appropriate texture bias.
-// Helps optimize performance on lower-end devices or slow connections.
 function detectInitialLOD(bandWidth){
   if ('connection' in navigator && navigator.connection){
     const  conn = navigator.connection || navigator.webkitConnection;
@@ -763,9 +721,6 @@ function detectInitialLOD(bandWidth){
   }
 }
 // applyTextureLODInitial use to set up the material at the initial loadtime 
-// This function applies initial texture LOD settings to a material.
-// It sets the mipmap bias and anisotropy based on the provided bias value,
-// adjusting texture quality for performance or detail as needed.
 function applyTextureLODInitial(material , mipMapBias){
   if (!material || !renderer || !renderer.capabilities) return;
   if (material.map && material.map.isTexture) {
@@ -781,46 +736,53 @@ function applyTextureLODInitial(material , mipMapBias){
   }
 }
 
+function applyTextureLOD(mipMapBias) {
+    if (!scene || !renderer) return; // Ensure scene/renderer are available
 
+    scene.traverse((object) => {
+        if (object.isMesh) {
+            const material = object.material;
+            // Handle both single material and array of materials
+            const materials = Array.isArray(material) ? material : [material];
 
-// This function adjusts the runtime Level of Detail based on current FPS.
-// If FPS drops below the minimum acceptable, it switches to low quality.
-// If above target, it uses high quality. Otherwise, medium.
-// Applies the new tier if it changes.
-function adjustRuntimeLOD(fps) {
-  let newTier = currentLODTier;
+            materials.forEach(mat => {
+                // We only care about main texture maps that are loaded (like user uploads)
+                if (mat.map && mat.map.isTexture) {
+                    // Check if the texture is a KTX2/compressed texture (by format)
+                    if (mat.map.format) {
+                        mat.map.mipMapBias = mipMapBias;
+                        
+                        // Also adjust anisotropy (texture filtering quality)
+                        // Lower bias for high quality, higher bias for performance
+                        mat.map.anisotropy = (mipMapBias > 0) ? 4 : window.renderer.capabilities.getMaxAnisotropy();
+                        
+                        mat.map.needsUpdate = true;
+                    }
+                }
+            });
+        }
+    });
+}
 
-  if (fps < LOD_SETTINGS.minAcceptableFPS) {
-    newTier = LOD_SETTINGS.LOW;
-  } else if (fps < LOD_SETTINGS.targetFPS) {
-    newTier = LOD_SETTINGS.MEDIUM;
-  } else {
-    newTier = LOD_SETTINGS.HIGH;
+function checkAndAdjustLOD(currentFPS){
+  let newBias = LOD_SETTINGS.currentBias;
+  const BIAS_STEP = 0.5;
+  const {minAcceptableFPS , targetFPS , HIGH , LOW} = LOD_SETTINGS
+  // FPS DROP --> DEGRADE MATERIAL QUALITY
+  // Try to tune the newBias so it can dynamically catch up with the network status
+  // If the FPS is low then the acceptable FPS , mean that network still low and therefore set the low standard at newbias 
+  if (minAcceptableFPS > currentFPS){
+    newBias = Math.min(newBias , newBias + BIAS_STEP);
+  }else{ // Else set the newbias higher so it can exactly reflect the network enhancement 
+    newBias = Math.max(newBias , newBias + BIAS_STEP);
   }
-
-  if (newTier !== currentLODTier) {
-    currentLODTier = newTier;
-    applyRuntimeLOD(newTier);
+  // If the newBias different ( can be lower or higher then initial LOD_SETTING.currentBias then try to announce to the program to dynamically tune the material )
+  if (newBias != LOD_SETTINGS.currentBias){
+    LOD_SETTINGS.currentBias = newBias;
+    applyTextureLOD(newBias);
   }
 }
 
-// This function applies the runtime LOD tier to picture frames.
-// It sets the lodDistSq based on the tier: closer distances for lower quality to hide distant frames.
-function applyRuntimeLOD(tier) {
-  const distSq =
-    tier === LOD_SETTINGS.HIGH ? 25 :
-    tier === LOD_SETTINGS.MEDIUM ? 16 :
-    9;
-
-  for (const frame of pictureFramesArray) {
-    frame.userData.lodDistSq = distSq;
-  }
-}
-
-
-// This function recursively clears and disposes of all objects in the scene.
-// It stops animations, disposes geometries and materials, resets door states,
-// and clears various arrays and caches to free memory.
 function clearSceneObjects(obj) {
     if (mixer) {
         mixer.stopAllAction();
@@ -850,9 +812,6 @@ function clearSceneObjects(obj) {
     currentScene = null;
 }
 
-// This function checks if the player is near a door and if it's open.
-// If the player is within 4 units of the door bounding box and the door is open,
-// it sets a flag to enter a new scene and switches to the next museum model.
 function checkPlayerPosition() {
     if (doorBoundingBox && !hasEnteredNewScene && hasLoadPlayer) {
         const playerPosition = fpView.getPlayerPosition();
@@ -864,9 +823,6 @@ function checkPlayerPosition() {
     }
 }
 
-// This function updates the audio listener's position and orientation based on the active player.
-// It sets the listener's position and orientation in 3D space for spatial audio.
-// Supports both first-person and third-person views.
 function checkCurrentPosition() {
   let playerPosition = null;
   let playerQuaternion = null;
@@ -893,12 +849,9 @@ function checkCurrentPosition() {
   }
 }
 
-// This function updates spatial audio for all sources in the scene.
-// It checks if the camera has moved enough to warrant updates, then updates listener position,
-// and manages video playback based on distance to the player.
-// Videos play when within 5 meters and pause when farther, with hysteresis to prevent flickering.
+const lastAudioPos = new THREE.Vector3();
+const lastAudioQuat = new THREE.Quaternion();
 function updateSpatialAudio(scene) {
-
   // Check if camera moved enough to warrant an update
   if (camera.position.distanceToSquared(lastAudioPos) < 0.01 && 
       camera.quaternion.angleTo(lastAudioQuat) < 0.01) {
@@ -931,9 +884,6 @@ function updateSpatialAudio(scene) {
     }
 
     // --- 🔊 DISTANCE CHECK LOGIC ---
-    // This section handles when to play or pause spatial audio based on player proximity.
-    // It uses a hysteresis mechanism with lastExitTimes to prevent rapid on/off switching
-    // when the player is near the boundary. Videos restart from beginning if away for more than 5 seconds.
     const lastExitTimes = {}; 
 
     if (video) {
@@ -964,9 +914,6 @@ function updateSpatialAudio(scene) {
   }
 }
 
-// This function updates the visibility of props (like picture frames) based on distance and FPS.
-// It runs every 30 frames to optimize performance, hiding distant frames if FPS is low.
-// Uses squared distance for efficiency.
 function updatePropVisibility() {
     // Only run this check every 30 frames (0.5 seconds)
     if (LOD_SETTINGS.frames % 30 !== 0) return;
@@ -986,10 +933,6 @@ function updatePropVisibility() {
 
 
 // Material Tuning Function
-// This function tunes a material for optimal rendering in the scene.
-// It upgrades non-PBR materials to MeshStandardMaterial, enables shadows,
-// clamps roughness and metalness, sets environment intensity, and applies LOD-based texture settings.
-// Also handles UV2 for AO maps and normal scales.
 // function tuneMaterial(material) {
 //     if (!material) return null; 
 
@@ -1124,9 +1067,7 @@ function tuneMaterial(material) {
     return material;
 }
 
-// This function ensures UV2 coordinates exist for AO/lightmaps on geometries.
-// If UV2 is missing but UV exists, it copies UV to UV2.
-// Updates the buffer attribute to ensure AO maps work correctly.
+// ENSURE UV2 EXISTS FOR AO/LIGHTMAPS IF AO MAPS ARE PRESENT
 function ensureUV2ForAO(geometry) {
   if (!geometry) return;
   if (!geometry.attributes.uv2 && geometry.attributes.uv) {
@@ -1136,34 +1077,14 @@ function ensureUV2ForAO(geometry) {
 }
 
 // FUNCTION TO INIT NPC
-// This function initializes an NPC (Non-Player Character) in the scene.
-// It clones the character model, sets up materials for debugging (green wireframe),
-// creates animation controllers, positions the NPC on the navmesh,
-// computes foot offset, and registers it as a crowd agent for pathfinding.
-// Returns an object with the model, agent, and movement parameters.
-export async function initNPC(scene, navQuery, bvhMeshes) {
+export function initNPC(scene, navQuery, bvhMeshes) {
   if (!navQuery) {
     console.warn("initNPC: Nav query not ready yet — NPC init may fail.");
   }
-  if (characterModel && !npcModel){
-    // Clone base character model
-    npcModel = SkeletonUtils.clone(characterModel);
-  }else if (!characterModel && !npcModel){
-    async function reloadNpcModel() {
-      for (let i = 0 ; i<=3 ; i++){
-        setTimeout(() => {
-          if (characterModel && !npcModel){
-            npcModel = SkeletonUtils.clone(characterModel);
-          }
-        }, i*1000);
-      }
-    }
-    reloadNpcModel();
-  }
 
-  console.warn ("NPC MODEL BEFORE ADDING TO SCENE:", npcModel);
+  // Clone base character model
+  const npcModel = SkeletonUtils.clone(characterModel);
   npcModel.updateMatrixWorld(true);
-
 
   // 🐛 --- DEBUG MODIFICATION START ---
   // Create one debug material to reuse
@@ -1174,7 +1095,6 @@ export async function initNPC(scene, navQuery, bvhMeshes) {
 
   npcModel.traverse((child) => {
     if (child.isMesh) {
-      child.frustumCulled = true;
       child.castShadow = true;
       child.receiveShadow = true;
       if (Array.isArray(child.material)) {
@@ -1350,10 +1270,7 @@ export async function initNPC(scene, navQuery, bvhMeshes) {
   return { model: npcModel, agent, walkSpeed: 2.6, runSpeed: 6.0, state: { mode: 'idle' }, requestedGait: null };
 }
 
-// This function sets the player agent to follow the NPC at an appropriate offset.
-// It calculates the best position beside or behind the NPC using navmesh checks,
-// ensuring the path is valid and not blocked by obstacles.
-// Updates the follow side preference for future decisions.
+// index.js — replace setPlayerFollowTarget with the version below
 function setPlayerFollowTarget(playerAgent, npc, navQuery) {
   if (!playerAgent || !npc || !npc.model || !npc.agent || !navQuery) return;
 
@@ -1451,10 +1368,6 @@ function setPlayerFollowTarget(playerAgent, npc, navQuery) {
   } catch (e) {}
 }
 
-// This function animates the loading progress bar smoothly.
-// It incrementally updates the progress towards the target,
-// adjusting the visual fill and percentage text.
-// Uses requestAnimationFrame for smooth animation.
 function animateProgress() {
   if (currentProgress < targetProgress) {
     // Maximum speed per frame (e.g. ~0.5% per frame at 60fps = ~30%/s)
@@ -1497,9 +1410,7 @@ function animateProgress() {
   }
 }
 
-// This function computes the length of a navigation path between two points.
-// It uses the navQuery to compute the path and sums the distances between points.
-// Returns 0 if no path is found or computation fails.
+// --------- helper: compute nav path length (meters) ----------
 function computeNavPathLength(navQuery, startPoint, endPoint) {
   if (!navQuery || !startPoint || !endPoint) return 0;
   try {
@@ -1516,8 +1427,6 @@ function computeNavPathLength(navQuery, startPoint, endPoint) {
   }
 }
 
-// This function measures bandwidth based on load time and bytes transferred.
-// Converts to Mbps, useful for adjusting LOD based on connection speed.
 function measureBandwidth(enlapsedTime , totalBytes){
   const totalLoadTime = enlapsedTime / 1000 // Convert from ms to s
   const bandWidth = (totalBytes / 1048576) * 8 / totalLoadTime // 1Bytes = 1024 * 1024 MBytes ; 1MBytes = 8Mbits
@@ -1526,12 +1435,6 @@ function measureBandwidth(enlapsedTime , totalBytes){
 
 
 // src/game_logic/index.js
-// This function loads the 3D model for the museum scene.
-// It clears the previous scene, sets up lighting and environment,
-// loads the GLTF model, traverses and processes meshes (floors, picture frames, etc.),
-// initializes navigation, crowd simulation, and players.
-// Also sets up colliders for physics interaction.
-// Parallel loads character model and API assets for efficiency.
 async function loadModel() {
 
     if (fpView) {
@@ -1592,13 +1495,6 @@ async function loadModel() {
 
     scene.background = new THREE.Color("#f0f0f0"); // Set a neutral background color
 
-    // // Set up geometry LOD 
-    // const lod = new THREE.LOD();
-    // lod.addLevel(highMesh, 0);
-    // lod.addLevel(medMesh, 10);
-    // lod.addLevel(lowMesh, 20);
-    // scene.add(lod);
-
 
     try {
         // MEASURE BANDWIDTH
@@ -1642,44 +1538,28 @@ async function loadModel() {
         // 3. Load third view character
         const loadModelCharacterPromise = characterLoader.loadAsync('optimizedModel/ANIMATED_1.glb');
         // Try to load the characterModel in background, but don't block scene loading on it.
-        // loadModelCharacterPromise.then((gltf) => {
-        //     characterGLTF = gltf;
-        //     characterModel = gltf.scene;
-        //     characterModelReady = true;
-        //     if(tpView){
-        //         tpViewExisted = true;
-        //         tpViewLoadLate = false;
-        //         tpView.handleAnimation(characterModel, characterGLTF);
-        //         console.info("Finish handle character model using handleAnimation() function in ThirdPersonPlayer.js")
-        //     }else{
-        //         tpViewExisted = false;
-        //         tpViewLoadLate = true;
-        //         // Store to call in the activateThirdPerson()
-        //         character = {model: characterModel, gltf: characterGLTF}
-        //     }
-        // }).catch((error) => {
-        //     console.error('Error loading character model:', error);
-        // });
+        loadModelCharacterPromise.then((gltf) => {
+            characterGLTF = gltf;
+            characterModel = gltf.scene;
+            characterModelReady = true;
+            if(tpView){
+                tpViewExisted = true;
+                tpViewLoadLate = false;
+                tpView.handleAnimation(characterModel, characterGLTF);
+                console.info("Finish handle character model using handleAnimation() function in ThirdPersonPlayer.js")
+            }else{
+                tpViewExisted = false;
+                tpViewLoadLate = true;
+                // Store to call in the activateThirdPerson()
+                character = {model: characterModel, gltf: characterGLTF}
+            }
+        }).catch((error) => {
+            console.error('Error loading character model:', error);
+        });
 
         // 3. Wait for BOTH promises to complete simultaneously.
-        // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
-        const [items , gltf , charGLTF] = await Promise.all([getAssetsPromise ,loadModelPromise , loadModelCharacterPromise]);
-
-        // ✅ ASSIGN CHARACTER VARIABLES IMMEDIATELY
-        characterGLTF = charGLTF;
-        characterModel = charGLTF.scene;
-        characterModelReady = true;
-
-        // Update tpView logic since we now know the character is ready
-        if (tpView) {
-            tpViewExisted = true;
-            tpViewLoadLate = false;
-            tpView.handleAnimation(characterModel, characterGLTF);
-        } else {
-            tpViewExisted = false;
-            tpViewLoadLate = true; // Setup for activateThirdPerson later
-            character = { model: characterModel, gltf: characterGLTF };
-        }
+        const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
+        // const [gltf] = await Promise.all([loadModelPromise]);
 
 
         // Clear map before use 
@@ -1739,119 +1619,116 @@ async function loadModel() {
             console.log('Found TourTarget:', child.name, '=> maps to', frameName);
           }
             
-          child.updateMatrixWorld(true);
-          bvhMeshList.push(child);
+            child.updateMatrixWorld(true);
+            bvhMeshList.push(child);
 
-          child.receiveShadow = true;
-          child.updateMatrixWorld(true);
+            child.receiveShadow = true;
+            child.updateMatrixWorld(true);
 
-          // if (Array.isArray(child.material)) {
-          //     child.material = child.material.map(tuneMaterial);
-          // } else {
-          //     child.material = tuneMaterial(child.material); 
-          // }
+            if (Array.isArray(child.material)) {
+                child.material = child.material.map(tuneMaterial);
+            } else {
+                child.material = tuneMaterial(child.material); 
+            }
 
-          ensureUV2ForAO(child.geometry);
+            ensureUV2ForAO(child.geometry);
 
-          if(child.userData && child.userData.navWalkable || child.userData.navObstacle){
-              navInputMeshes.push(child);
-          }
+            if(child.userData && child.userData.navWalkable || child.userData.navObstacle){
+                navInputMeshes.push(child);
+            }
 
             // if (child.isObject3D) {
             //   console.log("Found an empty object of type Object3D:", child.name);
             // }
 
-          if (child.isMesh) {
-            // Setup the metadata for video texture handling
-              child.userData.hlsInstance = null; // initialize hlsInstance to null
-              child.userData.videoElement = null; // initialize videoElement to null
-              child.frustumCulled = true;
+            if (child.isMesh) {
+              // Setup the metadata for video texture handling
+                child.userData.hlsInstance = null; // initialize hlsInstance to null
+                child.userData.videoElement = null; // initialize videoElement to null
 
-              console.log('CHILD MESH NAME:', child.name);
-              child.userData.navWalkable = false;
-              child.userData.navObstacle = true;
-              
-              if(child.name.toLowerCase() === "stair"){
-                child.userData.navWalkable = true;
-                child.userData.navObstacle = false;
-              }
+                console.log('CHILD MESH NAME:', child.name);
+                child.userData.navWalkable = false;
+                child.userData.navObstacle = true;
 
-              if (child.name.toLowerCase().includes("visual_stair")){
-                return; // skip visual_stair from navmesh consideration
-              }
+                if (child.name.toLowerCase().includes("floor")) {
+                    child.userData.navWalkable = true;
+                    child.userData.navObstacle = false;
+                } else {
+                    // By default, every other mesh is considered an obstacle.
+                    child.userData.navWalkable = false;
+                    child.userData.navObstacle = true;
+                }
 
-              // Second, now that properties are set, check if it should be part of the navmesh.
-              if (child.userData.navWalkable || child.userData.navObstacle) {
-                  navInputMeshes.push(child);
-              }
-              // --- END OF CORRECTED LOGIC ---
+                // Second, now that properties are set, check if it should be part of the navmesh.
+                if (child.userData.navWalkable || child.userData.navObstacle) {
+                    navInputMeshes.push(child);
+                }
+                // --- END OF CORRECTED LOGIC ---
 
-              // DEBUG FUNCTION
-              const pos = new THREE.Vector3();
-              child.getWorldPosition(pos);
-              child.receiveShadow = true;
-              if (pos.y < fallbackY) {
-                  fallbackY = pos.y;
-                  fallbackX = pos.x;
-                  fallbackZ = pos.z;
-              }
+                // DEBUG FUNCTION
+                const pos = new THREE.Vector3();
+                child.getWorldPosition(pos);
+                child.receiveShadow = true;
+                if (pos.y < fallbackY) {
+                    fallbackY = pos.y;
+                    fallbackX = pos.x;
+                    fallbackZ = pos.z;
+                }
 
 
-              if (child.name.toLowerCase().includes("floor")) {
-                  child.userData.navWalkable = true;
-                  child.userData.navObstacle = false;
-                  child.receiveShadow = true;
-                  // console.log("Floor bbox: ", child.geometry.boundingBox)
-                  // console.log("FLOOR POSITION IS: ",child.position.x, child.position.y, child.position.z)
-                  const box = new THREE.Box3().setFromObject(child);
-                  const size = box.getSize(new THREE.Vector3());
-                  const area = size.x * size.z;
-                  if (area > maxArea) {
-                      maxArea = area;
-                      floorMesh = { box, center: box.getCenter(new THREE.Vector3()) };
-                      floorBoxMaxY = box.max.y;
-                  }
-              }
+                if (child.name.toLowerCase().includes("floor")) {
+                    child.receiveShadow = true;
+                    // console.log("Floor bbox: ", child.geometry.boundingBox)
+                    // console.log("FLOOR POSITION IS: ",child.position.x, child.position.y, child.position.z)
+                    const box = new THREE.Box3().setFromObject(child);
+                    const size = box.getSize(new THREE.Vector3());
+                    const area = size.x * size.z;
+                    if (area > maxArea) {
+                        maxArea = area;
+                        floorMesh = { box, center: box.getCenter(new THREE.Vector3()) };
+                        floorBoxMaxY = box.max.y;
+                    }
+                }
 
-              // if (child.parent?.name === "Door") {
-              //     doorBoundingBox = new THREE.Box3().setFromObject(child);
-              // }
-              
-              // if (child.name === "Handle") {
-              //     child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
-              // }
-
-              if (child.name.toLowerCase().includes("pictureframe")){
-                // if (child.name === "PictureFrame003"){
-                //   child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
+                // if (child.parent?.name === "Door") {
+                //     doorBoundingBox = new THREE.Box3().setFromObject(child);
                 // }
-                pictureFramesArray.push(child);
-              }
-
-              if (/^ImageMesh\d+$/.test(child.name)) {
-                // if (child.name === "ImageMesh004"){
-                //   child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
+                
+                // if (child.name === "Handle") {
+                //     child.material = new THREE.MeshStandardMaterial({ color: 0xF4EBC7, metalness: 1.0, roughness: 0.2 });
                 // }
-                  imageMeshesArray.push(child);
-                  const imagePlane = child;
-                  if (imagePlane.geometry?.attributes.uv) imagePlane.geometry.attributes.uv.needsUpdate = true;
-                  const box = new THREE.Box3().setFromObject(imagePlane);
-                  const center = box.getCenter(new THREE.Vector3());
-                  const annotationDiv = new AnnotationDiv(count++, imagePlane);
-                  const label = new CSS2DObject(annotationDiv.getElement());
-                  label.position.copy(center);
-                  scene.add(label);
-                  annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
-                  // Attach to DOM so it can be seen
-                  annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
-              }
 
-          }
+                if (child.name.toLowerCase().includes("pictureframe")){
+                  // if (child.name === "PictureFrame003"){
+                  //   child.material = new THREE.MeshBasicMaterial({color : "green" , wireframe: true})
+                  // }
+                  pictureFramesArray.push(child);
+                }
+
+                if (/^ImageMesh\d+$/.test(child.name)) {
+                  // if (child.name === "ImageMesh004"){
+                  //   child.material = new THREE.MeshBasicMaterial({color : "red", wireframe: true})
+                  // }
+                    imageMeshesArray.push(child);
+                    const imagePlane = child;
+                    if (imagePlane.geometry?.attributes.uv) imagePlane.geometry.attributes.uv.needsUpdate = true;
+                    const box = new THREE.Box3().setFromObject(imagePlane);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const annotationDiv = new AnnotationDiv(count++, imagePlane);
+                    const label = new CSS2DObject(annotationDiv.getElement());
+                    label.position.copy(center);
+                    scene.add(label);
+                    annotationMesh[imagePlane.name] = { label, annotationDiv, mesh: imagePlane };
+                    // Attach to DOM so it can be seen
+                    annotationDiv.onAnnotationClick = () => displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imagePlane.name });
+                }
+
+            }
         });
 
         await initRecastIfNeeded();
 
-        // LOAD EXTERNAL NAVMESH
+
         console.log("START LOADING EXTERNAL NAVMESH")
         const ExternalNavMeshURL = './assets/navmesh/new_nav_mesh.bin'
         const navMeshResult = await LoadExternalNavMesh(scene , ExternalNavMeshURL );
@@ -1886,16 +1763,12 @@ async function loadModel() {
             console.warn("No floor mesh found, using lowest mesh position as fallback.");
         }
 
-        // --- PLAYER COLLIDER SETUP ---
-        // Creates a capsule collider for the player to handle physics and collision detection.
-        // The capsule is positioned with its bottom at the floor level, ensuring the player's feet are on the ground.
-        // Radius of 0.35 units provides a comfortable collision boundary, and total height of 1 unit fits the character model.
-        // The capsule shape allows smooth movement around corners and over small obstacles.
+        // --- PLAYER SETUP (capsule aligned so feet are on the floor) ---
         const RADIUS = 0.35;
-        const TOTAL_HEIGHT = 1;           // desired overall capsule height
+        const TOTAL_HEIGHT = 1.8;           // desired overall capsule height
         const SEGMENT = TOTAL_HEIGHT - 2*RADIUS; // the inner line segment length
 
-        const startY = playerStart.y + RADIUS + 0.02; // bottom sphere center, slightly above floor to prevent clipping
+        const startY = playerStart.y + RADIUS + 0.02; // bottom sphere center
         const endY   = startY + SEGMENT;              // top sphere center
 
         playerCollider = new Capsule(
@@ -1932,7 +1805,7 @@ async function loadModel() {
             // console.log("Nav query: ", navQuery)
         }
         // Call initNPC function to init NPC 
-        const npcEntry =  await initNPC(scene, navQuery, bvhMeshList);
+        const npcEntry = initNPC(scene, navQuery, bvhMeshList);
        
         if (npcEntry){
           npcEntry.state = {mode: 'idle'};
@@ -1977,16 +1850,11 @@ async function loadModel() {
     }
 }
 
-// This function sets the current museum model and triggers loading.
-// It updates the museum ID and calls loadModel to switch scenes.
 function setMuseumModel(modelId) {
     currentMuseumId = modelId;
     loadModel();
 }
 
-// This function initializes the menu UI.
-// It sets up event listeners for menu buttons and keyboard shortcuts.
-// Creates menu items for switching between museum rooms.
 function initMenu() {
     const menuContainer = document.getElementById("menu-container");
     if (!menuContainer) return;
@@ -2022,25 +1890,19 @@ function initMenu() {
     });
 }
 
-// This function opens the menu by setting its display to flex.
-// It sets the menuOpen flag to true.
 function openMenu(){
     menuOpen = true;
     const menuContainer = document.getElementById("menu-container");
     if (menuContainer) menuContainer.style.display = "flex";
 }
 
-// This function closes the menu by setting its display to none.
-// It sets the menuOpen flag to false.
 function closeMenu(){
     menuOpen = false;
     const menuContainer = document.getElementById("menu-container");
 if (menuContainer) menuContainer.style.display = "none";
 }
 
-// This event listener handles mouse movement for first-person camera rotation.
-// When pointer is locked (in FP mode), it updates yaw and pitch based on mouse delta.
-// Clamps pitch to prevent over-rotation, allowing smooth camera control.
+// pointer lock mouse look (example — adapt to your app)
 window.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement) {
     camYaw   -= e.movementX * 0.005;  // sensitivity X
@@ -2049,9 +1911,6 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 
-// This function updates the Web Audio listener's position and orientation.
-// It sets the listener's position to the camera and computes forward and up vectors
-// from the camera's quaternion for accurate spatial audio.
 function updateAudioListener(camera) {
   if (!window.audioCtx || !camera) return;
   const listener = window.audioCtx.listener;
@@ -2070,27 +1929,10 @@ function updateAudioListener(camera) {
   listener.upZ.setValueAtTime(up.z, window.audioCtx.currentTime);
 }
 
-// This function updates the visibility of picture frames based on distance.
-// It hides frames that are too far to improve performance.
-function updateFrameVisibility() {
-  if (!camera) return;
-
-  for (const frame of pictureFramesArray) {
-    if (!frame.userData.lodDistSq) continue;
-
-    const d = frame.position.distanceToSquared(camera.position);
-    frame.visible = d < frame.userData.lodDistSq;
-  }
-}
 
 
 
 
-// This is the main animation loop that runs every frame.
-// It handles LOD monitoring, spatial audio updates, crowd simulation,
-// NPC updates with animation and positioning, player updates,
-// camera positioning for third-person view with collision detection,
-// mixer updates, and rendering with post-processing.
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
     // render CSS3D (if you use it)
@@ -2098,21 +1940,25 @@ function animate() {
 
   const now = performance.now();
   prevTime = now;
+  let prevFPS = 0;
 
     // --- LOD Performance Monitoring (Add this block) ---
-  // run every frame
   LOD_SETTINGS.frames++;
   if (now - LOD_SETTINGS.startTime >= LOD_SETTINGS.FPS_CHECK_INTERVAL_MS) {
-    const fps =
-      (LOD_SETTINGS.frames * 1000) /
-      (now - LOD_SETTINGS.startTime);
-
-    adjustRuntimeLOD(fps);
-
-    LOD_SETTINGS.frames = 0;
-    LOD_SETTINGS.startTime = now;
+      const currentFPS = LOD_SETTINGS.frames / ((now - LOD_SETTINGS.startTime) / 1000);
+      if (currentFPS > currentFPS + 1 || currentFPS < currentFPS - 1 || currentFPS === prevFPS){
+        prevFPS = currentFPS;
+        LOD_SETTINGS.frames = 0;
+        LOD_SETTINGS.startTime = now;
+        return;
+      }
+      checkAndAdjustLOD(currentFPS); // Call the dynamic adjustment function
+      prevFPS = currentFPS;
+      // Reset counters
+      LOD_SETTINGS.frames = 0;
+      LOD_SETTINGS.startTime = now;
   }
-
+  updatePropVisibility();
   updateSpatialAudio(scene);
 
 
@@ -2122,8 +1968,6 @@ function animate() {
   const frameDelta = Math.min(0.05, clock.getDelta());
   physicsTimeAccumulator += frameDelta;
   const FIXED_TIMESTEP = 1 / 60;
-
-  // updateFrameVisibility();
 
 
 
@@ -2354,16 +2198,12 @@ function animate() {
         tpView.syncFromCrowd();
       }
     } else {
-      // ✅ FIX: Remove the double loop. Pass the full frame delta.
-      // Velocity-based movement in ThirdPersonPlayer handles variable time robustly.
-      tpView.update(frameDelta);
+      for (let i = 0; i < STEPS_PER_FRAME; i++) {
+        tpView.update(1/280);
+      }
     }
 
-    // --- Step 3: Camera Setup and Positioning ---
-    // This section handles the third-person camera positioning and rotation.
-    // It supports two modes: normal follow and tour stop viewing.
-    // In normal mode, the camera follows behind the player with collision avoidance.
-    // In tour stop mode, it positions to show both player and picture.
+    // --- Step 3: Camera update ---
     if (tpView.playerCollider && tpView.model && tpView.bvhMeshes?.length > 0) {
       const npcEntry = npcAgents[0];
       
@@ -2375,7 +2215,7 @@ function animate() {
 
       if (isAtTourStop) {
         // ====================================================================
-        // ✅ TOUR STOP CAMERA LOGIC: When at a tour stop, keep the player in view but look at the picture.
+        // ✅ NEW LOGIC: When at a tour stop, keep the player in view but look at the picture.
         // ====================================================================
         try {
           const pic = npcEntry.state.currentPictureMesh;
@@ -2410,15 +2250,16 @@ function animate() {
       } 
       else {
         // ====================================================================
-        // ✅ STANDARD FOLLOW CAMERA LOGIC: When moving, use the normal third-person follow-cam.
+        // ✅ STANDARD LOGIC: When moving, use the normal follow-cam.
+        // This logic is correct for following the player.
         // ====================================================================
         let cameraLookTarget = playerLookAtPoint.clone();
 
-        const idealOffset = new THREE.Vector3(0, 1.15, -2.8).applyQuaternion(tpView.model.quaternion);
+        const idealOffset = new THREE.Vector3(0, 1.2, -3.0).applyQuaternion(tpView.model.quaternion);
         const idealPos = playerLookAtPoint.clone().add(idealOffset);
         let finalPos = idealPos.clone();
 
-        // Camera collision detection: cast a ray from player to ideal position to avoid clipping through walls
+        // Camera collision logic (unchanged)
         const fovRadians = THREE.MathUtils.degToRad(camera.fov);
         const near = camera.near;
         const halfHeight = Math.tan(fovRadians * 0.5) * near;
@@ -2427,8 +2268,7 @@ function animate() {
         const raycaster = new THREE.Raycaster(playerLookAtPoint, idealOffset.clone().normalize(), 1e-14, idealOffset.length());
         const intersects = raycaster.intersectObjects(tpView.bvhMeshes, true);
         if (intersects.length > 0) {
-          // If collision detected, pull camera back to the intersection point
-          finalPos.copy(intersects[0].point).sub(raycaster.ray.direction.clone().multiplyScalar(camRadius + 0.25));
+          finalPos.copy(intersects[0].point).sub(raycaster.ray.direction.clone().multiplyScalar(camRadius + 0.05));
         }
         
         if (tpView.isTouring && tpView.isViewingPicture){
@@ -2458,8 +2298,9 @@ function animate() {
 
   // ---------------- FP VIEW ----------------
   if (physiscsReady && activePlayer === 'fp' && fpView) {
-    // ✅ FIX: Remove the double loop. Pass the full frame delta.
-    fpView.update(frameDelta, camYaw, camPitch);
+    for (let i = 0; i < STEPS_PER_FRAME; i++) {
+      fpView.update(frameDelta, camYaw, camPitch);
+    }
     if (fpView.isTouring && fpView.followAgent) {
       const npcEntry = fpView.followAgent;
       // Prefer the agent's interpolated position when available (most accurate)
@@ -2520,15 +2361,11 @@ function animate() {
   }
   updateAudioListener(camera)
 
-
   // checkPlayerPosition();
   composer.render();
 }
 
 
-// This function switches to third-person view.
-// It handles late-loading of the TP player if needed, resets controls,
-// captures yaw from FP view, adds the model to scene, and sets up crowd agent if touring.
 async function activateThirdPerson() {
   activePlayer = 'tp';
 
@@ -2556,7 +2393,6 @@ async function activateThirdPerson() {
       tpViewLoadLate = false;
     } else if (tpViewExisted && character) {
       if (!tpView.model) tpView.attachModel(character.model);
-      if (!npcModel) npcModel = character.model;
       tpView.handleAnimation(character.model, character.gltf);
       if (tpView.playerCollider) tpView._smoothedPlayerPosition.copy(tpView.playerCollider.end);
       if (tpView.tempQuaternion && tpView.model) tpView.tempQuaternion.copy(tpView.model.quaternion);
@@ -2631,9 +2467,6 @@ async function activateThirdPerson() {
 }
 
 
-// This function switches to first-person view.
-// It captures yaw from TP model, deactivates TP view,
-// resets FP controls, and resumes NPC follow if touring.
 function activateFirstPerson() {
   activePlayer = 'fp';
 
@@ -2689,9 +2522,6 @@ function activateFirstPerson() {
 }
 
 
-// This function computes the foot offset for a model.
-// It calculates the distance from the model's origin to its lowest point,
-// ensuring the model sits correctly on the ground.
 function computeFootOffsetForModel(model) {
   // returns positive number = distance from model origin to feet
   try {
@@ -2707,9 +2537,6 @@ function computeFootOffsetForModel(model) {
 }
 
 
-// This function creates a remote avatar by cloning the character model.
-// It sets up the model for remote players, computes foot offset,
-// and prepares animation mixer if GLTF is available.
 function createRemoteAvatarFromTemplate(peerId, attempts = 1) {
   if (!characterModelReady || !characterModel) {
     if (attempts < MAX_AVATAR_LOAD_ATTEMPTS && !REMOTE_LOAD_RETRY[peerId]) {
@@ -2749,8 +2576,6 @@ function createRemoteAvatarFromTemplate(peerId, attempts = 1) {
 }
 
 
-// This function adds a remote player to the scene.
-// It creates the avatar, sets up state tracking, and prepares for interpolation.
 export function addRemotePlayer(peerId, attempts = 1) {
   if (!peerId) return null;
   if (remotePlayers.has(peerId)) return remotePlayers.get(peerId);
@@ -2911,8 +2736,6 @@ export function addRemotePlayer(peerId, attempts = 1) {
 
 // expect THREE in scope, remotePlayers Map defined elsewhere
 // remotePlayers is Map<string, { mesh, lastPos:THREE.Vector3, lastQuat:THREE.Quaternion, lastUpdateTime:number, mixer?:THREE.AnimationMixer }>
-// This function updates the state of a remote player.
-// It handles position, rotation, animation, and spatial audio for remote avatars.
 export function updateRemotePlayerState(peerId, state) {
   if (!peerId) return;
 
@@ -3078,8 +2901,6 @@ export function updateRemotePlayerState(peerId, state) {
 
 }
 
-// This function removes a remote player from the scene.
-// It cleans up the model, stops any timers, and removes from the map.
 export function removeRemotePlayer(peerId) {
   const p = remotePlayers.get(peerId);
   if (!p) return;
@@ -3097,8 +2918,6 @@ export function removeRemotePlayer(peerId) {
 }
 
 // Call this from your main animate loop in index.js:
-// This function updates all remote players in the scene.
-// It calls update on each remote player for interpolation and animation.
 export function updateRemotePlayers(dt) {
   for (const p of remotePlayers.values()){
     if (p.mixer) p.mixer.update(dt);
@@ -3107,8 +2926,6 @@ export function updateRemotePlayers(dt) {
 } 
 
 
-// This function gets the current state of the local player.
-// It returns position, rotation, animation state, and camera look-at for multiplayer sync.
 export function getLocalPlayerState() {
   // Ensure tpView & model exist
   if (tpView && tpView.model && tpView.playerCollider) {
@@ -3165,8 +2982,6 @@ export function getLocalPlayerState() {
 
 
 
-// This function gets the current state of the NPC.
-// It returns position, rotation, name, and camera info for host broadcasting.
 export function getCurrentNPCState() {
   const NPC_MODEL = npcAgents?.[0]?.model ?? null;
   if (!NPC_MODEL) {
@@ -3208,10 +3023,6 @@ window.getCurrentNPCState = getCurrentNPCState; // debug handle
 
 
 
-// This function initializes the entire game.
-// It sets up the container, camera, renderers, post-processing,
-// event listeners, menu, and starts the loading process.
-// Takes a container ID as parameter, defaults to 'model-container'.
 export function initializeGame(targetContainerId = 'model-container') {
     container = document.getElementById(targetContainerId);
     if (!container) {
@@ -3240,7 +3051,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); // dynamic res clamp
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1;
+    renderer.toneMappingExposure = 1.5;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Use soft shadows
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -3542,8 +3353,7 @@ export function initializeGame(targetContainerId = 'model-container') {
     }
 }
 
-// This function stops the game.
-// It cancels the animation frame, clears the scene, and disposes of renderers.
+// ... (stopGame function is unchanged)
 export function stopGame() {
     if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
@@ -3552,4 +3362,5 @@ export function stopGame() {
     clearSceneObjects(scene);
     renderer?.dispose();
     container?.remove();
+
 }

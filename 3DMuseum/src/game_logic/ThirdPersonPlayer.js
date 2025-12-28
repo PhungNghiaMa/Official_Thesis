@@ -97,9 +97,7 @@ export default class ThirdPersonPlayer {
 
 
   resetControls() {
-    this.input.forward = this.input.backward =
-    this.input.left    = this.input.right =
-    this.input.run     = false;
+    this.input.forward = this.input.backward = this.input.left = this.input.right = this.input.run = false;
     this.playerVelocity.set(0, 0, 0);
     this.playerOnFloor = true; // optional, helps settle instantly
   }
@@ -343,152 +341,6 @@ export default class ThirdPersonPlayer {
     this._physicsStep(safeDelta);
   }
 
-  // _physicsStep(dt) {
-  //   // ✅ VELOCITY-BASED MOVEMENT (instead of force-based)
-  //   // This prevents the "rocket launch" effect when frames drop
-    
-  //   const ACCELERATION = 20.0;  // How fast you reach top speed
-  //   const DECELERATION = 10.0;  // How fast you stop
-  //   const WALK_SPEED = 4.0;
-  //   const RUN_SPEED = 10.0;
-
-  //   // --- 1. Calculate desired Horizontal Velocity based on Inputs ---
-  //   const targetSpeed = this.input.run ? RUN_SPEED : WALK_SPEED;
-  //   const inputVector = new THREE.Vector3();
-
-  //   // Get forward direction relative to model
-  //   const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.model.quaternion).setY(0).normalize();
-
-  //   // Tank controls (turning)
-  //   const yawAxis = new THREE.Vector3(0, 1, 0);
-  //   if (this.input.left) {
-  //     this.model.rotateOnWorldAxis(yawAxis, this.turnRate * dt);
-  //   }
-  //   if (this.input.right) {
-  //     this.model.rotateOnWorldAxis(yawAxis, -this.turnRate * dt);
-  //   }
-
-  //   // Determine target direction
-  //   if (this.input.forward) {
-  //     inputVector.add(forward);
-  //   }
-  //   if (this.input.backward) {
-  //     inputVector.add(forward.clone().multiplyScalar(-0.5)); // Move backward slower
-  //   }
-
-  //   // Normalize input to ensure consistent speed
-  //   const isMoving = inputVector.lengthSq() > 0;
-  //   if (isMoving) inputVector.normalize();
-
-  //   const targetVelocity = inputVector.multiplyScalar(targetSpeed);
-
-  //   // --- 2. Smoothly interpolate Current Velocity -> Target Velocity ---
-  //   // This replaces the "addScaledVector" + "damping" logic
-  //   const factor = isMoving ? ACCELERATION : DECELERATION;
-  //   const lerpAlpha = 1.0 - Math.exp(-factor * dt);
-
-  //   this.playerVelocity.x = THREE.MathUtils.lerp(this.playerVelocity.x, targetVelocity.x, lerpAlpha);
-  //   this.playerVelocity.z = THREE.MathUtils.lerp(this.playerVelocity.z, targetVelocity.z, lerpAlpha);
-
-  //   // --- 3. Apply Gravity ---
-  //   if (!this.playerOnFloor) {
-  //     // Apply gravity when falling
-  //     this.playerVelocity.y -= this.gravity * dt;
-  //     // Clamp maximum fall speed to prevent overshoot (prevents tunneling)
-  //     this.playerVelocity.y = Math.max(this.playerVelocity.y, -10);
-  //   } else {
-  //     // When on floor, stop downward velocity
-  //     this.playerVelocity.y = 0;
-  //   }
-
-  //   // --- 4. Integrate Position ---
-  //   const deltaPos = this.playerVelocity.clone().multiplyScalar(dt);
-  //   this.playerCollider.translate(deltaPos);
-
-  //   // --- 5. Collision Resolution (BVH Shapecast) ---
-  //   this.playerOnFloor = false;
-  //   let hasCollided = false;
-
-  //   // Compute world AABB of the capsule
-  //   this._tmpMin.set(
-  //     Math.min(this.playerCollider.start.x, this.playerCollider.end.x) - this.playerCollider.radius,
-  //     Math.min(this.playerCollider.start.y, this.playerCollider.end.y) - this.playerCollider.radius,
-  //     Math.min(this.playerCollider.start.z, this.playerCollider.end.z) - this.playerCollider.radius
-  //   );
-  //   this._tmpMax.set(
-  //     Math.max(this.playerCollider.start.x, this.playerCollider.end.x) + this.playerCollider.radius,
-  //     Math.max(this.playerCollider.start.y, this.playerCollider.end.y) + this.playerCollider.radius,
-  //     Math.max(this.playerCollider.start.z, this.playerCollider.end.z) + this.playerCollider.radius
-  //   );
-  //   this._capsuleWorldBox.set(this._tmpMin, this._tmpMax);
-
-
-
-  //   for (const mesh of this.bvhMeshes) {
-  //     const bvh = mesh.geometry.boundsTree;
-  //     if (!bvh) continue;
-  //     if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(this._capsuleWorldBox)) continue;
-
-  //     this.tempBox.makeEmpty();
-  //     this.tempMat.copy(mesh.userData.invWorld);
-
-  //     this.tempSegment.copy(this.playerCollider);
-  //     this.tempSegment.start.applyMatrix4(this.tempMat);
-  //     this.tempSegment.end.applyMatrix4(this.tempMat);
-  //     this.tempBox.expandByPoint(this.tempSegment.start);
-  //     this.tempBox.expandByPoint(this.tempSegment.end);
-  //     this.tempBox.min.addScalar(this.playerCollider.radius * -1);
-  //     this.tempBox.max.addScalar(this.playerCollider.radius);
-
-  //     bvh.shapecast({
-  //       intersectsBounds: (box) => box.intersectsBox(this.tempBox),
-  //       intersectsTriangle: (tri) => {
-  //         const triPoint = new THREE.Vector3();
-  //         const capPoint = new THREE.Vector3();
-  //         const dist = tri.closestPointToSegment(this.tempSegment, triPoint, capPoint);
-  //         if (dist < this.playerCollider.radius) {
-  //           hasCollided = true;
-  //           const depth = this.playerCollider.radius - dist;
-  //           const pushDir = capPoint.sub(triPoint).normalize();
-  //           // Only push if depth is significant (avoid micro-corrections)
-  //           if (depth > 0) {
-  //             this.tempSegment.start.addScaledVector(pushDir, depth);
-  //             this.tempSegment.end.addScaledVector(pushDir, depth);
-  //           }
-  //           // Detect ground: only if pushing upward significantly
-  //           if (pushDir.y > 0.5) {
-  //             this.playerOnFloor = true;
-  //           }
-  //         }
-  //       }
-  //     });
-
-  //     this.playerCollider.start.copy(this.tempSegment.start).applyMatrix4(mesh.matrixWorld);
-  //     this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
-  //   }
-
-  //   // --- 6. Sync Visual Model ---
-  //   // Use smoothing to prevent jerky position updates from collision corrections
-  //   const targetY = this.playerCollider.start.y - this.playerCollider.radius + this.footOffset;
-  //   const positionSmoothFactor = 0.2; // Smooth out collision corrections
-    
-  //   this.model.position.x += (this.playerCollider.start.x - this.model.position.x) * positionSmoothFactor;
-  //   this.model.position.y += (targetY - this.model.position.y) * positionSmoothFactor;
-  //   this.model.position.z += (this.playerCollider.start.z - this.model.position.z) * positionSmoothFactor;
-
-  //   // Update smoothed position variable just for the camera to use
-  //   this._smoothedPlayerPosition.copy(this.model.position);
-
-  //   // Sync camera smoothing quaternion
-  //   this.tempQuaternion.copy(this.model.quaternion);
-
-  //   // --- 7. Update Animation ---
-  //   const speed = new THREE.Vector3(this.playerVelocity.x, 0, this.playerVelocity.z).length();
-  //   this.updateAnimationState(speed, this.input);
-  // }
-
-  // ThirdPersonPlayer.js — inside class ThirdPersonPlayer
-  
   _physicsStep(dt) {
     // Constants
     const ACCELERATION = 20.0;
@@ -503,6 +355,13 @@ export default class ThirdPersonPlayer {
     this._inputVector.set(0, 0, 0);
 
     // Get forward/right from model quaternion (optimized)
+    // This creates a "pointing" vector. It says: "Start by pointing exactly where the character thinks 'forward' is in its own local space."
+    // We must normalize because : 
+    /*
+      Input vectors can be longer than 1 when combining keys.
+      Normalization keeps the vector length = 1.
+      This ensures consistent movement speed regardless of direction.
+     */
     this._forward.set(0, 0, 1).applyQuaternion(this.model.quaternion).setY(0).normalize();
 
     // Turn Logic
@@ -554,6 +413,7 @@ export default class ThirdPersonPlayer {
     this.playerOnFloor = false;
     
     // Update Capsule World Box
+    // 
     this._tmpMin.set(
       Math.min(this.playerCollider.start.x, this.playerCollider.end.x) - this.playerCollider.radius,
       Math.min(this.playerCollider.start.y, this.playerCollider.end.y) - this.playerCollider.radius,
@@ -566,35 +426,93 @@ export default class ThirdPersonPlayer {
     );
     this._capsuleWorldBox.set(this._tmpMin, this._tmpMax);
 
+    // Loop through all meshes that have BVH acceleration structures
+    // BVH stands for Bounding Volume Hierarchy - a spatial partitioning structure
     for (const mesh of this.bvhMeshes) {
       const bvh = mesh.geometry.boundsTree;
-      if (!bvh) continue;
+      if (!bvh) continue; // Skip if mesh has no BVH built
+
+      // Quick broad-phase check: skip if the mesh's world bounding box
+      // does not intersect with the player's capsule bounding box
       if (mesh.userData?.worldBox && !mesh.userData.worldBox.intersectsBox(this._capsuleWorldBox)) continue;
 
+      // Prepare temporary box and matrix for local-space calculations
       this.tempBox.makeEmpty();
-      this.tempMat.copy(mesh.userData.invWorld);
+      // Inverse world matrix to transform capsule into mesh local space
+      this.tempMat.copy(mesh.userData.invWorld); // inverse world matrix of mesh
 
+      // Copy the player's capsule collider into a temp segment
       this.tempSegment.copy(this.playerCollider);
+
+      // Transform capsule segment into mesh's local space
       this.tempSegment.start.applyMatrix4(this.tempMat);
       this.tempSegment.end.applyMatrix4(this.tempMat);
+
+      // Expand a bounding box around the capsule segment
       this.tempBox.expandByPoint(this.tempSegment.start);
       this.tempBox.expandByPoint(this.tempSegment.end);
+
+      // Expands the minimum corner of the box outward by the capsule’s radius.
+      // addScalar(-radius) means subtracting the radius from each axis (x, y, z).
+      // This ensures the box extends outward in the negative direction.
       this.tempBox.min.addScalar(this.playerCollider.radius * -1);
+
+      // Expands the maximum corner of the box outward by the capsule’s radius.
+      // This grows the box in the positive direction.
+      // Together, these two lines “inflate” the bounding box so it fully covers the capsule’s thickness (the radius around the line segment).
       this.tempBox.max.addScalar(this.playerCollider.radius);
 
+      // Perform BVH shapecast: efficient traversal of mesh triangles
+      // bvh.shapecast is a method that traverse the BVH and tests for intersections with a shape (here, our capsule)
       bvh.shapecast({
+        // Narrow-phase: only test triangles whose bounds intersect capsule box
+        // This is the broad-phase filter. It checks whether a triangle's bounding box intersects 
+        // the expanded capsule box (tempBox). If not, it skips that triangle.
+        // This is the part that optimize performance by avoiding unnecessary triangle tests.Especially useful in 
+        // complex scenes with many triangles.
         intersectsBounds: (box) => box.intersectsBox(this.tempBox),
+
+        // Triangle test: check closest point between triangle and capsule segment
         intersectsTriangle: (tri) => {
+          // Hold the closest points on the triangle and capsule segment
           const triPoint = new THREE.Vector3();
           const capPoint = new THREE.Vector3();
+
+          // // Find closest points between triangle and capsule segment
+          // this.tempSegment is the spine of the capsule.
+          // It’s required because the capsule isn’t just a point — it’s a line segment with thickness.
+          // // Collision detection uses this segment to measure distances to triangles and resolve overlaps correctly.
+          // dist is the shortest distance between the capsule’s line segment and the triangle.
+          // This is a 3D Euclidean distance — meaning it’s calculated across all axes (x, y, z), not just the Y axis.
           const dist = tri.closestPointToSegment(this.tempSegment, triPoint, capPoint);
+
+          // If distance < capsule radius → collision detected
           if (dist < this.playerCollider.radius) {
-            const depth = this.playerCollider.radius - dist;
-            const pushDir = capPoint.sub(triPoint).normalize();
+
+          // The capsule has a radius (its thickness around the line segment).
+          // If the triangle is closer than that radius, the capsule overlaps.
+          // depth = how far the capsule has penetrated into the triangle.
+
+          // 👉 Example:
+          // Capsule radius = 0.5
+          // Closest distance to triangle = 0.3
+          // Depth = 0.5 − 0.3 = 0.2 → means the capsule is overlapping by 0.2 units.
+          // If dist is larger than the radius, depth becomes negative → no collision.
+            const depth = this.playerCollider.radius - dist; // penetration depth
+
+            // triPoint = closest point on the triangle.
+            // capPoint = closest point on the capsule segment.
+            // Subtracting them gives the vector pointing from triangle → capsule.
+            // Normalizing makes it a unit vector.
+            const pushDir = capPoint.sub(triPoint).normalize(); // direction to push capsule out ; Normalizing makes it a unit vector (length = 1).
+
+            // Resolve collision by pushing capsule segment out of triangle
             if (depth > 0) {
               this.tempSegment.start.addScaledVector(pushDir, depth);
               this.tempSegment.end.addScaledVector(pushDir, depth);
             }
+
+            // If push direction is mostly upward → player is standing on floor
             if (pushDir.y > 0.5) {
               this.playerOnFloor = true;
             }
@@ -602,9 +520,11 @@ export default class ThirdPersonPlayer {
         }
       });
 
+      // Transform capsule segment back into world space after resolution
       this.playerCollider.start.copy(this.tempSegment.start).applyMatrix4(mesh.matrixWorld);
       this.playerCollider.end.copy(this.tempSegment.end).applyMatrix4(mesh.matrixWorld);
     }
+
 
     // --- 6. Sync Visual Model (THE CRITICAL FIX) ---
     // Do NOT lerp/smooth the model position. The collider is the source of truth.

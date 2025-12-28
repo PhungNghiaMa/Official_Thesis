@@ -45,13 +45,14 @@ type Asset struct {
 
 type Audio struct {
 	AudioID   uint      `gorm:"column:audio_id;primaryKey;autoIncrement" json:"auid"`
-	AssetCID  string    `gorm:"column:asset_cid;type:varchar(255);not null;index" json:"asset_cid"`
-	Language  string    `gorm:"column:language;type:varchar(50);not null" json:"language"`
+	AssetCID  string    `gorm:"column:asset_cid;type:varchar(255);not null;index:idx_audio_lookup,priority:1" json:"asset_cid"`
+	Asset   Asset     `gorm:"foreignKey:AssetCID;references:AssetCID"`
+	Language  string    `gorm:"column:language;type:varchar(50);not null;index:idx_audio_lookup,priority:2" json:"language"`
 	TextHash  string    `gorm:"column:text_hash;type:varchar(255);not null" json:"text_hash"`
 	AudioCID  string    `gorm:"column:audio_cid;type:varchar(255)" json:"audio_cid"`
-	Status    string    `gorm:"column:status;type:varchar(20);default:'pending';index" json:"status"`
+	Status    string    `gorm:"column:status;type:varchar(20);default:'pending';index:idx_audio_lookup,priority:3" json:"status"`
 	Attempts  int       `gorm:"column:attempts;default:0" json:"attempts"`
 	Duration  int64     `gorm:"column:duration_ms;default:0" json:"duration_ms"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime;index:idx_audio_lookup,priority:4,sort:desc" json:"created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }

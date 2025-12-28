@@ -129,7 +129,6 @@ body {
 
 }
 
-
 .LandingPageContainer , .LandingPageWrapContainer{
     height: inherit;
 }
@@ -616,6 +615,8 @@ canvas{
     padding: 20px;
     width: 100%;
     max-width: 500px;
+    max-height: 95dvh;
+    overflow: auto;
     z-index: 999;
     z-index: 999;
     display: none; /* Hidden by default, shown by JS */
@@ -641,6 +642,7 @@ canvas{
 
 .upload-container {
     position: relative;
+    box-sizing: border-box;
     border: 2px dashed #656565;
     position: relative;
     border: 2px dashed #656565;
@@ -650,14 +652,12 @@ canvas{
     justify-content: center;
     align-items: center;
     cursor: pointer;
-    min-height: 200px;
-    max-height: max-content; /* Fixed height for consistency */
-    min-height: 200px;
-    max-height: max-content; /* Fixed height for consistency */
+    min-height: fit-content;
+    min-height: 100px;
+    max-height: 300px; /* Fixed height for consistency */
     position: relative;
+    object-fit: contain;
     overflow: hidden;
-    object-fit: contain;
-    object-fit: contain;
 }
 
 
@@ -680,12 +680,14 @@ canvas{
 .upload-preview {
     position: relative;
     position: relative;
-    max-width: 100%;
-    max-height: 100%;
+    width: fit-content;
+    height: 250px;
+    max-height: 350px;
+    aspect-ratio: calc(16/10);
     object-fit: contain;
     display: none; /* Hidden by default, shown when image is selected */
-    background:#007bff;
-    background:#007bff
+    /* background:#007bff;
+    background:#007bff */
 }
 
 .upload-details {

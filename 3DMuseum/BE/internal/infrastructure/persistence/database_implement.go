@@ -74,8 +74,7 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp applicationDTO.
 
 	// Check if we are updating an existing asset AND the CIDs are identical.
 	// If the CIDs are identical AND we're updating, we skip the insert.
-	if currentVersion > 0 &&
-		latestAsset.AssetCID == ktx2Resp.IpfsHash {
+	if currentVersion > 0 && latestAsset.AssetCID == ktx2Resp.IpfsHash {
 
 		// CIDs are the same, but metadata (title/description) may have changed.
 		// We update the metadata of the LATEST record (not the CID/version).
@@ -144,6 +143,10 @@ func (Repository *AssetRepo) GetAsset(ctx context.Context, RoomID int) ([]model.
 	entry, found := latestAssetsCache[room_id]
 	latestAssetsCacheMu.RUnlock()
 
+	// Acquires a read lock on latestAssetsCacheMu.
+	// Checks if there’s a cached entry for room_id and whether it hasn’t expired.
+	// If valid: returns cached []model.ResponseMetadataInfor immediately (no DB hit).
+	// If missing/expired: proceeds to query the database.
 	if found && entry.expiresAt.After(time.Now()) {
 		return entry.data, nil
 	}
@@ -191,8 +194,6 @@ func (Repository *AssetRepo) GetAsset(ctx context.Context, RoomID int) ([]model.
 			ORDER BY au2.created_at DESC
 			LIMIT 1
 		) AS ea ON TRUE;
-
-
 	`
 	result := Repository.database.WithContext(ctx).Raw(query, room_id).Scan(&Assets)
 
@@ -205,6 +206,10 @@ func (Repository *AssetRepo) GetAsset(ctx context.Context, RoomID int) ([]model.
 	}
 
 	// 3. save in cache for reuse
+	// Cache write (slow path):
+	// Acquires a write lock.
+	// Stores the fetched Assets along with an expiration time (time.Now().Add(cacheTTL)).
+	// Releases the lock.
 	latestAssetsCacheMu.Lock()
 	latestAssetsCache[room_id] = cachedResult{
 		data:      Assets,
@@ -214,13 +219,14 @@ func (Repository *AssetRepo) GetAsset(ctx context.Context, RoomID int) ([]model.
 	return Assets, nil
 }
 
-
+// InsertAudio inserts a new audio record or returns the existing one if it already exists.
 func (repo *AssetRepo) InsertAudio(ctx context.Context, assetCID, language, description string) (*model.Audio, error) {
 	textHash := business.HashTextSHA256(description)
 	var existing model.Audio
 
 	err := repo.database.WithContext(ctx).Where("asset_cid = ? AND language = ?", assetCID, language).First(&existing).Error
 	// Case query execute succesfully without error
+	// This if block is to handle the case where the audio record already exists
 	if err == nil {
 		return &existing, nil
 	}

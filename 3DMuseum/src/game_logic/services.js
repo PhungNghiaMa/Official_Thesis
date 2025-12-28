@@ -99,17 +99,17 @@ export function StartWebSocket() {
 
   _ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    console.log("RAW WEBSOCKET MESSAGE:", data);
+    // console.log("RAW WEBSOCKET MESSAGE:", data);
 
     // Normalize message type
     const inferredType = data.type || inferTypeFromStage(data.stage);
 
     // DEBUG TRACE
     console.groupCollapsed(`[WS] 🔹 Incoming message (${inferredType})`);
-    console.log("Stage:", data.stage);
-    console.log("Status:", data.status);
-    console.log("Progress:", data.progress);
-    console.log("Channel:", data.channel);
+    // console.log("Stage:", data.stage);
+    // console.log("Status:", data.status);
+    // console.log("Progress:", data.progress);
+    // console.log("Channel:", data.channel);
     console.groupEnd();
 
     // Normalize: forward all to same event
@@ -124,7 +124,7 @@ export function StartWebSocket() {
     try {
       const data = JSON.parse(event.data);
       console.groupCollapsed(`[WS] 🔹 Incoming message (${data?.type || "unknown"})`);
-      console.log("Full payload:", data);
+      // console.log("Full payload:", data);
       console.groupEnd();
     } catch (err) {
       console.warn("[WS] Non-JSON message:", event.data);

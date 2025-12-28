@@ -15,6 +15,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin = "anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet"  crossorigin="anonymous">
 
+  <style>
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+    }
+  </style>
   </head>
   <!-- <script type="module" src="./src/game_logic/index.js"></script>
   <script type="module">
@@ -22,7 +31,7 @@
     window.initConnection = initConnection; // optional global
   </script> -->
 
-  <body style="width: 100%; height:100%; overflow: hidden; margin: 0; padding: 0;">
+  <body>
     <div id="landingpageContainer" class="GeneralContainer w-full min-h-full overflow-y-auto overflow-x-hidden box-border" >
       <div class="Page_1_Container w-full h-full overflow-hidden py-5">
         <div class="NavigationContainer w-full h-auto flex flex-row py-3 text-gray-300">
@@ -49,7 +58,50 @@
       <div class="ContentContainer w-full max-h-full overflow-hidden my-3 bg-transparent">
         <div class="WrapContainer w-auto overflow-hidden" style="max-height: fit-content;">
           <div class="PagesContainer w-full h-fit overflow-auto">
-            <div id="landingpage" class="landingpage w-full" style="height: fit-content"></div>
+            <div id="landingpage" class="landingpage w-full" style="height: fit-content">
+              <div id="landing_page" class="LandingPageContainer w-full overflow-hidden top-0">
+                <div class="LandingPageWrapContainer w-full h-auto flex flex-row-reverse overlfow-hidden">
+                  <div class="FirstCol w-9/12 h-full flex flex-col">
+                    <div class="SubMuseumNameContainer overflow-hidden w-full h-4/12 flex items-center justify-center">
+                      <div class="SubMuseumName overflow-hidden w-full h-full flex flex-col flex-wrap items-end justify-end px-20">
+                        <div>
+                          <h1 data-i18n = "LandingPage.Vietnam" class="Vietnam text-9xl font-bold text-amber-500"></h1>
+                        </div>
+                        <div class="w-full flex justify-end items-center py-5">
+                          <h1 data-i18n = "LandingPage.Traditional_art" class="Traditional_art text-4xl font-bold text-yellow-300"></h1>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="LandingPageFunctionContainer w-full h-8/12">
+                      <div class="InitBtnContainer w-full h-full">
+                        <div id="InitButton" class="InitBtn w-full h-fit overflow-hidden flex justify-end-safe pt-16">
+                          <button type="button" id="init_button" class="button h-auto overflow-hidden flex items-center justify-center">
+                              <div class="wrap">
+                                <p data-i18n="LandingPage.InitBtn">
+                                  <span>✧</span>
+                                  <span>✦</span>
+                                </p>
+                              </div>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="SecondCol w-3/12 h-full">
+                    <div class="ContentWrapperContainer w-full h-screen flex flex-col items-start justify-center gap-2 mx-5 box-border overflow-y-hidden">
+                      <div id="Graph_1_Container" class="Graph_1_Container w-full max-h-1/2 px-8 py-8 bg-white/1 backdrop-blur-xs rounded-2xl border border-white/1 overflow-auto">
+                        <h1 data-i18n="LandingPage.Des1" class="Description_1 text-small font-medium font-stretch-75% italic text-orange-50 drop-shadow-md"></h1>
+                      </div>
+
+                    <div id="Graph_2_Container" class="Graph_2_Container w-full max-h-1/2 px-8 py-8 mx-auto flex flex-wrap-reverse items-end justify-center bg-black/5 backdrop-blur-xs rounded-2xl border border-white/1 overflow-auto">
+                      <h1 data-i18n="LandingPage.Des2" class="Description_2 text-start text-small font-medium font-stretch-75% italic whitespace-pre-wrap text-orange-50 drop-shadow-md"></h1>
+                    </div>
+
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -168,8 +220,9 @@
         <label for="upload-input" class="upload-label">
           <div id="upload-text" class="flex items-center justify-center text-gray-300">Upload file here</div>
           <img src="" alt="" class="upload-preview" id="upload-preview" style="display: none;">
+          <video class="upload-preview" id="video-preview" style="display: none" controls></video>
         </label>
-        <input type="file" id="upload-input" accept="image/png, image/jpeg, image/webP, image/jpg" style="display: none;">
+        <input type="file" id="upload-input" accept="image/png, image/jpeg, image/webP, image/jpg , video/*" style="display: none;">
       </div>
     
       <div class="upload-details overflow-auto">
@@ -203,12 +256,12 @@
     <script type="module">
 
       // Render landing page quickly with template
-      import landingPageHTML from './template/landingpage_template.js';
+      // import landingPageHTML from './template/landingpage_template.js';
       // import {updateLobbyState} from './src/game_logic/webRTC.js';
       let isMultiplayerMode = false;
       window._IS_HOST = true;
 
-      document.getElementById('landingpage').innerHTML = landingPageHTML;
+      // document.getElementById('landingpage').innerHTML = landingPageHTML;
       localStorage.setItem('language', 'vi');
       //Lazy i18n loader
       const lazyI18n = () =>
@@ -270,30 +323,55 @@
         const btn = document.getElementById('start_button');
         if (!btn) return;
 
-        btn.addEventListener('click', async () => {
-          const {initConnection} = await import('./src/game_logic/webRTC.js');
-          initConnection().catch(console.error);
+        // btn.addEventListener('click', async () => {
+        //   const {initConnection} = await import('./src/game_logic/webRTC.js');
+        //   initConnection().catch(console.error);
           
-          if (!isGameInitialized) {
-            const { initializeGame } = await import('./src/game_logic/index.js');           
-            requestAnimationFrame(() => initializeGame('model-container'));
-            isGameInitialized = true;
-          }
+        //   if (!isGameInitialized) {
+        //     const { initializeGame } = await import('./src/game_logic/index.js');           
+        //     requestAnimationFrame(() => initializeGame('model-container'));
+        //     isGameInitialized = true;
+        //   }
           
+        //   if (generalContainer) generalContainer.style.display = 'none';
+        //   if (modelContainer)   modelContainer.style.display   = 'block';
+        //   if (menuContainer)    menuContainer.style.display    = 'flex';
+          
+        //   // FIX: Hide the mode selection container explicitly
+        //   const modeContainer = document.getElementById('ModeSelectionContainer');
+        //   if(modeContainer) modeContainer.style.display = 'none';
+        // });
+
+        btn.addEventListener('click', () => {
+          // 1. Immediately hide the menu to show the "Loading" state you already have in HTML
           if (generalContainer) generalContainer.style.display = 'none';
-          if (modelContainer)   modelContainer.style.display   = 'block';
-          if (menuContainer)    menuContainer.style.display    = 'flex';
-          
-          // FIX: Hide the mode selection container explicitly
           const modeContainer = document.getElementById('ModeSelectionContainer');
           if(modeContainer) modeContainer.style.display = 'none';
-        });
+
+          // 2. Run the heavy stuff in the background without 'await' at the top level
+          const loadGame = async () => {
+              const { initConnection } = await import('./src/game_logic/webRTC.js');
+              // Let connection run in background
+              initConnection().catch(console.error);
+
+              const { initializeGame } = await import('./src/game_logic/index.js');
+              
+              // Use requestAnimationFrame to ensure the UI has one last frame to 
+              // hide the menus before the 3D engine takes over the CPU
+              requestAnimationFrame(() => {
+                  initializeGame('model-container');
+                  if (modelContainer) modelContainer.style.display = 'block';
+              });
+          };
+
+          loadGame();
+      });
       };
 
       const startGame = async () => {
         if (!isGameInitialized) {
           const { initializeGame } = await import('./src/game_logic/index.js');           
-          requestAnimationFrame(() => initializeGame('model-container'));
+          requestAnimationFrame(() =>  initializeGame('model-container'));
           isGameInitialized = true;
           
           if (generalContainer) generalContainer.style.display = 'none';
@@ -402,11 +480,11 @@
       }
 
       // Prefetch game bundle in idle time for smoother Start click
-      if ('requestIdleCallback' in window) {
-        requestIdleCallback(() => import('./src/game_logic/index.js'));
-      } else {
-        setTimeout(() => import('./src/game_logic/index.js'), 50);
-      }
+      // if ('requestIdleCallback' in window) {
+      //   requestIdleCallback(() => import('./src/game_logic/index.js'));
+      // } else {
+      //   setTimeout(() => import('./src/game_logic/index.js'), 50);
+      // }
     </script>
 
   </body>

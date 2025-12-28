@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "all": "concurrently \"vite\" \"cd backend/cmd && go run .\"",
+    "all": "concurrently \"vite\" \"cd BE/cmd/server && go run .\"",
     "postinstall": "node ./copy-three-assets.js"
   },
   "devDependencies": {

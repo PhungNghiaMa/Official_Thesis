@@ -7,6 +7,7 @@ const uploadContainer = document.getElementById('upload-container');
 const uploadInput = document.getElementById('upload-input');
 const uploadText = document.getElementById('upload-text');
 const uploadPreview = document.getElementById('upload-preview');
+const uploadVideoPreview = document.getElementById('video-preview');
 const uploadTitle = document.getElementById("upload-title");
 const uploadEnDes = document.getElementById("upload-english-description");
 const uploadVietDes = document.getElementById("upload-vietnamese-description");
@@ -42,6 +43,8 @@ export function closeUploadModal() {
     uploadModal.style.display = "none";
     uploadPreview.src = '';
     uploadPreview.style.display = 'none';
+    uploadVideoPreview.src = '';
+    uploadVideoPreview.style.display = 'none';
     uploadText.style.display = 'flex';
     uploadInput.value = null;
     uploadTitle.value = "";
@@ -404,7 +407,7 @@ export function initUploadModal(ktx2Loader) {
         // Subscribe to the room channel *before* making the API call.
         // This ensures we catch all 'type: "upload"' messages from the start.
         SubscribeChannel(`room:${roomID}`);
-        if (!file) return toastMessage("Select an image.");
+        if (!file) return toastMessage("Select a file.");
 
         // uploadSpinner.style.display = 'block';
         // uploadSubmit.disabled = true;
@@ -486,13 +489,24 @@ function handleFile(file) {
     if (file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/webp' || file.type === 'video/mp4' || file.type === 'video/quicktime' || file.type === 'video/webm' || file.type === 'video/avi')) {
         const reader = new FileReader();
         reader.onload = function (e) {
+          if (file.type.startsWith('video/')) {
+            uploadVideoPreview.src = e.target.result;
+            uploadPreview.src = '';
+            uploadPreview.style.display = 'none';
+            uploadVideoPreview.style.display = 'block';
+            uploadPreview.style.display = 'none';
+            uploadText.style.display = 'none';
+          } else {
+            uploadVideoPreview.src = '';
+            uploadVideoPreview.style.display = 'none';
             uploadPreview.src = e.target.result;
             uploadPreview.style.display = 'block';
             uploadText.style.display = 'none';
+          }
         };
         reader.readAsDataURL(file);
     } else {
-        alert('Please upload a PNG / JPG / WebP image.');
+        alert('Please upload a PNG / JPG / WebP image or MP4 / WEBM / MOV / AVI video file.');
     }
 }
 

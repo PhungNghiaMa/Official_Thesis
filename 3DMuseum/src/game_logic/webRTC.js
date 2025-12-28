@@ -1,9 +1,39 @@
-// webrtc_game.js
-// Drop into front-end and load this script AFTER index.js so window.gameAPI exists.
-// Example usage:
-//   <script type="module" src="./src/game_logic/webrtc_game.js"></script>
-//   then call initConnection() from console or programmatically.
-import { addRemotePlayer, updateRemotePlayerState, removeRemotePlayer, updateRemotePlayers, getLocalPlayerState , getCurrentNPCState , initNPC , _sharedRefs } 
+// webRTC.js
+//
+// This module implements WebRTC-based peer-to-peer communication for multiplayer game functionality in a 3D museum environment.
+// It manages real-time synchronization of player positions, animations, NPC states, and voice chat between connected clients.
+//
+// Key components:
+// - Peer connection establishment and management
+// - Data channel for efficient binary transmission of game state updates
+// - Throttled data sending to optimize network bandwidth and reduce server load
+// - Voice chat integration for real-time audio communication
+// - Host/client role differentiation for coordinated tour experiences
+//
+// Dependencies:
+// - Requires './index.js' to be loaded first, as this module imports functions for player and NPC state management
+// - Assumes the presence of window.gameAPI for game integration
+//
+// Integration instructions:
+// - Load this script as a module in the HTML document after index.js
+// - Example HTML inclusion:
+//   <script type="module" src="./src/game_logic/webRTC.js"></script>
+//
+// Usage:
+// - Call initConnection() to establish a WebRTC peer connection
+// - The module automatically handles sending and receiving game state updates
+// - Voice chat is initialized through the voice chat instance
+//
+// Configuration:
+// - API_BASE defaults to 'http://localhost:3001' for backend communication
+// - PEER_ID is generated randomly or can be set via window.WEBRTC_PEER_ID
+// - Animation codes are defined for compact binary transmission (IDLE=0, WALK=1, RUN=2)
+// - Throttling parameters control send frequency and minimum change thresholds
+//
+// Instrumentation:
+// - Tracks sent bytes and packets for performance monitoring
+// - Last instrumentation time is recorded for analysis
+import { addRemotePlayer, updateRemotePlayerState, removeRemotePlayer, updateRemotePlayers, getLocalPlayerState , getCurrentNPCState , _sharedRefs } 
   from './index.js';
 const API_BASE = "http://localhost:3001"// default to backend:3001
 const PEER_ID = (window.WEBRTC_PEER_ID) ? window.WEBRTC_PEER_ID : Math.random().toString(36).substring(2, 10);
@@ -11,7 +41,6 @@ window.hostStartTour = hostStartTour;
 let pc = null;
 let dc = null;
 let sendTimer = null;
-let isConnected = false;
 
 window.gameAPI = {}
 
@@ -41,8 +70,7 @@ let _npc_lastPos = null;
 let _npc_lastQuat = null;
 let _npc_lastSendTime = 0;
 let _npc_forceSendTimer = null;
-let _npc_sendIntervalHandle = null;   // previously undefined -> ReferenceError
-let _npc_forceTimer = null;           // alias used by some functions; keep both safe
+let _npc_sendIntervalHandle = null;   
 let existingNPC = null
 
 window.npcModelName = null;
@@ -59,6 +87,14 @@ const remoteAudioNodes = new Map(); // peerId -> { source, panner, gain }
 window.audioCtx = audioCtx;
 window.remoteAudioNodes = remoteAudioNodes;
 
+/**
+ * Enables voice chat functionality by accessing the user's microphone, processing the audio stream,
+ * and adding the processed audio track to the provided WebRTC peer connection.
+ * This function configures audio constraints for optimal voice quality, applies compression to reduce noise,
+ * and sets bitrate parameters for efficient transmission.
+ * @param {RTCPeerConnection} pc - The WebRTC peer connection to which the audio track will be added.
+ * @returns {Promise<void>} Resolves when microphone access is granted and audio track is added, or rejects on error.
+ */
 async function enableVoiceChat(pc) {
   try {
     localAudioStream = await navigator.mediaDevices.getUserMedia({
@@ -110,6 +146,11 @@ async function enableVoiceChat(pc) {
   }
 }
 
+/**
+ * Initializes the voice chat user interface by creating and appending a push-to-talk button to the document body.
+ * The button allows users to toggle microphone activation for voice communication.
+ * Styles the button with absolute positioning and event handlers for click interactions.
+ */
 function initVoiceUI() {
   const btn = document.createElement("button");
   btn.id = "voiceBtn";
@@ -148,9 +189,13 @@ function initVoiceUI() {
     // Flip the state
     isTalking = !isTalking;
   }
-
 }
 
+/**
+ * Activates the microphone for voice transmission during voice chat.
+ * Enables all audio tracks in the local audio stream and sets the microphone active state.
+ * Creates and plays a local loopback audio element for self-monitoring if not already present.
+ */
 function startTalking() {
   if (!localAudioStream) return;
 
@@ -178,7 +223,10 @@ function startTalking() {
   }
 }
 
-
+/**
+ * Deactivates the microphone to stop voice transmission during voice chat.
+ * Disables all audio tracks in the local audio stream and updates the microphone active state.
+ */
 function stopTalking() {
   // Assuming localAudioStream and isMicActive are defined in a wider scope
   if (!localAudioStream) return;
@@ -189,31 +237,87 @@ function stopTalking() {
 
 
 // Lazy access helpers (always use these inside webRTC.js instead of globalRefs directly)
-function getScene()       { return _sharedRefs.scene || null; }
+/**
+ * Retrieves the current scene object from shared references.
+ * @returns {THREE.Scene|null} The scene object or null if not available.
+ */
+function getScene(){ return _sharedRefs.scene || null; }
+
+/**
+ * Retrieves the third-person view player object from shared references.
+ * @returns {Object|null} The third-person view object or null if not available.
+ */
 function getTpView()      { return _sharedRefs.tpView || null; }
+
+/**
+ * Retrieves the crowd manager object from shared references.
+ * @returns {Object|null} The crowd manager object or null if not available.
+ */
 function getCrowd()      { return _sharedRefs.crowd || null; }
+
+/**
+ * Retrieves the agents map from shared references by calling the getAgents function if available.
+ * @returns {Map} A map of agents or an empty map if not available.
+ */
 function getAgentsFunc() { return _sharedRefs.getAgents ? _sharedRefs.getAgents() : new Map(); }
+
+/**
+ * Stops the tour for the specified NPC by calling the stopTour function from shared references.
+ * @param {Object} npc - The NPC object for which to stop the tour.
+ * @returns {*} The result of the stopTour function or null if not available.
+ */
 function stopTour(npc) {return _sharedRefs.stopTour ? _sharedRefs.stopTour(npc) : null;}
 
-
+/**
+ * Determines the room ID for WebRTC connections.
+ * Prioritizes the provided input room ID, then checks window.WEBRTC_ROOM_ID, 
+ * and finally falls back to URL query parameter 'room' or 'default'.
+ * @param {string} INPUT_ROOM_ID - Optional input room ID.
+ * @returns {string} The determined room ID.
+ */
 const getRooomID  = (INPUT_ROOM_ID) =>{
   if (INPUT_ROOM_ID) return INPUT_ROOM_ID;
   return window.WEBRTC_ROOM_ID ??  (new URLSearchParams(location.search).get("room") || "default");
 }
 
-
+/**
+ * Calculates the Euclidean distance between two 3D vectors.
+ * @param {Object} a - First vector with x, y, z properties.
+ * @param {Object} b - Second vector with x, y, z properties.
+ * @returns {number} The distance between the vectors.
+ */
 function vecDistance(a, b) {
   return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2 + (a.z-b.z)**2);
 }
+
+/**
+ * Computes the dot product of two quaternions.
+ * @param {Object} q1 - First quaternion with x, y, z, w properties.
+ * @param {Object} q2 - Second quaternion with x, y, z, w properties.
+ * @returns {number} The dot product value.
+ */
 function quatDot(q1, q2) {
   return q1.x*q2.x + q1.y*q2.y + q1.z*q2.z + q1.w*q2.w;
 }
+
+/**
+ * Calculates the angular difference between two unit quaternions in radians.
+ * @param {Object} q1 - First unit quaternion with x, y, z, w properties.
+ * @param {Object} q2 - Second unit quaternion with x, y, z, w properties.
+ * @returns {number} The angle difference in radians.
+ */
 function quatAngleDelta(q1, q2) {
   // angle between two unit quaternions
   const dot = Math.min(1, Math.max(-1, Math.abs(quatDot(q1,q2))));
   return Math.acos(dot) * 2;
 }
 
+/**
+ * Retrieves the current state of the NPC, including position and quaternion.
+ * Attempts to use the exported getCurrentNPCState function from index.js first,
+ * then falls back to the global npcModel if available.
+ * @returns {Object|null} An object with position (p) and quaternion (q) properties, or null if unavailable.
+ */
 function getNPCState() {
   // prefer local variable npcModel if available in index.js scope (index.js already has getCurrentNPCState export)
   try {
@@ -231,9 +335,19 @@ function getNPCState() {
   return null;
 }
 
-
+/**
+ * Sends the NPC state in binary format over the WebRTC data channel.
+ * Creates a compact binary buffer containing the NPC's position and quaternion.
+ * @param {Object} st - The NPC state object with position (p) and quaternion (q) properties.
+ * @returns {number} The byte length of the sent buffer.
+ * @throws {Error} If the data channel is not open.
+ */
 function sendNPCStateBinaryFromState(st) {
   if (!dc || dc.readyState !== "open") throw new Error("dc not open");
+  // 1: This usually represents a 1-byte Header or "Type ID." 
+  // For example, 0 might mean "Player Position," while 1 might mean "Chat Message."
+  // 7: This represents seven numbers (usually the player's position and rotation).3 numbers for Position: $(x, y, z)$4 numbers for Rotation: $(x, y, z, w)$ — The Quaternion!
+  // *4: Each of those 7 numbers is a Float32 (a decimal number). In computer memory, one Float32 takes up 4 bytes.Total size: $1 + (7 \times 4) = 29$ bytes.
   const buf = new ArrayBuffer(1 + 7*4);
   const dv = new DataView(buf);
   dv.setUint8(0, 4); // type = 4 (npc_state)
@@ -246,9 +360,29 @@ function sendNPCStateBinaryFromState(st) {
   dv.setFloat32(1 + 6*4, st.q.w, true);
 
     // name length and name bytes
+  // This calculates the starting position for the name data.
+
+  // As we saw before: 1 (Type ID) + 28 (Position/Rotation data) = 29.
+
+  // This means the name data begins at index 29 in your buffer.
   const nameLenOffset = 1 + 7*4;
+
+  // dv is your DataView.
+
+  // This line writes one byte that stores the length of the name.
+
+  // Why? If the name is "Bob", nameLen is 3. The person receiving this data needs to read this number first so they know to look for exactly 3 letters next.
   dv.setUint8(nameLenOffset, nameLen);
   if (nameLen > 0) {
+    /*
+      u8 is a Uint8Array (a view that lets you work with raw bytes).
+
+      nameBytes: This is likely your name string converted into UTF-8 bytes (e.g., using TextEncoder).
+
+      nameLenOffset + 1: We add +1 because index 29 holds the length. The actual letters start at index 30.
+
+      .set(): This copies the raw bytes of the name into the buffer.
+     */
     u8.set(nameBytes.subarray(0, nameLen), nameLenOffset + 1);
   }
 
@@ -256,6 +390,12 @@ function sendNPCStateBinaryFromState(st) {
   return buf.byteLength;
 }
 
+/**
+ * Sends the NPC state in JSON format over the WebRTC data channel.
+ * Serializes the NPC state including position, quaternion, name, and camera information.
+ * @param {Object} st - The NPC state object with position (p), quaternion (q), npcName, camPos, and camLookAt properties.
+ * @throws {Error} If the data channel is not open.
+ */
 function sendNPCStateJSONFromState(st) {
   if (!dc || dc.readyState !== "open") throw new Error("dc not open");
   const msg = { t: "npc_state", p: [st.p.x, st.p.y, st.p.z], q: [st.q.x, st.q.y, st.q.z, st.q.w], npcName: st.npcName || null , camPos: st.camPos || null, camLookAt: st.camLookAt || null };
@@ -309,7 +449,6 @@ window.addEventListener("tour-stop", (ev) => {
             } else if (entry.agent && typeof entry.agent.stop === 'function') {
               entry.state.touring = false;
               entry.agent.stop();
-              
             }
           } catch (e) {
             console.warn("[Tour] stopTour failed for", model.name, e);
@@ -348,6 +487,12 @@ window.addEventListener("tour-stop", (ev) => {
 // Helper: send a one-time authoritative npc_state (including camera) as JSON.
 // Use this from the host when starting a tour or when a participant joins to ensure
 // immediate snap behavior on non-host clients.
+/**
+ * Sends a one-time authoritative snapshot of the NPC state, including camera information, in JSON format over the WebRTC data channel.
+ * Used by the host to ensure immediate synchronization when starting a tour or when participants join.
+ * @param {Object} npcModel - The NPC model object with position, quaternion, and name properties. If null, attempts to retrieve state from getNPCState().
+ * @returns {boolean} True if the snapshot was sent successfully, false otherwise.
+ */
 function sendNpcSnap(npcModel) {
   if (!dc || dc.readyState !== "open") return false;
   try {
@@ -398,6 +543,12 @@ function sendNpcSnap(npcModel) {
 
 
 // main throttled loop
+/**
+ * Attempts to send the current NPC state over the WebRTC data channel, subject to throttling rules.
+ * Checks if the position or quaternion has changed sufficiently since the last send, or if forced.
+ * Sends the state in JSON format if conditions are met.
+ * @param {boolean} force - If true, sends the state regardless of change thresholds or timing.
+ */
 function trySendNPCState(force=false) {
   if (!dc || dc.readyState !== "open") return;
   const st = getNPCState();
@@ -437,6 +588,11 @@ function trySendNPCState(force=false) {
 }
 
 // throttled sender
+/**
+ * Starts the throttled sender for NPC state updates.
+ * Initializes timers and intervals to periodically check and send NPC state changes.
+ * Prevents multiple instances by checking if already running.
+ */
 function startNPCThrottledSender() {
   if (_npc_sendIntervalHandle) return;
   _npc_lastSendTime = performance.now();
@@ -462,6 +618,10 @@ function startNPCThrottledSender() {
   }, NPC_SEND_INTERVAL_MS);
 }
 
+/**
+ * Stops the throttled sender for NPC state updates.
+ * Clears the interval timer and resets related state variables.
+ */
 function stopNPCThrottledSender() {
   if (_npc_sendIntervalHandle) {
     clearInterval(_npc_sendIntervalHandle);
@@ -474,6 +634,13 @@ function stopNPCThrottledSender() {
 }
 
 // UI for remote to accept a tour invite
+/**
+ * Displays a UI button allowing remote clients to join a tour initiated by the host.
+ * Creates a button with the specified host ID and NPC name, positioned on the screen.
+ * Handles click events to accept the tour invitation and start following the NPC.
+ * @param {string} hostId - The ID of the host initiating the tour.
+ * @param {string} npcName - The name of the NPC leading the tour.
+ */
 function showJoinTourButton(hostId, npcName) {
   // avoid duplicate buttons
   if (document.getElementById(`join-tour-btn-${npcName}`)) return;
@@ -575,6 +742,13 @@ function createPlaceholderNPC(state) {
 
 
 // start local tour mode following the NPC with given name
+/**
+ * Initiates local tour mode where the third-person player follows the specified NPC.
+ * Sets up the necessary crowd agent for the player and configures the NPC following behavior.
+ * Handles cases where the NPC agent may not exist by creating fallback agents.
+ * @param {string} npcName - The name of the NPC to follow during the tour.
+ * @returns {Promise<boolean>} True if the tour mode was started successfully, false otherwise.
+ */
 export async function startLocalRoomTourMode(npcName) {
   const scene = getScene();
   const tpView = getTpView();
@@ -677,9 +851,6 @@ export async function startLocalRoomTourMode(npcName) {
   }
 }
 
-
-
-  // in webRTC.js
   Object.assign(window.gameAPI, { addRemotePlayer, updateRemotePlayerState, removeRemotePlayer, updateRemotePlayers });
 
 const SEND_INTERVAL = 100; //ms => 10Hz (Each 10 ms , the data will be send to the backend)
@@ -697,7 +868,12 @@ const ICE_CONFIG = {
   iceTransportPolicy: "all"
 };
 
-
+/**
+ * Initializes the WebRTC connection to the SFU (Selective Forwarding Unit) server.
+ * Creates a peer connection, sets up data channels, enables voice chat, and establishes the connection.
+ * Handles ICE gathering, offer creation, and connection state management.
+ * @returns {Promise<void>} Resolves when the connection is established and ready for communication.
+ */
 export async function initConnection() {
   console.log("[WebRTC] Connecting to SFU... room:", getRooomID(null), "peer:", PEER_ID);
   // create RTCPeerConnection
@@ -816,6 +992,14 @@ export async function initConnection() {
 }
 
 // --- Create offer and wait for ICE gathering to finish BEFORE sending to SFU ---
+/**
+ * Creates a WebRTC offer, waits for ICE gathering to complete, and sends the offer to the SFU server.
+ * Ensures all ICE candidates are gathered before posting to avoid incomplete offers.
+ * @param {RTCPeerConnection} pc - The WebRTC peer connection instance.
+ * @param {string} joinUrl - The URL to send the offer to for joining the room.
+ * @returns {Promise<Object>} The answer received from the SFU server.
+ * @throws {Error} If the fetch request fails or response is not ok.
+ */
 async function createAndSendOffer(pc, joinUrl) {
   const offer = await pc.createOffer({
     // you can set offerToReceiveAudio/video if needed for getUserMedia flows
@@ -867,6 +1051,11 @@ async function createAndSendOffer(pc, joinUrl) {
 
 
 // Called when DataChannel is open
+/**
+ * Handles the opening of the WebRTC data channel.
+ * Sets the host flag, announces the peer's presence to other participants,
+ * and starts periodic state sending for synchronization.
+ */
 function onDataOpen() {
   console.log("[WebRTC] Data channel open");
   isHost = window._IS_HOST;
@@ -895,20 +1084,24 @@ function onDataOpen() {
     sendTimer = setInterval(() => {
     // if (!isHost) return; // 🚫 prevent non-host from sending
 
-    const st = getLocalPlayerState ? getLocalPlayerState() : null;
-    if (!st) return;
-    try {
-      // Debug
-      // console.log("Send state:", st.camPos, st.camLookAt);
-      sendLocalStateBinary(st);
-    } catch (e) {
-      sendLocalState({ t: "state", id: PEER_ID, p: st.p, q: st.q, ts: Date.now() });
-    }
-  }, SEND_INTERVAL);
+      const st = getLocalPlayerState ? getLocalPlayerState() : null;
+      if (!st) return;
+      try {
+        // Debug
+        // console.log("Send state:", st.camPos, st.camLookAt);
+        sendLocalStateBinary(st);
+      } catch (e) {
+        sendLocalState({ t: "state", id: PEER_ID, p: st.p, q: st.q, ts: Date.now() });
+      }
+    }, SEND_INTERVAL);
 
 }
 
 // Debug helper - run in console after initConnection()
+/**
+ * Debug utility function to display a shortened version of the local SDP (Session Description Protocol).
+ * Useful for troubleshooting WebRTC connection issues by examining the offer/answer details.
+ */
 function dumpLocalSDPShort() {
   if (!pc || !pc.localDescription) return console.warn("no localDescription yet");
   console.log("local sdp length:", pc.localDescription.sdp.length);
@@ -919,6 +1112,12 @@ window.dumpLocalSDPShort = dumpLocalSDPShort;
 
 // When data arrives from peers
 // webRTC.js — replace existing onDataMessage function
+/**
+ * Handles incoming JSON messages from the WebRTC data channel.
+ * Parses the message and dispatches to appropriate handlers based on message type.
+ * Supports player state updates, tour commands, tour invites, and NPC state updates.
+ * @param {string} raw - The raw JSON string received from the data channel.
+ */
 function onDataMessage(raw) {
   let msg;
   try { msg = JSON.parse(raw); } catch { return; }
@@ -1043,6 +1242,13 @@ function onDataMessage(raw) {
 
 
 // e = event object (dc.onmessage passes event). senderId optional (if SFU attaches metadata).
+/**
+ * Handles incoming binary messages from the WebRTC data channel.
+ * Parses compact binary data for efficient transmission of game state updates.
+ * Supports player state and NPC state updates in binary format.
+ * @param {Object} e - The message event object containing the binary data.
+ * @param {string|null} senderId - Optional sender peer ID, if available from SFU metadata.
+ */
 function onDataMessageBinary(e, senderId = null) {
   try {
     const arr = (e.data instanceof ArrayBuffer)
@@ -1213,6 +1419,12 @@ function onDataMessageBinary(e, senderId = null) {
 
 
 // sendLocalStateBinary: includes peer id length+bytes so receivers can map packet to peer
+/**
+ * Sends the local player state in compact binary format over the WebRTC data channel.
+ * Includes peer ID for identification and animation state for efficient transmission.
+ * Falls back to JSON if peer ID is too long.
+ * @param {Object} state - The local player state object with position (p), quaternion (q), camera position (camPos), and camera quaternion (camQuat).
+ */
 function sendLocalStateBinary(state) {
   if (!dc || dc.readyState !== "open") return;
   if (!state || !state.p || !state.q) return;
@@ -1244,9 +1456,9 @@ function sendLocalStateBinary(state) {
   u8[1] = idBytes.length;
   u8.set(idBytes, 2);
 
-  const dv = new DataView(buf, headerLen, payloadLen);
 
-  // helper to read vector3 (supports arrays [x,y,z] or objects {x,y,z})
+    const dv = new DataView(buf, headerLen, payloadLen);
+// helper to read vector3 (supports arrays [x,y,z] or objects {x,y,z})
   const readVec3 = (v) => {
     if (!v) return { x: 0, y: 0, z: 0 };
     if (Array.isArray(v)) return { x: v[0] || 0, y: v[1] || 0, z: v[2] || 0 };
@@ -1299,6 +1511,11 @@ function sendLocalStateBinary(state) {
 
 
 // send arbitrary JSON object
+/**
+ * Sends an arbitrary JSON object over the WebRTC data channel.
+ * Used for various message types including state updates, commands, and notifications.
+ * @param {Object} obj - The object to serialize and send as JSON.
+ */
 function sendLocalState(obj) {
   if (!dc || dc.readyState !== "open") return;
   try { dc.send(JSON.stringify(obj)); } catch (e) { console.warn("[WebRTC] send failed:", e); }
@@ -1311,6 +1528,12 @@ function sendLocalState(obj) {
 // This cache variable is important. Define it in the global scope of webRTC.js
 // let _remoteNPCEntry = null; // You already have this, just ensure it's there.
 
+/**
+ * Updates the remote NPC state based on received data from the host.
+ * Locates the appropriate NPC agent, applies remote control flags, and synchronizes position and rotation.
+ * Handles initial synchronization for non-host clients and caches the remote NPC entry for efficiency.
+ * @param {Object} state - The NPC state object containing position (p), quaternion (q), and optional npcName.
+ */
 function updateNPCRemoteState(state) {
   if (!state || !state.p || !state.q) return;
   const localPlayer = getTpView();
@@ -1481,6 +1704,11 @@ function updateNPCRemoteState(state) {
 }
 
 // Replace existing hostStartTour with this
+/**
+ * Initiates a tour as the host by broadcasting an invitation to all connected clients.
+ * Sends the NPC's current state and camera information to allow clients to join and follow the tour.
+ * @param {Object} npcModel - The NPC model object that will lead the tour.
+ */
 export function hostStartTour(npcModel) {
   if (!isHost) {
     console.log("[Tour] Skipping hostStartTour — this peer is not the host.");
@@ -1518,12 +1746,21 @@ export function hostStartTour(npcModel) {
 }
 
 // Host trigger to start room tour (broadcast)
+/**
+ * Broadcasts a tour start command to all connected peers in the room.
+ * Sends a message indicating the host has initiated a tour, allowing clients to prepare for following.
+ */
 function startRoomTourBroadcast() {
   if (!dc || dc.readyState !== "open") return;
   sendLocalState({ t: "tour", cmd: "start", ts: Date.now() });
   console.log("[WebRTC] Tour start broadcasted");
 }
 
+/**
+ * Broadcasts a tour stop command to all connected peers in the room.
+ * Sends a message indicating the host has ended the tour, allowing clients to regain control.
+ * @param {string|null} npcName - Optional name of the NPC that was leading the tour.
+ */
 function stopRoomTourBroadcast(npcName = null) {
   if (!dc || dc.readyState !== "open") return;
   const payload = { t: "tour", cmd: "stop", ts: Date.now() };
@@ -1534,9 +1771,13 @@ function stopRoomTourBroadcast(npcName = null) {
 
 
 // graceful cleanup
+/**
+ * Performs cleanup of WebRTC resources and audio streams.
+ * Closes data channels and peer connections, stops audio tracks, removes remote audio elements,
+ * and resets connection state variables.
+ */
 function cleanup() {
   if (sendTimer) { clearInterval(sendTimer); sendTimer = null; }
-  isConnected = false;
   try { dc?.close(); } catch {}
   try { pc?.close(); } catch {}
   // Stop audio tracks
@@ -1564,12 +1805,21 @@ window.initConnection = initConnection;
 window.startRoomTourBroadcast = startRoomTourBroadcast;
 window.stopRoomTourBroadcast = stopRoomTourBroadcast;
 // helper to cleanly leave (call before unload or when leaving room)
+/**
+ * Handles leaving the WebRTC room gracefully.
+ * Sends a leave message to notify other peers, then performs cleanup of resources.
+ */
 export function leaveRoom() {
   sendLocalState({ t: "leave", id: PEER_ID, ts: Date.now() });
   cleanup();
   // optional: notify backend, etc.
 }
 
+/**
+ * Updates the lobby user interface to reflect the current list of connected players.
+ * Modifies player slot elements to show occupied or empty states based on the provided peer IDs.
+ * @param {Array<string>} CURRENT_PEER_IDS - Array of current peer IDs in the room.
+ */
 export function updateLobbyUI(CURRENT_PEER_IDS){
   const playerSlots = ['P1', 'P2', 'P3', 'P4', 'P5'];
 
@@ -1595,6 +1845,11 @@ export function updateLobbyUI(CURRENT_PEER_IDS){
   console.log(`[updateLobbyUI] Updated UI with ${CURRENT_PEER_IDS.length} players.`);
 }
 
+/**
+ * Updates the lobby state by fetching the current list of players in the room from the backend.
+ * Calls updateLobbyUI to reflect the changes in the user interface.
+ * @param {string} inputRoomID - Optional room ID to update the lobby for.
+ */
 export async function updateLobbyState(inputRoomID){
   if (inputRoomID) window.roomID = inputRoomID;
   const ROOM_ID = getRooomID(inputRoomID)
