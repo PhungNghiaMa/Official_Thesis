@@ -26,6 +26,7 @@ type SFU struct {
 	rooms map[string]*Room
 	mu    sync.RWMutex
 	cfg   *webrtc.Configuration
+	api   *webrtc.API
 }
 
 type Room struct {
@@ -49,6 +50,27 @@ type Peer struct {
 // This ensures proper STUN/TURN setup for WebRTC connections.
 // -----------------------------------------------------------------------------
 
+// func NewSFURepo(sfuCfg *SFUConfig) *SFU {
+// 	var iceServers []webrtc.ICEServer
+
+// 	for _, srv := range sfuCfg.RTC.ICEServers.Servers {
+// 		iceServers = append(iceServers, webrtc.ICEServer{
+// 			URLs:           srv.URLs,
+// 			Username:       srv.Username,
+// 			Credential:     srv.Credential,
+// 			CredentialType: webrtc.ICECredentialTypePassword,
+// 		})
+// 	}
+
+// 	return &SFU{
+// 		rooms: make(map[string]*Room),
+// 		cfg: &webrtc.Configuration{
+// 			ICEServers: iceServers,
+// 		},
+// 	}
+// }
+
+
 func NewSFURepo(sfuCfg *SFUConfig) *SFU {
 	var iceServers []webrtc.ICEServer
 
@@ -61,11 +83,27 @@ func NewSFURepo(sfuCfg *SFUConfig) *SFU {
 		})
 	}
 
+	// 1. Create a SettingEngine to handle the External IP
+	settingEngine := webrtc.SettingEngine{}
+	if sfuCfg.RTC.ExternalIP != "" {
+		// This tells WebRTC to use this IP for all ICE candidates
+		settingEngine.SetNAT1To1IPs([]string{sfuCfg.RTC.ExternalIP}, webrtc.ICECandidateTypeHost)
+	}
+
+	// 2. Create the API object with our settings
+	// Note: webrtc.NewPeerConnection uses a default API that only supports basic ICE server config.
+	// ExternalIP (NAT 1-to-1 mapping) is a low-level network option in SettingEngine, not in Configuration.
+	// To apply ExternalIP, you must build a custom API with your SettingEngine and use it to create connections.
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+
+	// 3. Update the SFU struct to use the API for creating connections
 	return &SFU{
 		rooms: make(map[string]*Room),
 		cfg: &webrtc.Configuration{
 			ICEServers: iceServers,
 		},
+		api: api,
+		// You may need to add an 'api' field to your SFU struct to use it later
 	}
 }
 
@@ -264,7 +302,8 @@ func (s *SFU) HandleJoin(c *gin.Context) {
 		return
 	}
 
-	pc, err := createPeerConnection(s.cfg)
+	// pc, err := createPeerConnection(s.cfg)
+	pc, err := s.api.NewPeerConnection(*s.cfg)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "pc create: " + err.Error()})
 		return

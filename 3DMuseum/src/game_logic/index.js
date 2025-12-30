@@ -667,6 +667,7 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
   // Use 'loadedmetadata' or 'canplay' instead of 'canplaythrough' for faster feedback
   video.addEventListener('canplay', onCanPlay, { once: true });
 }
+
 // Listen for custom upload events to update annotations
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;

@@ -1,39 +1,75 @@
 # config.toml - ion-sfu example with TURN & STUN
+# Define logging verbosity
 [log]
 level = "info"
 
+# This section configures the WebRTC transport layer for your SFU.
 [rtc]
 # IP/port used for WebRTC and SFU workers
-external_ip = "" # set if running behind NAT (public IP)
+# For the same LAN use case, external_ip can be left empty
+# Definition: The public IP address that the SFU advertises to remote WebRTC peers during ICE candidate exchange.
+# Scope: External, visible to clients on the internet.
+# Example:
+# If your server is behind NAT or a cloud provider, it may have:
+# Private IP: 10.0.0.5
+# Public IP: 203.0.113.45
+# You bind to 0.0.0.0:5000 locally, but you must set external_ip = "203.0.113.45" so peers know how to reach you.
+# Purpose: Ensures ICE candidates contain a reachable public address instead of a private one.
+external_ip = "" # set if running behind NAT (public IP) / cloud provider
+
+# The local IP and port where the SFU listens for WebRTC traffic.
+# "0.0.0.0" means all interfaces.
+# Port 5000 is the entry point for RTP/RTCP packets.
+# bind = "0.0.0.0:5000" → The SFU listens on all network interfaces (localhost, private IP, public IP) at port 5000.
+# If you set bind = "127.0.0.1:5000", only processes on the same machine could connect.
+# Purpose: Tells the operating system where to open the socket for WebRTC traffic.
 bind = "0.0.0.0:5000"
+
+
 
 # ICE configuration: public STUN and an authenticated TURN server
 [rtc.ice_servers]
 [[rtc.ice_servers.servers]]
-urls = ["stun:stun.l.google.com:19302"]
+urls = ["stun:stun.l.google.com:19302", "stun:global.relay.metered.ca:80"]
 
 # Example TURN (replace with your TURN hostname and credentials)
 [[rtc.ice_servers.servers]]
 urls = [
-  "turn:turn.example.com:3478?transport=udp",
-  "turn:turn.example.com:3478?transport=tcp"
+  "turn:global.relay.metered.ca:80",
+  "turn:global.relay.metered.ca:443",
+  "turns:global.relay.metered.ca:443?transport=tcp"
 ]
-username = "turnuser"
-credential = "turnpassword"
+username = "d99d17eae5326e249f6ed1b9"
+credential = " e8rRRCKBU1XR/kAB"
 
 # optional: specify range for RTP/RTCP port allocation (if needed)
+# min = 30000 / max = 32000
+# Defines the port range for RTP/RTCP allocation.
+# Useful if you want to restrict which ports are used (e.g., firewall rules).
+
+# If omitted, defaults are used.
 # [rtc.ports]
 # min = 30000
 # max = 32000
 
 [web]
 # HTTP management port (for ion api / health / stats). Adjust if you want.
+# HTTP management API port.
+# Provides health checks, stats, and control endpoints.
+# Accessible via http://your-server:7000.
 bind = "0.0.0.0:7000"
 
+# gRPC API port.
+# Used for programmatic control of the SFU (e.g., from other services).
 [grpc]
 bind = "0.0.0.0:50051"
 
 [sfu]
 # tuning params (defaults are usually fine). Example:
+# Maximum number of subscribers per stream.
+# Controls scalability and resource usage.
 max_subscribers = 50
+
+# Maximum number of publishers (users sending streams).
+# Prevents overload by limiting simultaneous broadcasters.
 max_publishers = 10

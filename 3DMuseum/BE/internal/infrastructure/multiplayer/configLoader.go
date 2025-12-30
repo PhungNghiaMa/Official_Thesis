@@ -18,10 +18,12 @@ type ICEServer struct {
 }
 
 type RTCConfig struct {
+	ExternalIP string    `toml:"external_ip"`
 	ICEServers ICEConfig `toml:"ice_servers"`
 }
 
 type SFUConfig struct {
+	ExternalIP string    `toml:"external_ip"`
 	RTC RTCConfig `toml:"rtc"`
 }
 

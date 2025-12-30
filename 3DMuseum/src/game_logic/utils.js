@@ -503,6 +503,10 @@ function handleFile(file) {
             uploadPreview.style.display = 'block';
             uploadText.style.display = 'none';
           }
+
+
+
+          
         };
         reader.readAsDataURL(file);
     } else {
