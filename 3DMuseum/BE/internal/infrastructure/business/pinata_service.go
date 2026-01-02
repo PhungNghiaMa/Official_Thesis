@@ -219,7 +219,7 @@ func (r *PinataRepo) UploadAssetToPinata(fileBuffer []byte, originalFileName str
         req.Header.Set("pinata_secret_api_key", apiSecret)
     }
 
-    client := &http.Client{Timeout: 5 * time.Minute}
+    client := &http.Client{Timeout: 30 * time.Minute}
     resp, err := client.Do(req)
     if err != nil {
         return applicationDTO.AssetStruct{}, fmt.Errorf("failed to send request to Pinata: %w", err)
@@ -302,7 +302,7 @@ func (r *PinataRepo) UploadAudioToPinata(websocketRepo applicationRepository.Web
         req.Header.Set("pinata_secret_api_key", apiSecret)
     }
 
-    client := &http.Client{Timeout: 10 * time.Minute}
+    client := &http.Client{Timeout: 30 * time.Minute}
     resp, _ := client.Do(req)
     defer resp.Body.Close()
 
@@ -425,7 +425,7 @@ func (r *PinataRepo) UploadVideoToPinata(websocketRepo applicationRepository.Web
         req.Header.Set("pinata_secret_api_key", apiSecret)
     }
 
-    client := &http.Client{Timeout: 10 * time.Minute}
+    client := &http.Client{Timeout: 30 * time.Minute}
     resp, err := client.Do(req)
     if err != nil {
         return applicationDTO.AssetStruct{}, fmt.Errorf("failed to send request to Pinata: %w", err)

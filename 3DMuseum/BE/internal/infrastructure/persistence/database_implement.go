@@ -76,7 +76,7 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp applicationDTO.
 	// If the CIDs are identical AND we're updating, we skip the insert.
 	if currentVersion > 0 && latestAsset.AssetCID == ktx2Resp.IpfsHash {
 
-		// CIDs are the same, but metadata (title/description) may have changed.
+		// CIDs are the same, but metadata (title/description) may have changed
 		// We update the metadata of the LATEST record (not the CID/version).
 		// This is the simplest way to handle non-asset-changing updates.
 		updates := map[string]any{
@@ -103,30 +103,61 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp applicationDTO.
 				return fmt.Errorf("failed to update asset metadata and/or webp_cid: %w", err)
 			}
 		}
-	} else {
-		// Define new versin number for insert new row
-		newVersion := currentVersion + 1
-
-		// CIDs have changed OR it's a new asset (currentVersion == 0).
-		// Create a new record with the incremented version.
-		newAsset := model.Asset{
-			AssetCID:              ktx2Resp.IpfsHash, // New KTX2 CID
-			WebpCID:               newWebpCID,           // New WebP CID
-			AssetMeshName:         info.MeshName,
-			AssetName:             ktx2Resp.Filename,
-			Title:                 info.Title,
-			VietnameseDescription: info.VietnameseDescription,
-			EnglishDescription:    info.EnglishDescription,
-			RoomID:                uint(info.RoomID),
-			Filesize:              fileSize,
-			CategoryID:            uint(ktx2Resp.CategoryID),
-			Version:               newVersion, // <-- This is the new, incremented version
-		}
-		if err := tx.Create(&newAsset).Error; err != nil {
+	}else { 
+		// Define new version number for insert new row 
+		newVersion := currentVersion + 1 
+		// Check if this CID is currently the latest in ANY mesh 
+		var assetsWithCID []model.Asset 
+		if err := tx.Where("asset_cid = ?", ktx2Resp.IpfsHash).Find(&assetsWithCID).Error; err != nil {
 			tx.Rollback()
-			return fmt.Errorf("failed to create new asset version: %w", err)
-		}
-	}
+			return fmt.Errorf("error checking CID usage: %w", err) 
+		} 
+		inUse := false 
+		var conflictAsset model.Asset 
+		for _, asset := range assetsWithCID { 
+			var latestForMesh model.Asset 
+			err2 := tx.Where("asset_mesh_name = ? AND room_id = ?", asset.AssetMeshName, asset.RoomID). Order("version DESC"). First(&latestForMesh).Error 
+			if err2 == nil && latestForMesh.AssetCID == ktx2Resp.IpfsHash { 
+				inUse = true 
+				conflictAsset = latestForMesh 
+				break 
+			} 
+		} 
+		if inUse { 
+			// Case 1: CID is the latest in another mesh → block insert 
+			 tx.Rollback() 
+			 return fmt.Errorf("CID %s is already in use by mesh %s (room %d)", ktx2Resp.IpfsHash, conflictAsset.AssetMeshName, conflictAsset.RoomID) 
+		} else if len(assetsWithCID) > 0 && !inUse { 
+				// Case 2: CID exists but is not latest anywhere → update current mesh’s latest record 
+				updates := map[string]any{ 
+					"asset_cid": ktx2Resp.IpfsHash, 
+					"asset_name": ktx2Resp.Filename, 
+					"asset_mesh_name": info.MeshName, 
+					"title": info.Title, 
+					"vietnamese_description": info.VietnameseDescription, 
+					"english_description": info.EnglishDescription, 
+					"filesize": fileSize, 
+					"updated_at": time.Now(), 
+					"version": newVersion,
+				} 
+				
+				if (latestAsset.WebpCID == nil && newWebpCID != nil) || (latestAsset.WebpCID != nil && *latestAsset.WebpCID != *newWebpCID) { 
+					updates["webp_cid"] = newWebpCID 
+				} 
+				
+				if err := tx.Model(&model.Asset{}).Where("asset_id = ?", latestAsset.AID).Updates(updates).Error; err != nil { 
+					tx.Rollback() 
+					return fmt.Errorf("failed to update asset metadata and/or cid/webp_cid: %w", err) 
+				} 
+		} else{ 
+			// Case 3: CID not found at all → insert new record 
+			newAsset := model.Asset{ AssetCID: ktx2Resp.IpfsHash, WebpCID: newWebpCID, AssetMeshName: info.MeshName, AssetName: ktx2Resp.Filename, Title: info.Title, VietnameseDescription: info.VietnameseDescription, EnglishDescription: info.EnglishDescription, RoomID: uint(info.RoomID), Filesize: fileSize, CategoryID: uint(ktx2Resp.CategoryID), Version: newVersion, } 
+			if err := tx.Create(&newAsset).Error; err != nil { 
+				tx.Rollback() 
+				return fmt.Errorf("failed to create new asset version: %w", err) 
+			} 
+		} 
+	} 
 
 	// 4. Commit the transaction
 	if err := tx.Commit().Error; err != nil {

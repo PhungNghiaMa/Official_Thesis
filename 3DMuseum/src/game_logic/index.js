@@ -38,7 +38,7 @@ const clock = new THREE.Clock();
 const scene = new THREE.Scene();
 
 let menuOpen = false;
-let currentMuseumId = Museum.ART_GALLERY;
+let currentMuseumId = Museum.ROOM1;
 
 const STEPS_PER_FRAME = 2; // Number of physics steps per frame
 let fpView, tpView; // Instance of FirstPersonPlayer and ThirdPersonPlayer
@@ -232,8 +232,8 @@ let interactedDoor;
 export const FrameToImageMeshMap = {};
 
 const ModelPaths = {
-    [Museum.ART_GALLERY]: "optimizedModel/optimizeModel_NEW_5.glb",
-    [Museum.LOUVRE]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
+    [Museum.ROOM1]: "optimizedModel/optimizeModel_21.glb",
+    [Museum.ROOM2]: "art_hallway/VIRTUAL_ART_GALLERY_3.gltf",
 }
 let raycasterManager = null
 let imageMeshesArray = [];
@@ -298,17 +298,6 @@ function getAudioContext() {
     return audioContext;
 }
 
-// // Add temporary UI button for host test:
-// const hostBtn = document.createElement("button");
-// hostBtn.textContent = "Host: Invite Tour";
-// hostBtn.onclick = () => {
-//   // pick the NPC in scene (you must have one); example uses scene.getObjectByName('hostNPC')
-//   const npc = scene.getObjectByName('hostNPC') || scene.getObjectByName('NPC_tour_default');
-//   if (npc) quickHostInvite(npc);
-//   else console.warn("host npc not found; set npc.name or pass model");
-// };
-// hostBtn.style = "position:absolute;left:12px;top:12px;z-index:99999";
-// document.body.appendChild(hostBtn);
 
 
 export async function prefetchAudio(audioCID) {
@@ -392,6 +381,7 @@ export async function playAudio(audioCID) {
   source.start(0);
   currentSourceNode = source;
 }
+
 
 export function stopAudio() {
     if (currentSourceNode) {
@@ -623,6 +613,13 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
     videoTexture.format = THREE.RGBAFormat; // Use RGBA for safety
     videoTexture.colorSpace = THREE.SRGBColorSpace; // Match your renderer
 
+    // --- MIRROR Y LOGIC START ---
+    // Flip the texture vertically
+    videoTexture.wrapS = THREE.RepeatWrapping;
+    videoTexture.wrapT = THREE.RepeatWrapping;
+    videoTexture.repeat.set(1, -1); // 1 on X (normal), -1 on Y (mirrored)
+    videoTexture.offset.set(0, 1);  // Shift the offset so the flipped image aligns with the mesh
+
     const material = new THREE.MeshBasicMaterial({ map: videoTexture });
 
     // Clean up old material properties
@@ -671,13 +668,12 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
 // Listen for custom upload events to update annotations
 document.body.addEventListener("uploadevent", (event) => {
     const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
-
+    
     if (annotationMesh[asset_mesh_name]) {
         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamese_description,english_description);
         annotationMesh[asset_mesh_name].title = title;
         annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
         annotationMesh[asset_mesh_name].eng_des = english_description;
-        // setImageToMeshKTX2(currentScene,asset_mesh_name, img_url);
     }
 });
 
@@ -695,6 +691,10 @@ const ktx2Loader = new KTX2Loader();
 ktx2Loader.setTranscoderPath('/basis/');
 ktx2Loader.detectSupport(renderer);
 
+// Initialize geometric LOD for reduce draw calls 
+const lod = new THREE.LOD();
+scene.add(lod);
+
 // Main model loader 
 const loader = new GLTFLoader(LoadingManager).setPath('/assets/');
 loader.setDRACOLoader(dracoLoader);
@@ -705,59 +705,36 @@ const characterLoader = new GLTFLoader().setPath('/assets/');
 characterLoader.setDRACOLoader(dracoLoader);
 characterLoader.setKTX2Loader(ktx2Loader);
 
-function detectInitialLOD(bandWidth){
-  if ('connection' in navigator && navigator.connection){
-    const  conn = navigator.connection || navigator.webkitConnection;
-    const isSlowNetwork = ['slow-2g', '2g', '3g'].includes(conn.effectiveType);
-    const downlink = conn.downlinkMax;
-    let lowDonwLink = 6
-    const lowBandWidth = 50
-    if(!downlink) return
+// function detectInitialLOD(bandWidth){
+//   if ('connection' in navigator && navigator.connection){
+//     const  conn = navigator.connection || navigator.webkitConnection;
+//     const isSlowNetwork = ['slow-2g', '2g', '3g'].includes(conn.effectiveType);
+//     const downlink = conn.downlinkMax;
+//     let lowDonwLink = 6
+//     const lowBandWidth = 50
+//     if(!downlink) return
 
-    if (isSlowNetwork || downlink <= lowDonwLink || conn.saveData || bandWidth <= lowBandWidth){
-      LOD_SETTINGS.currentBias = LOD_SETTINGS.LOW;
-    } else {
-      LOD_SETTINGS.currentBias = LOD_SETTINGS.HIGH;
-    }
-  }
-}
+//     if (isSlowNetwork || downlink <= lowDonwLink || conn.saveData || bandWidth <= lowBandWidth){
+//       LOD_SETTINGS.currentBias = LOD_SETTINGS.LOW;
+//     } else {
+//       LOD_SETTINGS.currentBias = LOD_SETTINGS.HIGH;
+//     }
+//   }
+// }
 // applyTextureLODInitial use to set up the material at the initial loadtime 
-function applyTextureLODInitial(material , mipMapBias){
-  if (!material || !renderer || !renderer.capabilities) return;
-  if (material.map && material.map.isTexture) {
-    // Check if the texture is a KTX2/compressed texture (by format)
-    if (material.map) {
-        material.map.mipMapBias = mipMapBias;
-        
-        // Also adjust anisotropy (texture filtering quality)
-        // Lower bias for high quality, higher bias for performance
-        material.map.anisotropy = (mipMapBias > 0) ? 4 : renderer.capabilities.getMaxAnisotropy();
-        material.map.needsUpdate = true;
-    }
-  }
-}
-
 function applyTextureLOD(mipMapBias) {
-    if (!scene || !renderer) return; // Ensure scene/renderer are available
+    if (!scene || !renderer) return;
 
     scene.traverse((object) => {
         if (object.isMesh) {
             const material = object.material;
-            // Handle both single material and array of materials
             const materials = Array.isArray(material) ? material : [material];
 
             materials.forEach(mat => {
-                // We only care about main texture maps that are loaded (like user uploads)
                 if (mat.map && mat.map.isTexture) {
-                    // Check if the texture is a KTX2/compressed texture (by format)
-                    if (mat.map.format) {
+                    // Just change the bias. This is cheap and happens in the shader/sampler.
+                    if (mat.map.mipMapBias !== mipMapBias) {
                         mat.map.mipMapBias = mipMapBias;
-                        
-                        // Also adjust anisotropy (texture filtering quality)
-                        // Lower bias for high quality, higher bias for performance
-                        mat.map.anisotropy = (mipMapBias > 0) ? 4 : window.renderer.capabilities.getMaxAnisotropy();
-                        
-                        mat.map.needsUpdate = true;
                     }
                 }
             });
@@ -765,20 +742,30 @@ function applyTextureLOD(mipMapBias) {
     });
 }
 
-function checkAndAdjustLOD(currentFPS){
+// Function to check FPS and adjust LOD accordingly
+function checkAndAdjustLOD(currentFPS) {
   let newBias = LOD_SETTINGS.currentBias;
   const BIAS_STEP = 0.5;
-  const {minAcceptableFPS , targetFPS , HIGH , LOW} = LOD_SETTINGS
-  // FPS DROP --> DEGRADE MATERIAL QUALITY
-  // Try to tune the newBias so it can dynamically catch up with the network status
-  // If the FPS is low then the acceptable FPS , mean that network still low and therefore set the low standard at newbias 
-  if (minAcceptableFPS > currentFPS){
-    newBias = Math.min(newBias , newBias + BIAS_STEP);
-  }else{ // Else set the newbias higher so it can exactly reflect the network enhancement 
-    newBias = Math.max(newBias , newBias + BIAS_STEP);
+  
+  // Hysteresis buffers:
+  // Drop quality if FPS is consistently bad (< 45)
+  // Only improve quality if FPS is consistently great (> 58), not just "okay"
+  const UPGRADE_THRESHOLD = 58; 
+  const DOWNGRADE_THRESHOLD = 45;
+
+  if (currentFPS < DOWNGRADE_THRESHOLD) {
+    // Performance is bad -> Increase bias (blurrier textures, faster render)
+    newBias += BIAS_STEP;
+  } else if (currentFPS > UPGRADE_THRESHOLD) {
+    // Performance is great -> Decrease bias (sharper textures)
+    newBias -= BIAS_STEP;
   }
-  // If the newBias different ( can be lower or higher then initial LOD_SETTING.currentBias then try to announce to the program to dynamically tune the material )
-  if (newBias != LOD_SETTINGS.currentBias){
+
+  // Clamp bias between High Quality (0.0) and Low Quality (3.0 or higher)
+  newBias = Math.max(0.0, Math.min(newBias, 4.0));
+
+  // Only apply if changed
+  if (newBias !== LOD_SETTINGS.currentBias) {
     LOD_SETTINGS.currentBias = newBias;
     applyTextureLOD(newBias);
   }
@@ -794,7 +781,8 @@ function clearSceneObjects(obj) {
         clearSceneObjects(child);
         obj.remove(child);
     }
-    if (obj.geometry) obj.geometry.dispose();
+    if (obj.geometry) obj.geometry.dispose()    // console.log(`[LOD] Adjusting Texture Bias: ${LOD_SETTINGS.currentBias} -> ${newBias} (FPS: ${Math.round(currentFPS)})`);
+;
     if (obj.material) {
         const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
         materials.forEach(material => {
@@ -818,7 +806,7 @@ function checkPlayerPosition() {
         const playerPosition = fpView.getPlayerPosition();
         if (doorBoundingBox.distanceToPoint(playerPosition) < 4 && doorState[interactedDoor]) {
             hasEnteredNewScene = true;
-            const nextMuseum = currentMuseumId === Museum.ART_GALLERY ? Museum.LOUVRE : Museum.ART_GALLERY;
+            const nextMuseum = currentMuseumId === Museum.ROOM1 ? Museum.ROOM2 : Museum.ROOM1;
             setMuseumModel(nextMuseum);
         }
     }
@@ -932,67 +920,22 @@ function updatePropVisibility() {
     }
 }
 
+// applyTextureLODInitial use to set up the material at the initial loadtime 
+function applyTextureLODInitial(material , mipMapBias){
+  if (!material || !renderer || !renderer.capabilities) return;
+  if (material.map && material.map.isTexture) {
+    // Check if the texture is a KTX2/compressed texture (by format)
+    if (material.map) {
+        material.map.mipMapBias = mipMapBias;
+        
+        // Also adjust anisotropy (texture filtering quality)
+        // Lower bias for high quality, higher bias for performance
+        material.map.anisotropy = (mipMapBias > 0) ? 4 : renderer.capabilities.getMaxAnisotropy();
+        material.map.needsUpdate = true;
+    }
+  }
+}
 
-// Material Tuning Function
-// function tuneMaterial(material) {
-//     if (!material) return null; 
-
-//     // --- Force upgrade non-PBR materials (MeshBasic, Lambert, etc.) ---
-//     if (!(material instanceof THREE.MeshStandardMaterial) && !(material instanceof THREE.MeshPhysicalMaterial)) {
-//         material = new THREE.MeshStandardMaterial({
-//             map: material.map || null,
-//             color: (material.color && material.color.clone()) || new THREE.Color(0xffffff),
-//             roughness: 1.0,
-//             metalness: 0.0,
-//             transparent: !!material.transparent,
-//             opacity: material.opacity !== undefined ? material.opacity : 1.0,
-//         });
-//     }
-
-//     // --- Ensure shadows are enabled ---
-//     material.shadowSide = THREE.FrontSide;   // Fix shadow rendering
-//     material.needsUpdate = true;
-
-//     // Clamp safe values
-//     if (material.roughness !== undefined) {
-//         material.roughness = Math.min(Math.max(material.roughness, 0.0), 1.0);
-//     }
-//     if (material.metalness !== undefined) {
-//         material.metalness = Math.min(Math.max(material.metalness, 0.0), 1.0);
-//     }
-
-//     // Scene environment reflection
-//     if ('envMapIntensity' in material) {
-//         material.envMapIntensity = 0.5;
-//     }
-
-//     // ✅ Important: use FrontSide (so walls don’t render inside)
-//     material.side = THREE.DoubleSide;
-
-//     // Update all maps
-//     const mapNames = ['map', 'emissiveMap', 'aoMap', 'metalnessMap', 'roughnessMap', 'normalMap', 'bumpMap'];
-//     for (const name of mapNames) {
-//         const texture = material[name];
-//         if (!texture) continue;
-
-//         if (name === 'map' || name === 'emissiveMap') {
-//             texture.colorSpace = THREE.SRGBColorSpace;
-//         } else {
-//             texture.colorSpace = THREE.LinearSRGBColorSpace;
-//         }
-
-//         texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-//         texture.minFilter = THREE.LinearMipMapLinearFilter;
-//         texture.magFilter = THREE.LinearFilter;
-//         texture.needsUpdate = true;
-//     }
-
-//     if (material.normalMap && !material.normalScale) {
-//         material.normalScale = new THREE.Vector2(1, 1);
-//     }
-
-//     return material;
-// }
 function tuneMaterial(material) {
     if (!material) return null; 
 
@@ -1049,8 +992,8 @@ function tuneMaterial(material) {
         // --- DYNAMIC LOD/PERFORMANCE APPLICATION ---
         // Apply the dynamic mipmap bias based on current FPS/network conditions
         if (texture.isTexture) {
-            texture.mipMapBias = currentBias;
-            texture.anisotropy = anisotropy;
+          texture.mipMapBias = LOD_SETTINGS.currentBias;
+          texture.anisotropy = Math.min(4,renderer.capabilities.getMaxAnisotropy());
         }
         // -------------------------------------------
 
@@ -1832,6 +1775,9 @@ async function loadModel() {
             const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
             if (annotationMesh[asset_mesh_name]) {
                 annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
+                annotationMesh[asset_mesh_name].mesh.userData.videoSRC = `https://${PINATA_URL}${asset_cid}/master.m3u8`;
+                annotationMesh[asset_mesh_name].mesh.userData.backup_videoSRC = `https://${PINATA_URL}${asset_cid}/stream.m3u8`;
+                annotationMesh[asset_mesh_name].mesh.userData.category = category;
                 annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
                 if (category === "Image"){
                   setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
@@ -1869,7 +1815,7 @@ function initMenu() {
         listItem1.textContent = "Room1";
         listItem1.className = "menu-item";
         listItem1.addEventListener("click", () => {
-            setMuseumModel(Museum.ART_GALLERY);
+            setMuseumModel(Museum.ROOM1);
             closeMenu();
         });
 
@@ -1877,7 +1823,7 @@ function initMenu() {
         listItem2.textContent = "Room2";
         listItem2.className = "menu-item";
         listItem2.addEventListener("click", () => {
-            setMuseumModel(Museum.LOUVRE);
+            setMuseumModel(Museum.ROOM2);
             closeMenu();
         });
 
@@ -2200,7 +2146,7 @@ function animate() {
       }
     } else {
       for (let i = 0; i < STEPS_PER_FRAME; i++) {
-        tpView.update(1/280);
+        tpView.update(frameDelta / 2);
       }
     }
 
@@ -2361,7 +2307,7 @@ function animate() {
     try { updateRemotePlayers(frameDelta); } catch (e) { console.warn("updateRemotePlayers failed", e); }
   }
   updateAudioListener(camera)
-
+  lod.update(camera);
   // checkPlayerPosition();
   composer.render();
 }
@@ -3137,7 +3083,8 @@ export function initializeGame(targetContainerId = 'model-container') {
             console.log("Stopping tour...");
             stopAgentTour(npc);
             npc.state.touring = false;
-
+            // Stop play audio
+            stopAudio();
           try {
             const npcName = npc.model?.name || (npc.model?.userData && npc.model.userData.tourId) || null;
             if (typeof stopRoomTourBroadcast === 'function') {
@@ -3247,20 +3194,20 @@ export function initializeGame(targetContainerId = 'model-container') {
               imageMeshName = FrameToImageMeshMap[frameName];
             }
             console.debug("CLICKING ON FRAME: ", imageMeshName)
-            const imageData = annotationMesh[imageMeshName]
-            console.warn("IMAGE DATA: ", imageData)
-            if(!imageMeshName || !imageData){
+            const assetData = annotationMesh[imageMeshName]
+            console.warn("ASSET DATA: ", assetData)
+            if(!imageMeshName || !assetData){
                 console.warn("No image mapped for: ", frameName)
                 return;
             }
 
-            const imageURL = imageData.mesh.userData.imageSRC || '';
-            const {annotationDiv} = imageData
-            // const {annotationDiv} = imageData;
+            const assetURL = assetData.mesh.userData.videoSRC || assetData.mesh.userData.backup_videoSRC || assetData.mesh.userData.imageSRC || '';
+            const {annotationDiv} = assetData;
+            // const {annotationDiv} = assetData;
             console.log(`User clicked frame: ${frameName} → mapped to: ${imageMeshName}`);
             console.log("Viet description: ", annotationMesh[imageMeshName].annotationDiv.getVietDes())
             console.log("Eng description: ", annotationMesh[imageMeshName].annotationDiv.getEngDes())
-            DisplayImageOnDiv(imageURL , annotationDiv.title , annotationDiv.vietnamese_description , annotationDiv.english_description)
+            DisplayImageOnDiv(assetURL , annotationDiv.title , annotationDiv.vietnamese_description , annotationDiv.english_description)
          },
         onDoorClick: (clickedObject) => {
             const parentName = clickedObject.parent?.name;

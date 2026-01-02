@@ -1,7 +1,8 @@
 import { UploadItem , StartWebSocket , SubscribeChannel} from "./services";
 import * as THREE from "three";
 import { audioCache } from "./index.js";
-
+import Hls from "hls.js";
+let isVideo = false;
 const uploadModal = document.getElementById("upload-modal");
 const uploadContainer = document.getElementById('upload-container');
 const uploadInput = document.getElementById('upload-input');
@@ -421,6 +422,11 @@ export function initUploadModal(ktx2Loader) {
 
       UploadItem(file, asset_mesh_name, uploadTitle.value, uploadVietDes.value, uploadEnDes.value, roomID)
       .then((response) => {
+        // const asset_mesh = gameScene.getObjectByName(asset_mesh_name);
+
+        // if (isVideo){
+        //   asset_mesh.userData.
+        // }
 
         console.warn("RESPONSE: ", response);
         const realCID = response?.asset_cid;
@@ -453,7 +459,17 @@ export function initUploadModal(ktx2Loader) {
 
         if (response.success) closeUploadModal();
 
-        updatePictureFrameTexture(ktx2Loader, asset_mesh_name, realCID, webpCID);
+        if (!isVideo){
+          updatePictureFrameTexture(ktx2Loader, asset_mesh_name, realCID, webpCID);
+          return;
+        }else{
+          updateVideoTexture(asset_mesh_name, realCID);
+          return;
+        }
+
+        
+
+        // updatePictureFrameTexture(ktx2Loader, asset_mesh_name, realCID, webpCID);
       })
       .catch((err) => {
         console.error("Upload failed:", err);
@@ -496,17 +512,15 @@ function handleFile(file) {
             uploadVideoPreview.style.display = 'block';
             uploadPreview.style.display = 'none';
             uploadText.style.display = 'none';
+            isVideo = true;
           } else {
             uploadVideoPreview.src = '';
             uploadVideoPreview.style.display = 'none';
             uploadPreview.src = e.target.result;
             uploadPreview.style.display = 'block';
             uploadText.style.display = 'none';
-          }
-
-
-
-          
+            isVideo = false;
+          }          
         };
         reader.readAsDataURL(file);
     } else {
@@ -514,7 +528,6 @@ function handleFile(file) {
     }
 }
 
-// utils.js
 
 // Replace your current Mapping_PictureFrame_ImageMesh with this version.
 export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray) {
@@ -591,7 +604,7 @@ export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFrame
 }
 
 
-export function DisplayImageOnDiv(imageURL, title, vietnamese_description, english_description) {
+export function DisplayImageOnDiv(assetURL, title, vietnamese_description, english_description) {
     if (!FirstIMGCol || !TitleContainer || !BottomContainer || !ImageShowContainer) {
         console.error("Missing target DOM elements. Check your HTML structure.");
         return;
@@ -606,13 +619,60 @@ export function DisplayImageOnDiv(imageURL, title, vietnamese_description, engli
     BottomContainer.innerHTML = '';
 
     // Create image element
-    const imgElement = document.createElement('img');
-    imgElement.src = imageURL;
-    imgElement.alt = title || 'Artwork';
-    imgElement.style.width = '100%';
-    imgElement.style.height = '100%';
-    imgElement.style.objectFit = 'contain';
-    FirstIMGCol.appendChild(imgElement);
+    const isHLS = assetURL.toLowerCase().includes('.m3u8');
+    const videoExtensions = ['.mp4', '.webm', '.ogg'];
+    const isNormalVideo = videoExtensions.some(ext => assetURL.toLowerCase().includes(ext));
+
+    const videoElement = document.createElement('video');
+videoElement.controls = true;
+videoElement.muted = true; 
+videoElement.autoplay = true;
+videoElement.playsInline = true;
+videoElement.crossOrigin = "anonymous"; // CRITICAL: Fixes CORS issues
+videoElement.style.width = '100%';
+videoElement.style.height = '100%';
+videoElement.style.objectFit = 'contain';
+
+// Append FIRST, then set SRC (Better for browser lifecycle)
+FirstIMGCol.appendChild(videoElement);
+
+if (isHLS) {
+    if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+        videoElement.src = assetURL;
+        videoElement.load(); // Force the browser to start fetching
+    } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+        const hls = new Hls({
+            // Add these configs for better stability
+            enableWorker: true,
+            lowLatencyMode: true,
+            backBufferLength: 90
+        });
+        hls.loadSource(assetURL);
+        hls.attachMedia(videoElement);
+        videoElement._hlsInstance = hls;
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            videoElement.play().catch(e => console.error("Play failed:", e));
+        });
+
+        // Add an error listener specifically for HLS
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) console.error("HLS Fatal Error:", data.details);
+        });
+    }
+} else if (isNormalVideo) {
+    videoElement.src = assetURL;
+    videoElement.load(); // Force the browser to start fetching
+    videoElement.play().catch(e => console.error("MP4 Play failed:", e));
+}else {
+        // Xử lý Ảnh
+        const imgElement = document.createElement('img');
+        imgElement.src = assetURL;
+        imgElement.style.width = '100%';
+        imgElement.style.height = '100%';
+        imgElement.style.objectFit = 'contain';
+        FirstIMGCol.appendChild(imgElement);
+    }
 
     // Insert title
     TitleContainer.innerHTML = `
@@ -628,7 +688,15 @@ export function DisplayImageOnDiv(imageURL, title, vietnamese_description, engli
     ImageShowContainer.style.display = "flex";
     // Make sure event listener only binds once
     CancelBtnContainer.onclick = () => {
-        ImageShowContainer.style.display = 'none';
+      const video = FirstIMGCol.querySelector('video');
+      if (video) {
+          video.pause();
+          // Giải phóng bộ nhớ HLS instance nếu có
+          if (video._hlsInstance) {
+              video._hlsInstance.destroy();
+          }
+      }
+      ImageShowContainer.style.display = 'none';
     };
 }
 
@@ -656,7 +724,7 @@ const textureLoader = new THREE.TextureLoader();
 /**
  * Hot-updates a picture frame mesh with a new image texture.
  * @param {string} meshName - The name of the Three.js mesh (picture frame).
- * @param {string} imageUrl - The URL of the newly uploaded image.
+ * @param {string} assetURL - The URL of the newly uploaded image.
  */
 
 export function updatePictureFrameTexture(ktx2Loader , meshName, ktx2CID, webpCID) {
@@ -740,4 +808,186 @@ export function updatePictureFrameTexture(ktx2Loader , meshName, ktx2CID, webpCI
             );
         }
     );
+}
+
+function updateVideoTexture(meshName, videoCID){
+  if (!gameScene) {
+    console.error("Game scene not set. Cannot hot-update texture.");
+    return;
+  }
+  // 1. Find the mesh
+  const mesh = scene.getObjectByName(meshName);
+  if (!mesh || !mesh.isMesh) {
+    console.warn(`❌ Cannot find mesh for ${meshName}`);
+    return;
+  }
+
+  // 2. CLEANUP: Destroy old HLS instance and video if they exist on this mesh
+  if (mesh.userData.hlsInstance) {
+    console.log("🧹 Cleaning up old HLS instance for:", meshName);
+    try {
+      mesh.userData.hlsInstance.destroy();
+    } catch (e) {
+      console.warn("⚠️ Error destroying old HLS:", e);
+    }
+    mesh.userData.hlsInstance = null;
+  }
+  
+  if (mesh.userData.videoElement) {
+    console.log("🧹 Removing old video element for:", meshName);
+    try {
+      const oldVideo = mesh.userData.videoElement;
+      oldVideo.pause();
+      oldVideo.removeAttribute('src'); // Detach source
+      oldVideo.load(); // Force unload
+      oldVideo.remove(); // Remove from DOM (though it wasn't attached, good practice)
+    } catch (e) {
+      console.warn("⚠️ Error cleaning video element:", e);
+    }
+    mesh.userData.videoElement = null;
+  }
+
+  // 3. Create new video element
+  const video = document.createElement('video');
+  video.autoplay = false; // We control play manually
+  video.pause();
+  video.muted = false; // Needed for spatial audio
+  video.loop = true;   // Good for background videos
+  video.playsInline = true;
+  video.crossOrigin = 'anonymous';
+  video.style.display = 'none';
+
+  
+  // Store reference for later cleanup
+  mesh.userData.videoElement = video;
+
+  console.log("🎬 HLS URL Base:", hlsURL);
+
+  let hls;
+  let masterURL = hlsURL + "/master.m3u8";
+  let streamURL = hlsURL + "/stream.m3u8";
+  let isLoadingMaster = true;
+  if (Hls.isSupported()) {
+    const hlsConfig = {
+      startLevel: 0,             // Start at lowest quality for fast load
+      autoStartLoad: true,
+      capLevelToPlayerSize: true,
+      lowLatencyMode: false,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      maxBufferHole: 0.5,        // Tolerate small gaps (CRITICAL for your issue)
+      nudgeOffset: 0.1,          // Helper to jump gaps
+      nudgeMaxRetry: 10,
+      enableWorker: true,        // Use web worker for performance
+    };
+
+    hls = new Hls(hlsConfig);
+    mesh.userData.hlsInstance = hls; // Store for cleanup
+
+    hls.loadSource(masterURL)
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      console.log("✅ Manifest parsed, starting playback");
+      // Only try to play once manifest is ready
+      video.play().catch(e => console.warn("Autoplay prevented:", e));
+    });
+
+    hls.on(Hls.Events.ERROR, function (event, data) {
+      // Filter out non-fatal buffer errors that hls.js can often recover from automatically
+      if (data.details === 'bufferSeekOverHole' || data.details === 'bufferStalledError') {
+         console.warn(`⚠️ HLS Buffer Warning: ${data.details}. Attempting auto-recovery.`);
+         return; 
+      }
+
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            console.warn("HLS Network error, trying to recover...");
+            if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
+                // Try reloading the stream URL on network errors
+                if (hls.url != streamURL) {
+                  hls.loadSource(streamURL);
+                  hls.startLoad();
+                }else{
+                  console.error("❌ Failed to load HLS stream after master. Destroying instance.");
+                }     
+            }else{
+              hls.startLoad(); // Retry other network errors
+            }
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            console.warn("HLS Media error, trying to recover...");
+            hls.recoverMediaError();
+            break;
+          default:
+            console.error("❌ Unrecoverable HLS error, destroying instance.");
+            hls.destroy();
+            break;
+        }
+      }
+    });
+
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari Native HLS
+    video.src = masterURL;
+    video.play().catch(e => console.warn("Native play error:", e));
+  } else {
+    console.error('❌ HLS not supported');
+    return;
+  }
+
+  // 4. Texture & Material Setup (Only once video has data)
+  const onCanPlay = () => {
+    console.log("📺 Video has enough data to render texture");
+    
+    const videoTexture = new THREE.VideoTexture(video);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    videoTexture.format = THREE.RGBAFormat; // Use RGBA for safety
+    videoTexture.colorSpace = THREE.SRGBColorSpace; // Match your renderer
+
+    const material = new THREE.MeshBasicMaterial({ map: videoTexture });
+
+    // Clean up old material properties
+    if (mesh.material) {
+        if (mesh.material.map) mesh.material.map.dispose();
+        mesh.material.dispose();
+    }
+
+    mesh.material = material;
+    mesh.material.needsUpdate = true;
+
+    // 5. Spatial Audio Setup
+    if (!spatialSources.has(meshName)) {
+      // Ensure AudioContext is running
+      if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+      }
+
+      const source = audioCtx.createMediaElementSource(video);
+      const panner = audioCtx.createPanner();
+      const gain = audioCtx.createGain();
+
+      panner.panningModel = "HRTF";
+      panner.distanceModel = "inverse";
+      panner.refDistance = 2.0;
+      panner.maxDistance = 10.0;
+      panner.rolloffFactor = 0.5;
+      panner.coneInnerAngle = 360;
+
+      source.connect(panner);
+      panner.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      // Set initial position
+      const pos = mesh.position;
+      panner.setPosition(pos.x, pos.y, pos.z);
+
+      spatialSources.set(meshName, { source, panner, gain, video, mesh });
+    }
+  };
+
+  // Use 'loadedmetadata' or 'canplay' instead of 'canplaythrough' for faster feedback
+  video.addEventListener('canplay', onCanPlay, { once: true });
 }

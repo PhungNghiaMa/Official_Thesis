@@ -108,8 +108,6 @@ export function setAgentTarget(agentId, targetPosition, navQuery, options = {}) 
   }
 }
 
-
-
 // CrowdManager.js - replace existing updateCrowd
 export function updateCrowd(dt, timeSinceLastFrame = undefined, maxSubSteps = undefined) {
   if (!crowd) return;

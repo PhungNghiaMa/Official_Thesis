@@ -32,7 +32,7 @@ func main() {
 	router := gin.Default()
 
 	// === Load SFU configuration from config.toml ===
-	sfuCfg, err := multiplayer.LoadSFUConfig("./config.toml")
+	sfuCfg, err := multiplayer.LoadSFUConfig("3DMuseum/BE/config.toml")
 	if err != nil {
 		log.Println("[SFU] Warning: using default STUN server because config.toml not found:", err)
 		// Fallback default
