@@ -667,13 +667,21 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
 
 // Listen for custom upload events to update annotations
 document.body.addEventListener("uploadevent", (event) => {
-    const { asset_mesh_name, title, vietnamese_description, english_description, img_url } = event.detail;
+    const { asset_mesh_name, title, vietnamese_description, english_description, webpCID , assetCID , category } = event.detail;
     
     if (annotationMesh[asset_mesh_name]) {
         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, vietnamese_description,english_description);
         annotationMesh[asset_mesh_name].title = title;
         annotationMesh[asset_mesh_name].viet_des = vietnamese_description;
         annotationMesh[asset_mesh_name].eng_des = english_description;
+        if (category === 'image'){
+          annotationMesh[asset_mesh_name].mesh.userData.category = 'Image';
+          annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webpCID}`;
+        }else if (category === 'video'){
+          annotationMesh[asset_mesh_name].mesh.userData.category = 'Video';
+          annotationMesh[asset_mesh_name].mesh.userData.videoSRC = `https://${PINATA_URL}${assetCID}/master.m3u8`;
+          annotationMesh[asset_mesh_name].mesh.userData.backup_videoSRC = `https://${PINATA_URL}${assetCID}/stream.m3u8`;
+        }
     }
 });
 
@@ -1882,6 +1890,8 @@ function updateAudioListener(camera) {
 
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
+
+  if (window.isPaused3D) return;
     // render CSS3D (if you use it)
   if (css3dRenderer) css3dRenderer.render(scene, camera);
 
@@ -3200,8 +3210,12 @@ export function initializeGame(targetContainerId = 'model-container') {
                 console.warn("No image mapped for: ", frameName)
                 return;
             }
-
-            const assetURL = assetData.mesh.userData.videoSRC || assetData.mesh.userData.backup_videoSRC || assetData.mesh.userData.imageSRC || '';
+            let assetURL = '';
+            if (assetData.mesh.userData.category === 'Image'){
+              assetURL = assetData.mesh.userData.imageSRC || '';
+            }else if (assetData.mesh.userData.category === 'Video'){
+              assetURL = assetData.mesh.userData.videoSRC || assetData.mesh.userData.backup_videoSRC || ''
+            }
             const {annotationDiv} = assetData;
             // const {annotationDiv} = assetData;
             console.log(`User clicked frame: ${frameName} → mapped to: ${imageMeshName}`);

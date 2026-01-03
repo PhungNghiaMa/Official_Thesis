@@ -402,31 +402,27 @@ export function initUploadModal(ktx2Loader) {
     };
 
     const submitCallback = () => {
-        const { roomID , asset_mesh_name } = uploadProperties;
-        // ⬇️ --- START FIX --- ⬇️
-        // SUBSCRIBE FIRST!
-        // Subscribe to the room channel *before* making the API call.
-        // This ensures we catch all 'type: "upload"' messages from the start.
-        SubscribeChannel(`room:${roomID}`);
-        if (!file) return toastMessage("Select a file.");
+      const { roomID , asset_mesh_name } = uploadProperties;
+      // ⬇️ --- START FIX --- ⬇️
+      // SUBSCRIBE FIRST!
+      // Subscribe to the room channel *before* making the API call.
+      // This ensures we catch all 'type: "upload"' messages from the start.
+      SubscribeChannel(`room:${roomID}`);
+      if (!file) return toastMessage("Select a file.");
 
-        // uploadSpinner.style.display = 'block';
-        // uploadSubmit.disabled = true;
-        // Display dashboard
-        const pendingCID = "pending-" + Date.now();
-        getOrCreateAssetCard(pendingCID, uploadTitle.value || "New Asset");
-        ensureDashboard();
-        assetProgressState.lastPendingCid = pendingCID;
+      // uploadSpinner.style.display = 'block';
+      // uploadSubmit.disabled = true;
+      // Display dashboard
+      const pendingCID = "pending-" + Date.now();
+      getOrCreateAssetCard(pendingCID, uploadTitle.value || "New Asset");
+      ensureDashboard();
+      assetProgressState.lastPendingCid = pendingCID;
 
 
 
       UploadItem(file, asset_mesh_name, uploadTitle.value, uploadVietDes.value, uploadEnDes.value, roomID)
       .then((response) => {
-        // const asset_mesh = gameScene.getObjectByName(asset_mesh_name);
-
-        // if (isVideo){
-        //   asset_mesh.userData.
-        // }
+  
 
         console.warn("RESPONSE: ", response);
         const realCID = response?.asset_cid;
@@ -452,7 +448,9 @@ export function initUploadModal(ktx2Loader) {
             title: uploadTitle.value,
             vietnamese_description: uploadVietDes.value,
             english_description: uploadEnDes.value,
-            img_url: URL.createObjectURL(file),
+            webpCID: webpCID,
+            assetCID: realCID,
+            category: response?.category
           },
         });
         document.body.dispatchEvent(uploadEvent);
@@ -461,10 +459,10 @@ export function initUploadModal(ktx2Loader) {
 
         if (!isVideo){
           updatePictureFrameTexture(ktx2Loader, asset_mesh_name, realCID, webpCID);
-          return;
+          return {asset_mesh_name , webpCID , vietnamese_description , english_description} ;
         }else{
           updateVideoTexture(asset_mesh_name, realCID);
-          return;
+          return {asset_mesh_name , realCID , vietnamese_description , english_description};
         }
 
         
@@ -610,6 +608,12 @@ export function DisplayImageOnDiv(assetURL, title, vietnamese_description, engli
         return;
     }
 
+    console.log("Displaying Asset:", { assetURL, title });
+    if (!assetURL) {
+        console.error("LỖI: assetURL bị trống!");
+        return;
+    }
+
     const language = localStorage.getItem('language');
     const description = language === 'vi' ? vietnamese_description : english_description;
 
@@ -624,19 +628,32 @@ export function DisplayImageOnDiv(assetURL, title, vietnamese_description, engli
     const isNormalVideo = videoExtensions.some(ext => assetURL.toLowerCase().includes(ext));
 
     const videoElement = document.createElement('video');
-videoElement.controls = true;
-videoElement.muted = true; 
-videoElement.autoplay = true;
-videoElement.playsInline = true;
-videoElement.crossOrigin = "anonymous"; // CRITICAL: Fixes CORS issues
-videoElement.style.width = '100%';
-videoElement.style.height = '100%';
-videoElement.style.objectFit = 'contain';
+    videoElement.controls = true;
+    videoElement.muted = true; 
+    videoElement.autoplay = true;
+    videoElement.playsInline = true;
+    videoElement.crossOrigin = "anonymous"; // CRITICAL: Fixes CORS issues
+    videoElement.style.width = '100%';
+    videoElement.style.height = '100%';
+    videoElement.style.objectFit = 'contain';
+    videoElement.style.transform = "translateZ(0)"; // Force using seperate layer ( applied for Hardware Acceleration )
+    videoElement.style.backfaceVisibility = "hidden";
 
-// Append FIRST, then set SRC (Better for browser lifecycle)
-FirstIMGCol.appendChild(videoElement);
+    videoElement.onplay = () => {
+      window.isPaused3D = true;
+      console.log("3D Rendering Paused for Video Performance");
+    };
 
-if (isHLS) {
+    videoElement.onpause = () => {
+      window.isPaused3D = false;
+      console.log("3D Rendering Resumed");
+    };
+
+    videoElement.onended = () => {
+      window.isPaused3D = false;
+    };
+
+  if (isHLS) {
     if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
         videoElement.src = assetURL;
         videoElement.load(); // Force the browser to start fetching
@@ -645,14 +662,19 @@ if (isHLS) {
             // Add these configs for better stability
             enableWorker: true,
             lowLatencyMode: true,
-            backBufferLength: 90
+            backBufferLength: 10,
+            maxBufferLength: 20,  // Không cho phép buffer quá nhiều
+            maxMaxBufferLength: 30,
+            capLevelToPlayerSize: true, // Auto reduce the resolution by the size of the screen
+            testBandwidth: false, // Tránh việc nó liên tục test mạng gây giật
         });
         hls.loadSource(assetURL);
         hls.attachMedia(videoElement);
         videoElement._hlsInstance = hls;
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            videoElement.play().catch(e => console.error("Play failed:", e));
+          hls.nextLevel = Math.floor(data.levels.length / 2);
+          videoElement.play().catch(e => console.error("Play failed:", e));
         });
 
         // Add an error listener specifically for HLS
@@ -660,44 +682,49 @@ if (isHLS) {
             if (data.fatal) console.error("HLS Fatal Error:", data.details);
         });
     }
-} else if (isNormalVideo) {
-    videoElement.src = assetURL;
-    videoElement.load(); // Force the browser to start fetching
-    videoElement.play().catch(e => console.error("MP4 Play failed:", e));
-}else {
-        // Xử lý Ảnh
-        const imgElement = document.createElement('img');
-        imgElement.src = assetURL;
-        imgElement.style.width = '100%';
-        imgElement.style.height = '100%';
-        imgElement.style.objectFit = 'contain';
-        FirstIMGCol.appendChild(imgElement);
-    }
+    FirstIMGCol.appendChild(videoElement);
 
-    // Insert title
-    TitleContainer.innerHTML = `
-        <div class="Title text-xl font-semibold w-full text-center my-2">${title}</div>
-    `;
-
-    // Insert description
-    BottomContainer.innerHTML = `
-        <div class="Description text-md font-normal w-full px-5">${description}</div>
-    `;
-
-    // Show container
-    ImageShowContainer.style.display = "flex";
-    // Make sure event listener only binds once
-    CancelBtnContainer.onclick = () => {
-      const video = FirstIMGCol.querySelector('video');
-      if (video) {
-          video.pause();
-          // Giải phóng bộ nhớ HLS instance nếu có
-          if (video._hlsInstance) {
-              video._hlsInstance.destroy();
-          }
+  } else if (isNormalVideo) {
+      videoElement.src = assetURL;
+      videoElement.load(); // Force the browser to start fetching
+      videoElement.play().catch(e => console.error("MP4 Play failed:", e));
+      FirstIMGCol.appendChild(videoElement);
+  }
+  else {
+          // Xử lý Ảnh
+          const imgElement = document.createElement('img');
+          imgElement.src = assetURL;
+          imgElement.style.width = '100%';
+          imgElement.style.height = '100%';
+          imgElement.style.objectFit = 'contain';
+          FirstIMGCol.appendChild(imgElement);
       }
-      ImageShowContainer.style.display = 'none';
-    };
+
+      // Insert title
+      TitleContainer.innerHTML = `
+          <div class="Title text-xl font-semibold w-full text-center my-2">${title}</div>
+      `;
+
+      // Insert description
+      BottomContainer.innerHTML = `
+          <div class="Description text-md font-normal w-full px-5">${description}</div>
+      `;
+
+      // Show container
+      ImageShowContainer.style.display = "flex";
+      // Make sure event listener only binds once
+      CancelBtnContainer.onclick = () => {
+        const video = FirstIMGCol.querySelector('video');
+        if (video) {
+            video.pause();
+            // Giải phóng bộ nhớ HLS instance nếu có
+            if (video._hlsInstance) {
+                video._hlsInstance.destroy();
+            }
+            window.isPaused3D = true;
+        }
+        ImageShowContainer.style.display = 'none';
+      };
 }
 
 export function getCachedAudioDuration(audioCID){

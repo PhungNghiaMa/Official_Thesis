@@ -231,7 +231,7 @@ func (r *PinataRepo) UploadAssetToPinata(fileBuffer []byte, originalFileName str
         return applicationDTO.AssetStruct{}, fmt.Errorf("failed to read Pinata response: %w", err)
     }
 
-    if resp.StatusCode != http.StatusOK {
+    if resp.StatusCode != http.StatusOK || resp.StatusCode != http.StatusCreated {
         return applicationDTO.AssetStruct{}, fmt.Errorf("Pinata API returned %d - %s", resp.StatusCode, string(respBytes))
     }
 

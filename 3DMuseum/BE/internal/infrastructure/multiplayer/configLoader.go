@@ -3,7 +3,6 @@ package multiplayer
 import (
 	"fmt"
 	"os"
-
 	"github.com/pelletier/go-toml/v2"
 )
 
