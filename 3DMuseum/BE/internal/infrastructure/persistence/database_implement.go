@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type AssetRepo struct {
@@ -48,28 +49,21 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp applicationDTO.
 	}
 
 	// =========================================================================
-	// STEP 1: CHECK IF THE ASSET (CID) IS CURRENTLY IN USE BY ANOTHER MESH
+	// STEP 1: CHECK IF THE ASSET (CID) IS CURRENTLY IN USE AS THE LATEST VERSION BY ANY MESH
 	// =========================================================================
 	var conflictAsset model.Asset
-	// Find the latest record of any mesh using this CID
+	// Find if this CID is the latest version for any mesh-room
 	errCheck := tx.Raw(`
 		SELECT * FROM (
-			SELECT *, 
-				ROW_NUMBER() OVER (PARTITION BY asset_mesh_name, room_id ORDER BY version DESC) as rn
+			SELECT *,
+				ROW_NUMBER() OVER (PARTITION BY asset_mesh_name, room_id ORDER BY version DESC) AS rn
 			FROM assets
 		) t
-		WHERE t.rn = 1 AND t.asset_cid = ? 
+		WHERE t.rn = 1 AND t.asset_cid = ?
 		LIMIT 1
 	`, ktx2Resp.IpfsHash).Scan(&conflictAsset).Error
 
-	if errCheck == nil && conflictAsset.AID != 0 {
-		// If this asset is found as the latest version of another mesh
-		// (Except for the case where that mesh is the current one being uploaded)
-		if conflictAsset.AssetMeshName != info.MeshName || conflictAsset.RoomID != uint(info.RoomID) {
-			return fmt.Errorf("Asset (CID: %s) is currently being used by mesh '%s' in room %d. Duplicate upload is not allowed.", 
-				ktx2Resp.IpfsHash, conflictAsset.AssetMeshName, conflictAsset.RoomID)
-		}
-	}
+
 
 	// =========================================================================
 	// STEP 2: RETRIEVE CURRENT VERSION INFORMATION FOR THE MESH BEING PROCESSED
@@ -82,6 +76,56 @@ func (repo *AssetRepo) UpsertAsset(ctx context.Context, ktx2Resp applicationDTO.
 		currentVersion = latestAsset.Version
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("error querying mesh version: %w", err)
+	}
+
+	// In the case the CID is holding by an asset_mesh as the latest verion , then check and allow the 
+	// admin that can only update 
+	// Else if the CID is not the latest verson of any assest_mesh then allow the admin to reuse this CID for the new asset_mesh by update
+	// the information like new title , new description , new name , new asset_mesh , new version for the asset_mesh that will
+	// use this CID 
+	if errCheck == nil && conflictAsset.AssetCID != ""  {
+		// Check if the CID exist in database or not 
+		// If this asset is the latest version for another mesh-room
+		// (Except for the case where that mesh is the current one being uploaded)
+		if conflictAsset.AssetMeshName != info.MeshName || conflictAsset.RoomID != uint(info.RoomID) {
+			return fmt.Errorf("Asset (CID: %s) is currently in use as the latest version by mesh '%s' in room %d. Duplicate upload is not allowed.",
+				ktx2Resp.IpfsHash, conflictAsset.AssetMeshName, conflictAsset.RoomID)
+		}
+	}else if errCheck == nil && conflictAsset.AssetCID == ""{
+		var count int64
+		tx.Model(&model.Asset{}).Where("asset_cid = ?", ktx2Resp.IpfsHash).Count(&count)
+		if (count > 0){
+			updates := map[string]any{
+				"asset_mesh_name": info.MeshName,
+				"asset_name":            ktx2Resp.Filename,
+				"title":                 info.Title,
+				"vietnamese_description": info.VietnameseDescription,
+				"english_description":    info.EnglishDescription,
+				"updated_at":            time.Now(),
+				"version": currentVersion + 1,
+			}
+
+			// Safe comparison of WebpCID to avoid panic
+			isWebpChanged := false
+			if (latestAsset.WebpCID == nil && newWebpCID != nil) || 
+			(latestAsset.WebpCID != nil && newWebpCID == nil) ||
+			(latestAsset.WebpCID != nil && newWebpCID != nil && *latestAsset.WebpCID != *newWebpCID) {
+				isWebpChanged = true
+			}
+
+			if isWebpChanged {
+				updates["webp_cid"] = newWebpCID
+			}
+
+			if err := tx.Model(&model.Asset{}).Where("asset_cid = ?", ktx2Resp.IpfsHash).Updates(updates).Error; err != nil {
+				return fmt.Errorf("failed to update metadata: %w", err)
+			}
+			// Sync Audio records for existing asset
+			if err := repo.syncAudioRecords(tx, ktx2Resp.IpfsHash, info); err != nil {
+				return err
+			}
+			return tx.Commit().Error
+		}
 	}
 
 	fileSize := int64(len(info.FileBuffer))
@@ -287,4 +331,61 @@ func (repo *AssetRepo) FetchPendingAudioJobs(ctx context.Context, limit int) ([]
 	var jobs []model.Audio
 	err := repo.database.WithContext(ctx).Where("status = ?", "pending").Limit(limit).Find(&jobs).Error
 	return jobs, err
+}
+
+// Helper to create/check audio jobs for both languages
+func (repo *AssetRepo) syncAudioRecords(tx *gorm.DB, assetCID string, info model.DetailUploadInfor) error {
+    languages := []struct {
+        code string
+        text string
+    }{
+        {"vi", info.VietnameseDescription},
+        {"en", info.EnglishDescription},
+    }
+
+    for _, lang := range languages {
+        if lang.text == "" {
+            continue
+        }
+
+        textHash := business.HashTextSHA256(lang.text)
+        
+        // Check if this specific text/lang combo already has a generated audio (FindAudioByHash)
+        var existingAudio model.Audio
+        err := tx.Where("text_hash = ? AND language = ? AND audio_cid IS NOT NULL", textHash, lang.code).
+            First(&existingAudio).Error
+
+        status := "pending"
+        var audioCID *string = nil
+
+        // If we found an existing audio with the SAME text hash, reuse its CID
+        if err == nil {
+            status = "completed"
+            audioCID = &existingAudio.AudioCID
+        }
+
+        // Use UPSERT logic for the audio table
+        // This ensures if a job for (assetCID, lang) exists, we update it; otherwise, insert.
+        audioEntry := model.Audio{
+            AssetCID: assetCID,
+            Language: lang.code,
+            TextHash: textHash,
+            Status:   status,
+            // AudioCID will be nil if status is pending, or the reused CID if completed
+        }
+        if audioCID != nil {
+            audioEntry.AudioCID = *audioCID
+        }
+
+        // Using GORM OnConflict to handle the "Insert or Update" for the audio table
+        err = tx.Clauses(clause.OnConflict{
+            Columns:   []clause.Column{{Name: "asset_cid"}, {Name: "language"}},
+            DoUpdates: clause.AssignmentColumns([]string{"text_hash", "status", "audio_cid", "updated_at"}),
+        }).Create(&audioEntry).Error
+
+        if err != nil {
+            return fmt.Errorf("failed to sync audio for %s: %w", lang.code, err)
+        }
+    }
+    return nil
 }

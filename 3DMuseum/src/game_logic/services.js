@@ -72,6 +72,42 @@ export const UploadItem = async (file, mesh_name , title, vietnamese_description
     }
 }
 
+/**
+ * Sends the player request to the Go backend.
+ * @param {string} webpCID - The IPFS CID for the image (from Pinata).
+ * @param {string} prompt - The user's question about the painting.
+ * @param {string} playerID - The unique ID of the player.
+ */
+export const GenAI = async (webpCID, prompt, playerID) => {
+    try {
+        const formData = new FormData();
+        
+        // These keys MUST match the strings inside your Go c.PostForm("...") calls
+        // formData.append("player_id", playerID);
+        formData.append("prompt", prompt);
+        formData.append("webp_cid", webpCID);
+
+        const response = await fetch(`${BACKEND_URL}/generate_answer`, {
+            method: "POST",
+            body: formData, 
+            // Note: No 'Content-Type' header needed, 
+            // browser sets it to multipart/form-data automatically
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || "Failed to get answer from server");
+        }
+
+        return result.answer;
+
+    } catch (error) {
+        console.error("GenAI Error:", error);
+        return "Sorry, I couldn't analyze that image right now.";
+    }
+};
+
 // WEBSOCKET
 let _ws = null 
 const _subscribed = new Set()

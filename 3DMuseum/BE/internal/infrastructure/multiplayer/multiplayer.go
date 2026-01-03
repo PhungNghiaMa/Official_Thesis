@@ -85,8 +85,7 @@ func NewSFURepo(sfuCfg *SFUConfig) *SFU {
 
 	// 1. Create a SettingEngine to handle the External IP
 	settingEngine := webrtc.SettingEngine{}
-	if sfuCfg.RTC.ExternalIP != "" {
-		// This tells WebRTC to use this IP for all ICE candidates
+	if sfuCfg.RTC.ExternalIP != "" && sfuCfg.RTC.ExternalIP != "0.0.0.0" {
 		settingEngine.SetNAT1To1IPs([]string{sfuCfg.RTC.ExternalIP}, webrtc.ICECandidateTypeHost)
 	}
 

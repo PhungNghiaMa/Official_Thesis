@@ -18,7 +18,7 @@ export default class ThirdPersonPlayer {
     this.playerVelocity = new THREE.Vector3();
     this.playerOnFloor = false;
     this.gravity = GRAVITY;
-    this.turnRateDegree = 40;
+    this.turnRateDegree = 60;
     this.turnRate = THREE.MathUtils.degToRad(this.turnRateDegree);
     this.cameraCollider = new Sphere(new THREE.Vector3(0,1,0), 0.35);
 
@@ -32,13 +32,13 @@ export default class ThirdPersonPlayer {
     this.isRunning = false ;
     this.isWalking = false ;  
 
-    // ADD THESE for physics optimization:
+    // Instance for physics optimization:
     this._inputVector = new THREE.Vector3();
     this._forward = new THREE.Vector3();
     this._yawAxis = new THREE.Vector3(0, 1, 0);
     this._dummyVec = new THREE.Vector3();
 
-    // Start position inside building (adjust as needed)
+    // Start position inside building 
     const start = new THREE.Vector3(0, 1, 0);
     this.playerCollider = playerCollider ?? new Capsule(
       start.clone(),
@@ -75,15 +75,18 @@ export default class ThirdPersonPlayer {
     this.tempSegment = new THREE.Line3();
   }
 
-  // Add inside ThirdPersonPlayer class
+  // Build BVH ( Bouding Volume Hierachy ) for detect collider 
   buildBVHFromMeshes(meshes) {
     this.bvhMeshes = [];
     meshes.forEach((child) => {
       if (!child.isMesh || !child.geometry) return;
+      // Ensure matrices are up to date before doing any math
       child.updateMatrixWorld(true);
+      // Build the BVH tree if it doesnt't exist. This run once only
       if (!child.geometry.boundsTree) {
         child.geometry.boundsTree = new MeshBVH(child.geometry, { maxLeafTris: 10 });
       }
+      // Store world-space data for fast collisiton math
       child.userData.worldBox = new THREE.Box3().setFromObject(child);
       child.userData.invWorld = child.matrixWorld.clone().invert();
       this.bvhMeshes.push(child);
@@ -99,7 +102,7 @@ export default class ThirdPersonPlayer {
   resetControls() {
     this.input.forward = this.input.backward = this.input.left = this.input.right = this.input.run = false;
     this.playerVelocity.set(0, 0, 0);
-    this.playerOnFloor = true; // optional, helps settle instantly
+    this.playerOnFloor = true; 
   }
 
   faceYaw(yaw) {
@@ -110,37 +113,42 @@ export default class ThirdPersonPlayer {
 
   // Function to handle animation when model was preloaded in index.js
   handleAnimation(model, characterGLTF) {
-  if (!model || !characterGLTF) return;
-  this.model = model;
+    if (!model || !characterGLTF) return;
+    this.model = model;
 
-  // compute footOffset as before
-  const bbox = new THREE.Box3().setFromObject(this.model);
-  this.footOffset = -bbox.min.y;
+    // compute footOffset as before
+    const bbox = new THREE.Box3().setFromObject(this.model);
+    this.footOffset = -bbox.min.y;
 
-  // create a reusable controller and attach to model.userData
-  const animCtrl = createAnimController(this.model, characterGLTF);
-  this.mixer = animCtrl.mixer;
-  this.idleAction    = animCtrl.idleAction;
-  this.walkAction    = animCtrl.walkAction;
-  this.runningAction = animCtrl.runningAction;
-  this.leftTurnAction  = animCtrl.leftTurnAction;
-  this.rightTurnAction = animCtrl.rightTurnAction;
-  // make playAction and currentAction behavior remain local to the class (playAction already exists)
-  // initialize currentAction so playAction/crossfades work:
-  if (this.idleAction) {
-    this.currentAction = this.idleAction;
-    // ensure idle is playing
-    this.currentAction.play();
-  }
-  // attach anim controller for external consumers (NPC sync already checks this path)
-  this.model.userData.animCtrl = animCtrl;
+    // create a reusable controller and attach to model.userData
+    const animCtrl = createAnimController(this.model, characterGLTF);
+    this.mixer = animCtrl.mixer;
+    this.idleAction    = animCtrl.idleAction;
+    this.walkAction    = animCtrl.walkAction;
+    this.runningAction = animCtrl.runningAction;
+    this.leftTurnAction  = animCtrl.leftTurnAction;
+    this.rightTurnAction = animCtrl.rightTurnAction;
+    // make playAction and currentAction behavior remain local to the class 
+    // initialize currentAction so playAction/crossfades work:
+    if (this.idleAction) {
+      this.currentAction = this.idleAction;
+      // ensure idle is playing
+      this.currentAction.play();
+    }
+    // attach anim controller for external consumers (NPC sync already checks this path)
+    this.model.userData.animCtrl = animCtrl;
 }
 
   getForwardVector() {
     if (this.model) {
+      // Detect the direction that the nose of character is pointing to
+      // Without apply the quaternion , the direction is always point inward to the screen and this cause problem when move forward
+      // For example if the character rotate and is facing on the right, without the quaternion the character still detect north direction
+      // is the forward direction and from the direction where theh character is facing , if we move forward , the character actually is moving 
+      // to the left instead
       const f = new THREE.Vector3(0, 0, 1).applyQuaternion(this.model.quaternion);
       f.y = 0;
-      return f.normalize();
+      return f.normalize();   
     }
     const v = new THREE.Vector3();
     if (this.camera) {
@@ -178,7 +186,8 @@ export default class ThirdPersonPlayer {
   }
 
   onKeyDown(event) {
-        // *** NEW CHECK: Ignore event if an input element is focused ***
+    // NEW CHECK: Ignore event if an input element is focused
+    // This isInput check is applied to avoid the character move while the admin input the text
     const isInput = event.target.closest('input, textarea, select, [contenteditable="true"]');
     if (isInput) {
         return; // Exit the handler immediately if typing in a form field
@@ -204,30 +213,30 @@ export default class ThirdPersonPlayer {
     }
   }
 
-  // Attach model. Optionally pass the GLTF so animations are prepared immediately.
+  // Attach model
   attachModel(model, characterGLTF = null) {
-  this.model = model;
-  if (characterGLTF) {
-  this.handleAnimation(model, characterGLTF);
-  }
+    this.model = model;
+    if (characterGLTF) {
+      this.handleAnimation(model, characterGLTF);
+    }
 
-  // keep smoothing aligned so there is no visual jump
-  if (this.playerCollider) this._smoothedPlayerPosition.copy(this.playerCollider.end);
-  if (this.tempQuaternion && this.model) this.tempQuaternion.copy(this.model.quaternion);
+    // keep smoothing aligned so there is no visual jump
+    if (this.playerCollider) this._smoothedPlayerPosition.copy(this.playerCollider.end);
+    if (this.tempQuaternion && this.model) this.tempQuaternion.copy(this.model.quaternion);
 
-  // If we already have a crowd agent (created earlier), align/teleport it to the model now
-  if (this.crowdAgent && this.model) {
-  try {
-  const p = this.model.position;
-  if (typeof this.crowdAgent.teleport === 'function') {
-  this.crowdAgent.teleport({ x: p.x, y: p.y, z: p.z });
-  } else if (this.crowdAgent.position) {
-  this.crowdAgent.position = { x: p.x, y: p.y, z: p.z };
-  }
-  } catch (e) {
-  console.warn("attachModel: failed to align crowdAgent to model", e);
-  }
-  }
+    // If we already have a crowd agent, align/teleport it to the model immediately
+    if (this.crowdAgent && this.model) {
+      try {
+        const p = this.model.position;
+      if (typeof this.crowdAgent.teleport === 'function') {
+        this.crowdAgent.teleport({ x: p.x, y: p.y, z: p.z });
+      } else if (this.crowdAgent.position) {
+        this.crowdAgent.position = { x: p.x, y: p.y, z: p.z };
+      }
+      } catch (e) {
+      console.warn("attachModel: failed to align crowdAgent to model", e);
+      }
+    }
   }
 
   setInitialRotationFromYaw(yaw) {
@@ -268,14 +277,14 @@ export default class ThirdPersonPlayer {
         this.isRunning = true ;
         this.isWalking = false ;
         if (this.currentAction) {
-          this.currentAction.timeScale = 1.5;
+          this.currentAction.timeScale = 2.0;
         }
       } else if (hasWalk) {
         this.playAction(this.walkAction);
         this.isWalking = true ;
         this.isRunning = false ;
         if (this.currentAction) {
-          this.currentAction.timeScale = 1.0;
+          this.currentAction.timeScale = 1.2;
         }
       }
 
@@ -335,11 +344,10 @@ export default class ThirdPersonPlayer {
 
   update(delta) {
     if (!this.bvhReady || !this.model) return;
-
-    // Single-step physics update with variable delta (capped for safety)
-    const safeDelta = Math.min(delta, 0.1);
-    this._physicsStep(safeDelta);
-  }
+      // Single-step physics update with variable delta (capped for safety)
+      const safeDelta = Math.min(delta, 0.1);
+      this._physicsStep(safeDelta);
+    }
 
   _physicsStep(dt) {
     // Constants
@@ -406,6 +414,9 @@ export default class ThirdPersonPlayer {
 
     // --- 4. Integrate Position ---
     // Translate collider directly using reuse variable
+    // The _dummyVec is used to calculate exactly how many meters the player should move in this specific frame
+    // Then the playerCollider - a capsule is update to detect the collider
+    // We use translate() to move both the start and end coordinate by exact same amount at the same time
     this._dummyVec.set(this.playerVelocity.x * dt, this.playerVelocity.y * dt, this.playerVelocity.z * dt);
     this.playerCollider.translate(this._dummyVec);
 
@@ -463,7 +474,7 @@ export default class ThirdPersonPlayer {
       this.tempBox.max.addScalar(this.playerCollider.radius);
 
       // Perform BVH shapecast: efficient traversal of mesh triangles
-      // bvh.shapecast is a method that traverse the BVH and tests for intersections with a shape (here, our capsule)
+      // bvh.shapecast is a method that traverse the BVH and tests for intersections with a shape (here, the capsule)
       bvh.shapecast({
         // Narrow-phase: only test triangles whose bounds intersect capsule box
         // This is the broad-phase filter. It checks whether a triangle's bounding box intersects 
@@ -745,7 +756,7 @@ export default class ThirdPersonPlayer {
 
     // --- 3. Smoothly Apply Position to the Model ---
     // A high lerp factor makes the player feel responsive to the agent's movement.
-    const posLerpFactor = 0.8;
+    const posLerpFactor = 1.0;
     this.model.position.x = THREE.MathUtils.lerp(this.model.position.x, targetPos.x, posLerpFactor);
     this.model.position.z = THREE.MathUtils.lerp(this.model.position.z, targetPos.z, posLerpFactor);
     this.model.position.y = THREE.MathUtils.lerp(this.model.position.y, targetPos.y, posLerpFactor);

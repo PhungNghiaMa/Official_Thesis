@@ -448,9 +448,11 @@ canvas{
     width: 70%;
     max-width: 900px;
     max-height: 80vh;
-    background: linear-gradient(135deg, #f5f5f5 0%, #ffffff 50%, #f5f5f5 100%);
-    border: 6px solid #000000;
-    border-radius: 0;
+    background: rgba(122, 122, 122, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
     display: none;
     flex-direction: column;
     align-items: center;
@@ -458,33 +460,7 @@ canvas{
     box-sizing: border-box;
     z-index: 999;
     overflow-y: auto;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.2);
-}
-
-.menu-container::before {
-    content: '';
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 85%;
-    height: 6px;
-    background: linear-gradient(90deg, #dc143c 0%, #dc143c 20%, #000000 20%, #000000 25%, #dc143c 25%, #dc143c 40%, #ffffff 40%, #ffffff 50%, #dc143c 50%, #dc143c 65%, #000000 65%, #000000 70%, #dc143c 70%, #dc143c 100%);
-    border-top: 2px solid #000000;
-    border-bottom: 2px solid #000000;
-}
-
-.menu-container::after {
-    content: '';
-    position: absolute;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 85%;
-    height: 6px;
-    background: linear-gradient(90deg, #dc143c 0%, #dc143c 20%, #000000 20%, #000000 25%, #dc143c 25%, #dc143c 40%, #ffffff 40%, #ffffff 50%, #dc143c 50%, #dc143c 65%, #000000 65%, #000000 70%, #dc143c 70%, #dc143c 100%);
-    border-top: 2px solid #000000;
-    border-bottom: 2px solid #000000;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
 }
 
 .menu-container .flex {
@@ -497,19 +473,19 @@ canvas{
 .menu-container h2 {
     margin-top: 0;
     margin-bottom: 10px;
-    color: #dc143c;
+    color: #ffffff;
     font-size: 2.2rem;
     font-weight: 900;
-    font-family: 'Noto Serif Display', serif;
+    /* font-family: 'Noto Serif Display', serif; */
     text-align: center;
-    text-shadow: 2px 2px 0px #000000;
+    text-shadow: 2px 2px 0px #9e9c9c;
 }
 
 .menu-container hr {
     width: 80%;
     border: none;
-    height: 3px;
-    background: linear-gradient(90deg, transparent, #dc143c 20%, #000000 50%, #dc143c 80%, transparent);
+    height: 1px;
+    background: rgba(255, 255, 255, 0.3);
     margin-top: 20px;
     margin-bottom: 20px;
 }
@@ -521,17 +497,19 @@ canvas{
     height: 2.5rem;
     display: flex;
     padding: .28rem;
-    color: #dc143c;
-    border: 2px solid #000000;
-    border-radius: 0;
+    color: #e91818;
+    border: 1px solid rgb(84, 84, 84);
+    border-radius: 8px;
     align-items: center;
     justify-content: center;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
     transition: all 0.3s ease;
 }
 
 #menu-close:hover {
-    background-color: #dc143c;
+    background: rgba(255, 255, 255, 0.2);
     color: #ffffff;
     transform: rotateZ(90deg);
     transition: 0.3s ease-out;
@@ -550,30 +528,32 @@ canvas{
 
 .menu-item {
     padding: 20px 30px;
-    background: linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%);
+    background: rgba(255, 255, 255, 0.1);
     width: 80%;
     height: auto;
-    border: 3px solid #000000;
-    border-radius: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
     cursor: pointer;
     font-size: 1.1rem;
     font-weight: 700;
-    color: #000000;
+    color: #ffffff;
     text-align: center;
     transition: all 0.3s ease;
-    box-shadow: 4px 4px 0px #dc143c, 6px 6px 0px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     font-family: 'Noto Serif Display', serif;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
 }
 
 .menu-item:hover {
-    background: linear-gradient(135deg, #f5f5f5 0%, #ffffff 100%);
-    transform: translate(-2px, -2px);
-    box-shadow: 6px 6px 0px #dc143c, 8px 8px 0px rgba(0, 0, 0, 0.3);
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 .menu-item:active {
-    transform: translate(0px, 0px);
-    box-shadow: 2px 2px 0px #dc143c, 3px 3px 0px rgba(0, 0, 0, 0.1);
+    transform: translateY(0px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .menu-container ul {
@@ -581,7 +561,7 @@ canvas{
     padding: 0;
     margin: 0;
     font-size: 14px;
-    color: #2a2a2a;
+    color: #ffffff;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -837,10 +817,10 @@ canvas{
 }
 
 
-.FirstIMGCol img{
-    border: 8px solid rgb(6, 5, 5);
-    border-radius: 2%;
-}
+/* .FirstIMGCol img{
+    border: 1.4px solid black;
+    border-radius: 5% ;
+}  */
 
 .TitleContainer {
     font-weight: 800;
@@ -881,9 +861,11 @@ canvas{
     }
 
     /* --- CARD CONTAINER --- */
-    /* This replaces your old simple flex container with a styled card */
+    /* Glassmorphism styled container */
     .SinglePlayer_MultiPlayer_Container {
-        background-color: #e9e9e9; /* Off-white paper color */
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
         width: 800px;
         max-width: 90%;
         padding: 60px 40px;
@@ -893,33 +875,12 @@ canvas{
         align-items: center;
         justify-content: center;
         gap: 40px;
-        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-        
-        /* Double Border Effect */
-        border: 2px solid #1a1a1a;
-        outline: 4px solid #9e0e0e; /* Red accent border */
-        outline-offset: -12px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
     }
 
-    /* Corner Decorations (The ornamental flourish) */
-    .SinglePlayer_MultiPlayer_Container::before,
-    .SinglePlayer_MultiPlayer_Container::after {
-        content: "";
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        background-image: 
-            linear-gradient(45deg, #9e0e0e 10px, transparent 10px),
-            linear-gradient(135deg, #9e0e0e 10px, transparent 10px),
-            linear-gradient(225deg, #9e0e0e 10px, transparent 10px),
-            linear-gradient(315deg, #9e0e0e 10px, transparent 10px);
-        background-position: top left, top right, bottom right, bottom left;
-        background-size: 50% 50%;
-        background-repeat: no-repeat;
-        top: 0; left: 0;
-        opacity: 0; /* Hidden by default, simpler design chosen */
-    }
+
 
     /* --- TYPOGRAPHY --- */
     .mode-header {
@@ -931,7 +892,7 @@ canvas{
     .mode-title {
         font-size: 3.5rem;
         font-weight: 700;
-        color: #1a1a1a;
+        color: #ffffff;
         margin: 0;
         line-height: 1.2;
         letter-spacing: -1px;
@@ -940,7 +901,7 @@ canvas{
     
     .mode-subtitle {
         font-size: 1rem;
-        color: #9e0e0e;
+        color: #ffffff;
         font-style: italic;
         letter-spacing: 3px;
         margin-top: 5px;
@@ -956,7 +917,7 @@ canvas{
         display: block;
         height: 1px;
         width: 40px;
-        background-color: #9e0e0e;
+        background-color: #ffffff;
     }
 
     /* --- BUTTONS LAYOUT --- */
@@ -974,8 +935,11 @@ canvas{
         position: relative;
         width: 220px;
         height: 280px;
-        background: transparent;
-        border: 2px solid #1a1a1a;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(5px);
+        -webkit-backdrop-filter: blur(5px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -990,14 +954,15 @@ canvas{
         content: '';
         position: absolute;
         top: 6px; left: 6px; right: 6px; bottom: 6px;
-        border: 1px solid #9e0e0e; /* Thin red line */
+        border: 1px solid rgba(255, 255, 255, 0.3); /* Thin white line */
+        border-radius: 8px;
         transition: all 0.4s ease;
     }
 
     /* Icon / Large Text styling */
     .btn-icon {
         font-size: 3rem;
-        color: #1a1a1a;
+        color: #ffffff;
         margin-bottom: 20px;
         transition: all 0.4s ease;
     }
@@ -1006,7 +971,7 @@ canvas{
     .btn-label {
         font-size: 1.5rem;
         font-weight: 700;
-        color: #1a1a1a;
+        color: #ffffff;
         text-transform: uppercase;
         letter-spacing: 1px;
         transition: color 0.4s ease;
@@ -1015,7 +980,7 @@ canvas{
     /* Description */
     .btn-desc {
         font-size: 0.85rem;
-        color: #666;
+        color: #cccccc;
         margin-top: 10px;
         font-style: italic;
         transition: color 0.4s ease;
@@ -1033,10 +998,16 @@ canvas{
         border-color: #f4f1ea; /* Inner line becomes white */
     }
 
+    .traditional-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
     .traditional-btn:hover .btn-label,
     .traditional-btn:hover .btn-icon,
     .traditional-btn:hover .btn-desc {
-        color: #f4f1ea; /* Text becomes white */
+        color: #ffffff;
     }
 
     /* --- RESPONSIVE --- */
@@ -1050,32 +1021,263 @@ canvas{
     /* --- STYLING FOR THE HIDDEN INPUTS (Matching Theme) --- */
     /* Ensuring subsequent screens look good too */
     .RoomIDContainer, .AlertContainer, .PlayerContainer {
-        background-color: #f4f1ea;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
         padding: 20px;
-        border: 2px solid #1a1a1a;
-        outline: 2px solid #9e0e0e;
-        outline-offset: -6px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
         max-width: 500px;
         text-align: center;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        color: #ffffff;
     }
     
     #roomID {
         font-family: 'Noto Serif Display', serif;
-        color: #9e0e0e;
-        border-color: #1a1a1a;
+        color: #ffffff;
+        border-color: rgba(255, 255, 255, 0.3);
         background: transparent;
         font-size: 1.5rem;
     }
 
     .StartBtn {
-        background-color: #1a1a1a;
-        color: #f4f1ea;
-        border: none;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(5px);
+        -webkit-backdrop-filter: blur(5px);
+        color: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
         padding: 10px 40px;
         font-family: 'Noto Serif Display';
         text-transform: uppercase;
         letter-spacing: 2px;
         transition: background 0.3s;
     }
-    .StartBtn:hover { background-color: #9e0e0e; }
+    .StartBtn:hover { 
+        background: rgba(255, 255, 255, 0.2);
+        transform: translateY(-2px);
+    }
+
+.AnnotationChoiceContainer {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10000;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+.ChoiceContainer {
+    display: flex;
+    gap: 20px;
+}
+
+.ChoiceShowImage, .ChoiceUploadImage {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    padding: 10px 20px;
+    color: #ffffff;
+    font-family: 'Noto Serif Display', serif;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.ChoiceShowImage:hover, .ChoiceUploadImage:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+.museum-panel {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    width: 90%;
+    max-width: 800px;
+    padding: 16px 24px;
+    
+    /* GLASSMORPHISM: Low alpha background + heavy blur */
+    background: rgba(40, 40, 40, 0.4); 
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    
+    border-radius: 28px;
+    
+    /* THE GLOW: A light ivory/gray border and a soft outer spread */
+    border: 1px solid rgba(255, 255, 245, 0.2); 
+    box-shadow: 
+        0 0 15px rgba(255, 255, 240, 0.15), /* Inner glow */
+        0 10px 30px rgba(0, 0, 0, 0.4);      /* Outer shadow for depth */
+    
+    color: #f0f0f0;
+    font-family: 'Google Sans', sans-serif;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 2000;
+}
+
+/* Hover state to make the glow pulse slightly */
+.museum-panel:hover {
+    border: 1px solid rgba(255, 255, 245, 0.4);
+    box-shadow: 0 0 25px rgba(255, 255, 240, 0.25), 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.museum-panel.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+
+.close-panel {
+    position: absolute;
+    top: 12px;
+    right: 20px;
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 18px;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.close-panel:hover { color: #fff; }
+
+.picture-title {
+    margin: 0 0 12px 4px;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #fff;
+}
+
+
+
+.input-container:focus-within {
+    border-color: rgba(255, 255, 240, 0.5); /* Border brightens when typing */
+    background: rgba(255, 255, 255, 0.08);
+}
+
+#user-inquiry {
+    width: 100%;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 16px;
+    resize: none; /* Prevents the user from manually dragging the corner */
+    outline: none;
+    display: block;
+    line-height: 1.5;
+    padding: 0;
+    margin: 0;
+    max-height: 150px; /* Limits how tall the box can get */
+    overflow-y: auto;  /* Adds scrollbar only when max-height is reached */
+    transition: height 0.1s ease; /* Smooth growth */
+    scrollbar-width: none;    /* Hides scrollbar in Firefox */
+    -ms-overflow-style: none; /* Hides scrollbar in IE/Edge */
+}
+
+#user-inquiry::-webkit-scrollbar {
+  display: none;            /* Hides scrollbar in Chrome/Safari/Brave */
+}
+
+/* Ensure the container flexes with the textarea */
+.input-container {
+    display: flex;
+    align-items: flex-end;
+    box-sizing: border-box;
+
+    background: rgba(255, 255, 255, 0.05); /* Very subtle input lift */
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: border-color 0.3s ease;
+}
+
+.send-button {
+    background: transparent;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s;
+}
+
+.send-button:hover { opacity: 0.7; }
+
+.chat-history-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 300px; /* Adjust based on your UI needs */
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.message {
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 85%;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.message.user {
+    align-self: flex-end;
+    background: #d97706; /* amber-600 */
+    color: white;
+}
+
+.message.gemini {
+    align-self: flex-start;
+    background: rgba(255, 255, 255, 0.1);
+    color: #f3f4f6;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Styling for the typing bubble */
+.message.gemini.typing {
+    opacity: 0.8;
+    border-style: dashed; /* Visual cue that it's temporary */
+}
+
+.typing-text {
+    font-size: 0.85rem;
+    color: #fbbf24; /* Amber-400 */
+    margin-right: 5px;
+}
+
+/* Optional: A simple pulse animation */
+@keyframes pulse {
+    0% { opacity: 0.5; }
+    50% { opacity: 1; }
+    100% { opacity: 0.5; }
+}
+
+.dot-flashing {
+    display: inline-block;
+    animation: pulse 1.5s infinite;
+}
+
+.bubble p {
+    margin: 5px 0; /* Reduces gap between paragraphs */
+}
+.bubble h3 {
+    font-size: 1.1em;
+    margin-top: 10px;
+    font-weight: bold;
+}

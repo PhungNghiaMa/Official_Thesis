@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
-	api "main/internal/interfaces"
 	business "main/internal/infrastructure/business"
-	database "main/internal/infrastructure/persistence"
 	multiplayer "main/internal/infrastructure/multiplayer"
+	database "main/internal/infrastructure/persistence"
+	api "main/internal/interfaces"
+	genai "main/internal/infrastructure/gen_ai"
 	"os"
 	"os/signal"
 	"sync"
@@ -32,7 +33,7 @@ func main() {
 	router := gin.Default()
 
 	// === Load SFU configuration from config.toml ===
-	sfuCfg, err := multiplayer.LoadSFUConfig("../../config.toml")
+	sfuCfg, err := multiplayer.LoadSFUConfig("../config.toml")
 	if err != nil {
 		log.Println("[SFU] Warning: using default STUN server because config.toml not found:", err)
 		// Fallback default
@@ -50,6 +51,18 @@ func main() {
 	// create SFU server (reads STUN/TURN from env in your websocket package)
 	SFU := multiplayer.NewSFURepo(sfuCfg)
 
+	// CONFIG GEMINI 
+	const (
+		Gemini_3_Pro = "gemini-3-pro"
+		Gemini_2_5_Pro = "gemini-2.5-pro"
+	)
+
+	geminiConfig := &genai.GeminiClientConfig{
+		APIKey: os.Getenv("GEMINI_API_KEY"),
+		Model: Gemini_2_5_Pro,
+	}
+
+	
 	// CONFIG CORS middleware
 	CORS := cors.DefaultConfig()
 	FRONTEND_URL := os.Getenv("FRONTEND_TEST_URL")
@@ -74,7 +87,7 @@ func main() {
 	pinataGatewayURL := os.Getenv("PINATA_GATEWAY_URL")
 	PinataService := business.NewPinataService(pinataJWT, pinataGatewayURL)
 
-	api.RegisterRoutes(router, db, PinataService, SFU)
+	api.RegisterRoutes(router, db, PinataService, SFU, geminiConfig)
 
 	go func() {
 		if err := router.Run(":3001"); err != nil {

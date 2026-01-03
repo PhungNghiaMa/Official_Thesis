@@ -455,14 +455,30 @@ window.addEventListener("tour-stop", (ev) => {
           }
           // clear flags so client doesn't continue applying remote transforms
           try {
-            model.userData.remoteControlled = false;
-            model.userData.externalPos = null;
-            model.userData.externalQuat = null;
+            // Instead of setting externalPos to null, set it to current position to keep NPC fixed
+            if (!model.userData.externalPos) {
+              model.userData.externalPos = model.position.clone();
+            }
+            if (!model.userData.externalQuat) {
+              model.userData.externalQuat = model.quaternion.clone();
+            }
+            model.userData._smoothedSpeed = 0; // Reset smoothed speed to stop animation
             if (entry.state) {
               entry.state.isOnTour = false;
               entry.state.mode = 'idle';
               entry.state.tourFacingQuat = null;
               entry.state.preventRotationUntil = null;
+            }
+            // Force animation to idle
+            const animCtrl = model.userData?.animationCtrl || model.userData?.animCtrl;
+            if (animCtrl) {
+              if (animCtrl.idleAction && typeof animCtrl.playAction === 'function') {
+                animCtrl.playAction(animCtrl.idleAction);
+                animCtrl.idleAction.timeScale = 1.0;
+              }
+              if (animCtrl.mixer) {
+                animCtrl.mixer.timeScale = 0.6; // Ensure normal speed
+              }
             }
           } catch (e) {}
           console.log("[Tour] Stopped NPC on client:", model.name);

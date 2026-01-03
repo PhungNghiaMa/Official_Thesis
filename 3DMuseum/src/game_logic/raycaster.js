@@ -1,15 +1,17 @@
 // raycaster.js
 import * as THREE from 'three';
 import { acceleratedRaycast } from "three-mesh-bvh";
+// Enhance performance by using BVH (Bounding Volume Hierarchy) for faster raycasting
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
 export default class RaycasterManager {
   constructor(camera, scene, domElement, options = {}) {
     this.camera = camera;
     this.scene = scene;
     this.domElement = domElement;
-    this.pointer = new THREE.Vector2();
+    this.pointer = new THREE.Vector2(); // Stores 2D mouse position
     this.raycaster = new THREE.Raycaster();
 
+    // Internal state and callback assignments
     this.doorNames = options.doorNames || ["Door001"];
     this.doorClickCallback = options.onDoorClick;
     this.outlineCallback = options.onHoverPictureFrame;
@@ -23,6 +25,7 @@ export default class RaycasterManager {
     this.lastHovered = null;
     this.enabled = true;
 
+    // Attach event listeners to the DOM
     domElement.addEventListener('click', this.handleClick.bind(this));
     domElement.addEventListener('mousemove', this.handleMouseMove.bind(this));
   }
@@ -39,93 +42,77 @@ export default class RaycasterManager {
     this.outlinePass = outlinePass
   }
 
-//   handleClick(event) {
-//     if (!this.enabled) return;
 
-//     this.updatePointer(event);
-//     this.raycaster.setFromCamera(this.pointer, this.camera);
-//     const intersects = this.raycaster.intersectObjects(this.scene.children, true);
-//     if (intersects.length === 0) return;
+  handleClick(event) {
+    if (!this.enabled) return;
+    // 1. Convert mouse pixels to -1/+1 normalized coordinates
+    this.updatePointer(event);
 
-//     const clickedObject = intersects[0].object;
-//     const name = clickedObject.name;
-//     if (this.doorNames.includes(clickedObject.parent?.name) && this.doorClickCallback) {
-//       this.doorClickCallback(clickedObject);
-//     }
+    // 2. Project a ray from the camera lens through the mouse pointer into the scene
+    this.raycaster.setFromCamera(this.pointer, this.camera);
 
-//     if (/^Picture_Frame\d+$/.test(name)) {
-//         if (this.pictureClickCallback) {
-//             this.pictureClickCallback(name);  // e.g., Picture_Frame024
-//         }
-//     }
-// }
+    // 3. Find all objects in the scene that the ray passes through
+    const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+    if (intersects.length === 0){
+      console.warn("INTERSECTS NOT EXIST !")
+      return;
+    } 
+    window.INTERSECTS = intersects;
 
-handleClick(event) {
-  if (!this.enabled) return;
+    // Extract the first (closest) intersection data
+    const first = intersects[0];
+    const clickedObject = first.object;
+    const name = clickedObject.name;
 
-  this.updatePointer(event);
-  this.raycaster.setFromCamera(this.pointer, this.camera);
-  const intersects = this.raycaster.intersectObjects(this.scene.children, true);
-  if (intersects.length === 0){
-    console.warn("INTERSECTS NOT EXIST !")
-    return;
-  } 
-  window.INTERSECTS = intersects;
+    window.CLICK_PICTURE = name
 
-  // choose the first meaningful intersection
-  const first = intersects[0];
-  const clickedObject = first.object;
-  const name = clickedObject.name;
-
-  window.CLICK_PICTURE = name
-
-  // door click (keep old behavior) -> return after handling
-  if (this.doorNames.includes(clickedObject.parent?.name) && this.doorClickCallback) {
-    this.doorClickCallback(clickedObject);
-    return;
-  }
-
-  // picture frame click -> return after handling
-  if (/^(PictureFrame)(\d{3})$/.test(name) || /^(ImageMesh)(\d{3})$/.test(name)) {
-    if (this.pictureClickCallback) {
-      this.pictureClickCallback(name);
-    }else{
-      console.warn("PICTURE CLICK CALLBACK NOT EXIST !")
+    // Logic for Door Interaction
+    if (this.doorNames.includes(clickedObject.parent?.name) && this.doorClickCallback) {
+      this.doorClickCallback(clickedObject);
+      return;
     }
-    return;
-  }
 
-  // general object click callback (e.g. for navigation) — pass the intersection
-  if (this.onNPCPathFollow) {
-    // pass the intersection object (has .point, .object, etc)
-    this.onNPCPathFollow(first);
-  }
-  
-  // ground click callback for crowd agent movement
-  if (this.onGroundClick) {
-    this.onGroundClick(first);
-  }
-}
-
-
-handleMouseMove(event) {
-  if (!this.enabled) return;
-
-  this.updatePointer(event);
-  this.raycaster.setFromCamera(this.pointer, this.camera);
-
-  const intersects = this.raycaster.intersectObjects(this.pictureFrames, true);
-  if (intersects.length > 0) {
-    const hovered = intersects[0].object;
-    if (hovered !== this.lastHovered) {
-      this.lastHovered = hovered;
-      if (this.outlinePass) this.outlinePass.selectedObjects = [hovered];
+    // picture frame click -> return after handling
+    if (/^(PictureFrame)(\d{3})$/.test(name) || /^(ImageMesh)(\d{3})$/.test(name)) {
+      if (this.pictureClickCallback) {
+        this.pictureClickCallback(name);
+      }else{
+        console.warn("PICTURE CLICK CALLBACK NOT EXIST !")
+      }
+      return;
     }
-  } else if (this.lastHovered) {
-    this.lastHovered = null;
-    if (this.outlinePass) this.outlinePass.selectedObjects = [];
+
+    // general object click callback (e.g. for navigation) — pass the intersection
+    if (this.onNPCPathFollow) {
+      // pass the intersection object (has .point, .object, etc)
+      this.onNPCPathFollow(first);
+    }
+    
+    // ground click callback for crowd agent movement
+    if (this.onGroundClick) {
+      this.onGroundClick(first);
+    }
   }
-}
+
+
+  handleMouseMove(event) {
+    if (!this.enabled) return;
+
+    this.updatePointer(event);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+
+    const intersects = this.raycaster.intersectObjects(this.pictureFrames, true);
+    if (intersects.length > 0) {
+      const hovered = intersects[0].object;
+      if (hovered !== this.lastHovered) {
+        this.lastHovered = hovered;
+        if (this.outlinePass) this.outlinePass.selectedObjects = [hovered];
+      }
+    } else if (this.lastHovered) {
+      this.lastHovered = null;
+      if (this.outlinePass) this.outlinePass.selectedObjects = [];
+    }
+  }
 
   updatePointer(event) {
     const rect = this.domElement.getBoundingClientRect();
@@ -133,4 +120,10 @@ handleMouseMove(event) {
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   }
 
+  dispose() {
+    this.domElement.removeEventListener('click', this._handleClick);
+    this.domElement.removeEventListener('mousemove', this._handleMouseMove);
+    this.pictureFrames = [];
+    this.interactables = [];
+  }
 }

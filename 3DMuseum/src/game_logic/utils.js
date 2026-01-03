@@ -1,6 +1,6 @@
 import { UploadItem , StartWebSocket , SubscribeChannel} from "./services";
 import * as THREE from "three";
-import { audioCache } from "./index.js";
+import { audioCache, audioRawCache } from "./index.js";
 import Hls from "hls.js";
 let isVideo = false;
 const uploadModal = document.getElementById("upload-modal");
@@ -20,8 +20,9 @@ const TitleContainer = document.getElementById('TitleContainer');
 const BottomContainer = document.getElementById('BottomContainer');
 const CancelBtnContainer = document.getElementById('CancelBtnContainer');
 const ImageShowContainer = document.getElementById('ImageShowContainer'); // Get the main container
-
-
+const ShowImageChoice = document.getElementById('choice_show_image');
+const UploadImageChoice = document.getElementById('choice_upload_image');
+const ChoiceContainer = document.getElementById("choice_container");
 
 // toastAlert.style.display = "none";
 let file = null;
@@ -53,20 +54,30 @@ export function closeUploadModal() {
     uploadVietDes.value = "";
 }
 
-export function displayUploadModal(_aspectRatio, uploadProps) {
-    uploadModal.style.display = "block";
-    uploadProperties = uploadProps;
-    console.log("upload properties: ", uploadProps);
+export function displayUploadModal(_aspectRatio, uploadProps, assetURL, annotationDiv) {
+    // uploadModal.style.display = "block";
+    ChoiceContainer.style.display = "block";
+    ShowImageChoice.addEventListener("click" , ()=>{
+      const event = new CustomEvent('showImage', { detail: { assetURL, title: annotationDiv.title, vietnamese_description: annotationDiv.getVietDes(), english_description: annotationDiv.getEngDes() } });
+      document.dispatchEvent(event);
+      ChoiceContainer.style.display = "none";
+      assetURL = null
+    })
+    UploadImageChoice.addEventListener("click" , () =>{
+      uploadModal.style.display = "block";
+      uploadProperties = uploadProps;
+      // console.log("upload properties: ", uploadProps);
 
 
-    // Ensure websocket running and subscribe to room channel so we receive progress updates 
-    StartWebSocket();
-    // Subscribe the room asset is the 
-    if (uploadProps?.roomID) {
-        const roomCh = `room:${uploadProps.roomID}`;
-        SubscribeChannel(roomCh);
-    }
-
+      // Ensure websocket running and subscribe to room channel so we receive progress updates 
+      StartWebSocket();
+      // Subscribe the room asset is the 
+      if (uploadProps?.roomID) {
+          const roomCh = `room:${uploadProps.roomID}`;
+          SubscribeChannel(roomCh);
+      }
+      ChoiceContainer.style.display = "none";
+    })
 }
 
 // --- Upload progress dashboard setup ---
@@ -193,6 +204,7 @@ function updateSubTask(cid, taskKey, status, progress, message) {
 
 
 function showCompletionAnimation(card) {
+  let dash = document.getElementById("upload-dashboard");
   card.innerHTML = `
     <div style="display:flex; justify-content:center; align-items:center; height:60px;">
       <div class="checkmark-circle" style="
@@ -210,6 +222,7 @@ function showCompletionAnimation(card) {
   // remove after 1 second
   setTimeout(() => {
     card.style.opacity = "0";
+    dash.style.display = "none";
     setTimeout(() => card.remove(), 500);
   }, 1000);
 }
@@ -527,7 +540,6 @@ function handleFile(file) {
 }
 
 
-// Replace your current Mapping_PictureFrame_ImageMesh with this version.
 export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray) {
   // Defensive copy of image meshes we can assign
   let availableImageMeshes = [...imageMeshesArray];
@@ -546,7 +558,6 @@ export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFrame
     m.getWorldPosition(imgPos);
     // console.warn(`ImageMesh: ${m.name} worldPos: ${imgPos.x.toFixed(3)}, ${imgPos.y.toFixed(3)}, ${imgPos.z.toFixed(3)}`);
   }
-  console.warn('--- End debug ---');
 
   // Sort frames left -> right by world X (if your gallery layout is horizontal).
   // If your layout runs on Z-axis instead, change to comparing .z instead.
@@ -696,7 +707,9 @@ export function DisplayImageOnDiv(assetURL, title, vietnamese_description, engli
           imgElement.src = assetURL;
           imgElement.style.width = '100%';
           imgElement.style.height = '100%';
-          imgElement.style.objectFit = 'contain';
+          imgElement.style.objectFit = 'cover';
+          imgElement.style.borderRadius = '10px';
+
           FirstIMGCol.appendChild(imgElement);
       }
 
@@ -727,19 +740,38 @@ export function DisplayImageOnDiv(assetURL, title, vietnamese_description, engli
       };
 }
 
-export function getCachedAudioDuration(audioCID){
-    if (!audioCID) return null;
-    try{
-        if (typeof audioCache !== undefined && audioCache instanceof Map){
-            const buffer = audioCache.get(audioCID);
-            if (buffer && typeof buffer.duration === 'number') return buffer.duration
-        }
-    }catch (error){
-        console.error("Fail to get audio duration: ", error)
-        return null;
+export async function getCachedAudioDuration(audioCID) {
+  if (!audioCID) return null;
+  const context = window.context || getAudioContext(); 
+  if (!context){
+    console.log("[getCachedAudioDuration] context is null.")
+  }
+  try {
+    // 1. Check if already decoded
+    let buffer = audioCache.get(audioCID);
+    if (buffer) return buffer.duration;
+
+    // 2. If not decoded, check if we have the raw data
+    const raw = audioRawCache.get(audioCID);
+    if (raw) {
+      console.info(`Decoding on-the-fly for duration: ${audioCID}`);
+      // AWAIT the actual decoding so we return a real number, not null
+      buffer = await context.decodeAudioData(raw.slice(0));
+      audioCache.set(audioCID, buffer);
+      audioRawCache.delete(audioCID);
+      return buffer.duration;
     }
+
+    // 3. If we don't even have raw data, we can't get duration yet
+    return null; 
+  } catch (error) {
+    console.error("Fail to get audio duration:", error);
     return null;
+  }
 }
+
+window.getAudioDuration = getCachedAudioDuration;
+
 
 export function setGameScene(scene) {
     gameScene = scene;

@@ -62,7 +62,6 @@ type AssetService struct {
 	WebsocketRepo applicationRepository.WebsocketRepository
 	ImageConvertRepo applicationRepository.ImageConvertRepository
 	VideoConvertRepo applicationRepository.VideoConvertRepository
-
 }
 
 func NewService(AssetRepo applicationRepository.Repository, PinataRepo applicationRepository.PinataRepository, TTSRepo applicationRepository.TTSRepository, WebsocketRepo applicationRepository.WebsocketRepository, ImageConvertRepo applicationRepository.ImageConvertRepository, VideoConvertRepo applicationRepository.VideoConvertRepository) *AssetService {

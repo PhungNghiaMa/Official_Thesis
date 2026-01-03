@@ -11,8 +11,8 @@ export const initI18next = async() => {
             lng: 'vi', 
             fallbackLng: 'en',
             debug: true,
-            ns: ['LandingPage'],
-            defaultNS: 'LandingPage',
+            ns: ['translation'],
+            defaultNS: 'translation',
             supportedLngs: ['en', 'vi'],
             interpolation: {
                 escapeValue: false,

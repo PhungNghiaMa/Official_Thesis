@@ -16,6 +16,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet"  crossorigin="anonymous">
 
   </head>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- <script type="module" src="./src/game_logic/index.js"></script>
   <script type="module">
     import { initConnection } from './src/game_logic/webRTC.js';
@@ -129,26 +130,26 @@
         </div>
     </div>
     
-    <div class="MenuContainerWrapper w-full h-full flex items-center justify-center bg-transparent">
+    <div class="MenuContainerWrapper w-full h-auto flex items-center justify-center bg-transparent">
       <div class="menu-container" id="menu-container" style="display: none;">
         <div class="MenuCloseContainer flex items-center justify-end" style="width:100%;">
           <i class="menu_close bi bi-x bg-orange-400 rounded-2xl" id="menu-close" ></i>
         </div>
       
-        <h2>Menu</h2>
+        <h2 data-i18n="Guidance.guidance_title"></h2>
       
-        <div style="font-size: 18px; font-weight: 600; color: ivory;">
-          Select the Gallery / Museum
-        </div>
+        <!-- <div style="font-size: 18px; font-weight: 600; color: ivory;">
+          Manual guidance
+        </div> -->
       
         <div id="menu-selection-list"></div>
         <hr>
         <div class="GuidanceContainer py-5 text-gray-300 text-center">
           <ul>
-            <li class="text-gray-300">Use WASD to move around</li>
-            <li class="text-gray-300">Escape key to open/close menu</li>
-            <li class="text-gray-300">Hover on annotation for details</li>
-            <li class="text-gray-300">Click on annotation to upload image</li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_1"></li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_2"></li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_3"></li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_4"></li>
           </ul>
         </div>
       </div>
@@ -173,6 +174,7 @@
         </label>
         <input type="file" id="upload-input" accept="image/png, image/jpeg, image/webP, image/jpg" style="display: none;">
       </div>
+
     
       <div class="upload-details overflow-auto">
         <input type="text" name="" id="upload-title" placeholder="title" maxlength="30">
@@ -185,9 +187,16 @@
       </div>
     </div>
 
+    <div id="choice_container" class="AnnotationChoiceContainer w-fit h-auto absolute" style="display: none;">
+      <div class="ChoiceContainer w-fit h-auto flex items-center justify-around">
+        <button type="button" id="choice_show_image" class="ChoiceShowImage w-fit" data-i18n="ChoiceBtn.show_image"></button>
+        <button type="button" id="choice_upload_image" class="ChoiceUploadImage" data-i18n="ChoiceBtn.upload_image"></button>
+      </div>
+    </div>
+
     <div id="ImageShowContainer" class="ImageShowContainer" id="image-show-container" style="display: none;">
-      <div class="FirstColContainer w-1/2 h-full flex items-center justify-center">
-        <div id="FirstIMGCol" class="FirstIMGCol w-auto max-w-full h-full py-5 object-contain"></div>
+      <div class="FirstColContainer w-1/2 h-full flex items-center justify-center mx-5">
+        <div id="FirstIMGCol" class="FirstIMGCol w-auto max-w-full h-full py-5 rounded-xl object-contain"></div>
       </div>
       <div id="SecondIMGCol" class="SecondIMGCol w-1/2 h-auto overflow-hidden mx-5 my-5">
         <div id="TopContainer" class="TopContainer w-full max-h-2/12 flex flex-row">
@@ -200,6 +209,34 @@
         <div id="BottomContainer" class="BottomContainer  w-full flex flex-wrap max-h-10/12 overflow-auto px-5 py-8"></div>
       </div>
     </div>
+
+    <div id="museum-ui" class="museum-panel">
+      <button class="close-panel" onclick="window.hideInquiryPanel()">✕</button>
+
+      <div class="panel-header">
+          <h3 id="picture-title" class="picture-title"></h3>
+      </div>
+
+      <div id="chat-history" class="chat-history-container scrollbar-hide">
+          </div>
+
+      <div class="input-container justify-center items-center py-4 px-4">
+        <textarea 
+            id="user-inquiry" 
+            class="scroll-smooth caret-amber-600 pl-1"
+            placeholder="Ask Museum Assistant about this piece..." 
+            rows="1"
+            oninput="autoScaleInput(this)"
+        ></textarea>
+          
+        <button type="submit" id="send-button" class="send-button">
+            <svg viewBox="0 0 24 24" width="20" height="20">
+                <path fill="currentColor" d="M2.01 21L23 12L2.01 3L2 10l15 2l-15 2z"></path>
+            </svg>
+        </button>
+      </div>
+    </div>
+
     
     <div id="model-container" style="display: none; width: 100dvw; height: 100dvh; position: absolute; top: 0; left: 0;"></div> 
     <script type="module">

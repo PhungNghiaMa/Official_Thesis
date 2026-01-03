@@ -1,12 +1,12 @@
 import { Crowd } from 'recast-navigation';
 import * as THREE from 'three';
-import { prefetchAudio , playAudio , AssetDataMap , FrameToImageMeshMap} from './index.js';
+import { prefetchAudio , playAudio , AssetDataMap , FrameToImageMeshMap, audioCache} from './index.js';
 import { getCachedAudioDuration } from './utils.js';
 import {hostStartTour} from './webRTC.js';
 export let crowd = null;
 const agents = new Map();
 
-export function initCrowd(navMesh, maxAgents = 16, maxAgentRadius = 1.0) {
+export function initCrowd(navMesh, maxAgents = 16, maxAgentRadius = 0.5) {
   if (!navMesh) {
     console.error("initCrowd: navMesh is required");
     return null;
@@ -30,7 +30,7 @@ export function addAgent(position, agentParams = {}, userData = {}) {
   const pos = { x: position.x, y: position.y, z: position.z };
 
   const params = {
-    radius: agentParams.radius ?? 0.5,
+    radius: agentParams.radius ?? 0.35,
     height: agentParams.height ?? 2.0,
     maxAcceleration: agentParams.maxAcceleration ?? 8.0,
     maxSpeed: agentParams.maxSpeed ?? 3.5,
@@ -318,9 +318,9 @@ export const agentTours = new Map();
 const TOUR_DEFAULT = {
   desiredDistance: 1, // Desired distance that want to set between the agent (NPC) and the objects (Pictures)
   fanSteps: 12, // Sampling resolution if direct snap fails
-  holdTime: 3.0, // Seconds to wait for NPC to present at each picture 
+  holdTime: 25.0, // Seconds to wait for NPC to present at each picture 
   loop: false,  // Loop when finish . Set false to not loop when the NPC finish introduce product
-  arrivalDist: 0.18 // Arrival / distance threshold (horizontal)
+  arrivalDist: 0.5 // Arrival / distance threshold (horizontal)
 }
 
 function resolveEntry(agentEntry){
@@ -524,6 +524,10 @@ export async function updateAgentTours(navQuery) {
       const arrivalDist = (tour.arrivalDist ?? TOUR_DEFAULT.arrivalDist);
       const hysteresisDist = Math.max(arrivalDist * 0.5, 0.25); // if it moves farther than this, clear arrived
 
+      if (tour.status === 'loading_audio' || tour.status === 'playing_audio') {
+        continue; 
+      }
+
       // --------------------------
       // MOVING state (main)
       // --------------------------
@@ -553,10 +557,26 @@ export async function updateAgentTours(navQuery) {
               // defer actual network/decoding to idle time — no awaits in update loop
               if (typeof requestIdleCallback !== 'undefined') {
                 requestIdleCallback(() => {
-                  try { prefetchAudio(nextAudioCID); } catch (e) { console.warn('prefetchAudio failed', e); }
-                }, { timeout: 1000 });
+                  try { 
+                    if (audioCache.has(nextAudioCID)) return;
+                    else{
+                      prefetchAudio(nextAudioCID); 
+                    }
+                  } catch (e) { 
+                    console.warn('prefetchAudio failed', e); 
+                  }
+                }, { timeout: 5000 });
               } else {
-                setTimeout(() => { try { prefetchAudio(nextAudioCID); } catch (e) { console.warn('prefetchAudio failed', e); } }, 0);
+                setTimeout(() => { 
+                  try { 
+                    if (audioCache.has(nextAudioCID)) return;
+                    else{
+                      prefetchAudio(nextAudioCID); 
+                    }
+                  } catch (e) { 
+                    console.warn('prefetchAudio failed', e); 
+                  } 
+                }, 0);
               }
             }
           }
@@ -564,7 +584,7 @@ export async function updateAgentTours(navQuery) {
         // --- ARRIVAL DETECTION (with single-fire) ---
         if (dist <= arrivalDist) {
           // if not already handled as arrived -> handle arrival once
-          if (!tour._arrived) {
+          if (!tour._arrived ) {
             tour._arrived = true;             // mark arrived to avoid repeated handling
             tour._prefetchCID = null;        // allow next leg to prefetch later
 
@@ -578,10 +598,17 @@ export async function updateAgentTours(navQuery) {
                 const audioCID = (language === 'vi') ? assetData.viet_audio_cid : assetData.eng_audio_cid;
                 if (audioCID) {
                   // Attempt to obtain cached decoded duration (if pre-decoded)
-                  const cachedDur = (typeof getCachedAudioDuration === 'function') ? getCachedAudioDuration(audioCID) : null;
+                  let cachedDur = (typeof getCachedAudioDuration === 'function') ?  await getCachedAudioDuration(audioCID) : null;
+                  if (cachedDur === null){
+                    cachedDur = await getCachedAudioDuration(audioCID);
+                  }
+                  
+                  console.log("CACHED DURATION: ", cachedDur);
                   const padding = 0.15; // small padding to account for latency
-                  const baseHold = (cachedDur && !isNaN(cachedDur)) ? cachedDur : (assetData?.holdTime ?? TOUR_DEFAULT.holdTime);
+                  let baseHold = (cachedDur && !isNaN(cachedDur)) ? cachedDur : (assetData?.holdTime ?? TOUR_DEFAULT.holdTime);
                   // Set tour.holdTime synchronously so the nextActionTime uses it
+                  // Give a second chance to get cacheDur again if the first time get cacheDur 
+                  // is fail ( maybe due to the low bandwidth so it cannot quick fetch audion and handle)
                   tour.holdTime = Math.max(0.1, baseHold + padding);
 
                   // mark loading state and start playback shortly (non-blocking)
@@ -789,7 +816,7 @@ export function addThirdPersonToCrowd(scene, crowd, tpView) {
     const startPos = { x: posVec.x ?? 0, y: posVec.y ?? 1, z: posVec.z ?? 0 };
 
     const agent = addAgent(startPos, {
-      radius: 0.25,
+      radius: 0.35,
       height: 1.8,
       maxSpeed: 2.4,
       maxAcceleration: 6.0,

@@ -19,7 +19,8 @@ export default class AnnotationDiv{
         this.title;
 
         const uploadBtn = document.createElement("button")
-        uploadBtn.textContent = "Upload";
+
+        uploadBtn.textContent = "Select action";
         uploadBtn.classList.add("btn")
         uploadBtn.addEventListener("click", (event) => {
             this.onAnnotationClick({event: null, id: this.__id})

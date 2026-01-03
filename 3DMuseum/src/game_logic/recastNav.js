@@ -7,6 +7,7 @@ let navMesh = null;
 let navQuery = null;
 let navHelper = null;
 
+// This function is used to create a NavMesh
 export async function initRecastIfNeeded() {
   if (!init.initialized) {
     await init();

@@ -54,10 +54,10 @@ export function createAnimController(model, characterGLTF) {
     if (run && hasRun) {
       actions.Running.timeScale = 1.5;
       playAction(actions.Running);
-      if (currentAction) currentAction.timeScale = 1.5;
+      if (currentAction) currentAction.timeScale = 1.0;
     } else if (hasWalk) {
       playAction(actions.WalkForward);
-      if (currentAction) currentAction.timeScale = 1.0;
+      if (currentAction) currentAction.timeScale = 0.6;
     }
 
     if (speed < 0.2) {
@@ -68,7 +68,6 @@ export function createAnimController(model, characterGLTF) {
 
   return {
     mixer,
-    // expose actions under conventional names used elsewhere
     idleAction: actions.Idle,
     walkAction: actions.WalkForward,
     runningAction: actions.Running,

@@ -12,6 +12,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pion/webrtc/v4 v4.1.6
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6
+	google.golang.org/genai v1.42.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )
@@ -35,6 +36,7 @@ require (
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
