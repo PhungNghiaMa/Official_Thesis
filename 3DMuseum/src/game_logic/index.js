@@ -1564,7 +1564,7 @@ async function loadModel() {
 
         // 3. Wait for BOTH promises to complete simultaneously.
         // const [gltf, items] = await Promise.all([loadModelPromise , getAssetsPromise]);
-        const [gltf , charGLTF] = await Promise.all([loadModelPromise , loadModelCharacterPromise]);
+        const [gltf , charGLTF , items] = await Promise.all([loadModelPromise , loadModelCharacterPromise , getAssetsPromise]);
 
         // ✅ ASSIGN CHARACTER VARIABLES IMMEDIATELY
         characterGLTF = charGLTF;
@@ -1584,12 +1584,12 @@ async function loadModel() {
 
 
         // Clear map before use 
-        // AssetDataMap.clear()
-        // // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
-        // // // image mesh name
-        // for (const item of items){
-        //   AssetDataMap.set(item.asset_mesh_name , item)
-        // }
+        AssetDataMap.clear()
+        // // Loop through each of items of items objects and then extract the data with the key is the image mesh name and value is corresponding for that 
+        // // image mesh name
+        for (const item of items){
+          AssetDataMap.set(item.asset_mesh_name , item)
+        }
 
         // let URL = "QmV55VNUfsGpCqv18Ak2B2VMHRxpaeupFedBMBJQVZ61zq"
         // await prefetchAudio(URL)
@@ -1850,21 +1850,21 @@ async function loadModel() {
         }
 
         // --- POPULATE SCENE WITH DATA ---
-        // (Array.isArray(items) ? items : []).forEach(item => {
-        //     console.warn(item)
-        //     if (!item) return;
-        //     const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
-        //     if (annotationMesh[asset_mesh_name]) {
-        //         annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
-        //         annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
-        //         if (category === "Image"){
-        //           setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
-        //         }else if (category === "Video"){
-        //           setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
-        //         }
+        (Array.isArray(items) ? items : []).forEach(item => {
+            console.warn(item)
+            if (!item) return;
+            const { asset_mesh_name, asset_cid, webp_cid , title, viet_des, en_des , viet_audio_cid , eng_audio_cid , category } = item;
+            if (annotationMesh[asset_mesh_name]) {
+                annotationMesh[asset_mesh_name].mesh.userData.imageSRC = `https://${PINATA_URL}${webp_cid}`;
+                annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
+                if (category === "Image"){
+                  setImageToMeshKTX2(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                }else if (category === "Video"){
+                  setVideoToMeshHLS(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`);
+                }
                 
-        //     }
-        // });
+            }
+        });
 
         hasEnteredNewScene = false;
         document.getElementById('loading-container').style.display = 'none';

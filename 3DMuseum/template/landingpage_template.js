@@ -30,11 +30,11 @@ export default
         <div class="SecondCol w-3/12 h-full">
           <div class="ContentWrapperContainer w-full h-screen flex flex-col items-start justify-center gap-2 mx-5 box-border overflow-y-hidden">
             <div id="Graph_1_Container" class="Graph_1_Container w-full max-h-1/2 px-8 py-8 bg-white/1 backdrop-blur-xs rounded-2xl border border-white/1 overflow-auto">
-              <h1 data-i18n="LandingPage.Des1" class="Description_1 text-sm font-medium font-stretch-75% italic text-orange-50 drop-shadow-md"></h1>
+              <h1 data-i18n="LandingPage.Des1" class="Description_1 text-small font-medium font-stretch-75% italic text-orange-50 drop-shadow-md"></h1>
             </div>
 
           <div id="Graph_2_Container" class="Graph_2_Container w-full max-h-1/2 px-8 py-8 mx-auto flex flex-wrap-reverse items-end justify-center bg-black/5 backdrop-blur-xs rounded-2xl border border-white/1 overflow-auto">
-            <h1 data-i18n="LandingPage.Des2" class="Description_2 text-start text-sm font-medium font-stretch-75% italic whitespace-pre-wrap text-orange-50 drop-shadow-md"></h1>
+            <h1 data-i18n="LandingPage.Des2" class="Description_2 text-start text-small font-medium font-stretch-75% italic whitespace-pre-wrap text-orange-50 drop-shadow-md"></h1>
           </div>
 
           </div>
