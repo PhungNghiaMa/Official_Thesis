@@ -31,7 +31,8 @@
         "guidance_1": "Sử dụng phím W-A-S-D để di chuyển",
         "guidance_2": "Sử dụng phím Escape để đóng/mở menu",
         "guidance_3": "Di chuột vào chú thích / Nhấp chuột vào tranh để xem chi tiết",
-        "guidance_4": "Nhấn phím I để kích hoạt chế độ tham quan"
+        "guidance_4": "Nhấn phím I để kích hoạt chế độ tham quan",
+        "guidance_5": "Nhấn phím V để thay đổi góc nhìn"
     },
 
     "ChoiceBtn": {

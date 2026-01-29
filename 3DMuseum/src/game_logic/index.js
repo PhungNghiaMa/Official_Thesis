@@ -1,6 +1,6 @@
-// src/game_logic/index.js
-
-// import "../../main.css";
+// This file contains the main game logic for the 3D museum application, 
+// including scene setup, player controls, audio management, and asset handling.
+// This is the main entry point for the game logic module and orchestrates various components
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -19,7 +19,9 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { KTX2Loader } from "three/examples/jsm/Addons.js";
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
-// import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
+
+// Use this if you want to load HDR environment map through .hdr file
+// import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js'; 
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { acceleratedRaycast } from "three-mesh-bvh";
 if (acceleratedRaycast) THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -84,7 +86,6 @@ let ambientLight , hemiLight , spot1 , spot2 , sun;
 // instance for post-processing
 let composer , outlinePass;
 
-// put these once near your input setup in index.js
 let camYaw = 0;
 let camPitch = 0;
 
@@ -120,7 +121,7 @@ export const AssetDataMap = new Map()
 let navQuery = null;
 let navMesh = null;
 let crowd = null;
-const npcAgents = [];
+export const npcAgents = [];
 
 const bvhMeshList = [];          // meshes used for BVH raycasts (ground snap + capsule checks)
 const navInputMeshes = [];   // meshes we will pass to recast
@@ -148,8 +149,8 @@ const AVATAR_RETRY_DELAY_MS = 5000; // 5s
 const LOD_SETTINGS = {
   // The bias is a fractional number of levels to offset the chosen mipmap.
     HIGH: 0.0,    // Default quality (best).
-    MEDIUM: 1.5,  // Slightly lower quality (skips first mipmap).
-    LOW: 3.0,     // Much lower quality (skips first few mipmaps).
+    MEDIUM: 2.0,  // Slightly lower quality (skips first mipmap).
+    LOW: 5.0,     // Much lower quality (skips first few mipmaps).
     
     // Performance Thresholds
     targetFPS: 180,                // Ideal frame rate
@@ -239,7 +240,7 @@ LoadingManager.onError = (url) => {
 
 // Definfe path to 3D model
 const ModelPaths = {
-    [Museum.ROOM1]: "optimizedModel/optimizeModel_21.glb",
+    [Museum.ROOM1]: "optimizedModel/optimizeModel_38.glb",
     [Museum.ROOM2]: "optimizedModel/optimizeModel_NEW_5.glb",
 }
 
@@ -302,7 +303,7 @@ function hideAnnotations() {
 // AudioContext acts as the master brain that calculates:
 //Panning: Is the sound coming from the left speaker or the right speaker?
 //Volume Decay: Is the sound quiet because the player is far away?
-//The Math: When you character move in the code, 
+//The Math: When character move in the code, 
 // An AudioListener is actually moving (which belongs to this AudioContext) through 3D space.
 // The Coordination: The AudioContext takes the (X, Y, Z) coordinates of character and compares 
 // them to the (X, Y, Z) coordinates of a sound source (like a TV or an NPC). It then performs a mathematical 
@@ -616,6 +617,14 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
     return;
   }
 
+  if(mesh.material) {
+    // Dispose old material and texture if they exist
+    if (mesh.material.map) {
+      mesh.material.map.dispose();
+    }
+    mesh.material.dispose();
+  }
+
   // 2. CLEANUP: Destroy old HLS instance and video if they exist on this mesh
   if (mesh.userData.hlsInstance) {
     console.log("Cleaning up old HLS instance for:", meshName);
@@ -757,7 +766,7 @@ function setVideoToMeshHLS(scene, meshName, hlsURL) {
     videoTexture.minFilter = THREE.LinearFilter;
     videoTexture.magFilter = THREE.LinearFilter;
     videoTexture.format = THREE.RGBAFormat; // Use RGBA for safety
-    videoTexture.colorSpace = THREE.SRGBColorSpace; // Match your renderer
+    videoTexture.colorSpace = THREE.SRGBColorSpace; // Match renderer setup
 
     // --- MIRROR Y LOGIC START ---
     // Flip the texture vertically
@@ -886,7 +895,7 @@ function updateDynamicLOD(measuredMbps = null) {
   if (mbps < SPEED_THRESHOLDS.LOW) {
     recommendedBias = LOD_SETTINGS.LOW;
   } else if (mbps < SPEED_THRESHOLDS.HIGH) {
-    recommendedBias = LOD_SETTINGS.MEDIUM; // Ensure you have a MEDIUM in your LOD_SETTINGS
+    recommendedBias = LOD_SETTINGS.MEDIUM; 
   } else {
     recommendedBias = LOD_SETTINGS.HIGH;
   }
@@ -1058,7 +1067,7 @@ function updateSpatialAudio(scene) {
 
   // Iterate through all spatial sources
   for (const [meshName, node] of spatialSources.entries()) {
-    // Destructure 'video' from the node (assuming you saved it there in setVideoToMeshHLS)
+    // Destructure 'video' from the node
     const { panner, mesh, video } = node; 
     if (!mesh) continue;
 
@@ -1106,9 +1115,9 @@ function updatePropVisibility() {
     // Only run this check every 30 frames (0.5 seconds)
     if (LOD_SETTINGS.frames % 30 !== 0) return;
 
-    const maxDistSq = 5 * 5; // 40 meters squared
+    const maxDistSq = 8 * 8; // 40 meters squared
 
-    // Iterate over detailed objects (e.g., your pictureFramesArray)
+    // Iterate over detailed objects (pictureFramesArray)
     for (const frame of pictureFramesArray) {
         const distSq = frame.position.distanceToSquared(camera.position);
         
@@ -1282,7 +1291,7 @@ export function initNPC(scene, navQuery, bvhMeshes) {
   // Add npcModel to scene
   scene.add(npcModel);
 
-  // --- compute an automatic footOffset if not provided by your importer ---
+  // --- compute an automatic footOffset if not provided by importer ---
   if (typeof npcModel.userData.footOffset !== 'number') {
     try {
       // bbox is bounding box, this will try to create smallest box that npcModel can 
@@ -1430,7 +1439,7 @@ export function initNPC(scene, navQuery, bvhMeshes) {
     agent.userData = agent.userData || {};
     agent.userData.model = npcModel;
 
-    // Also ensure the map entry has userData (if your addAgent produced an entry object)
+    // Also ensure the map entry has userData 
     try {
       // 1. SYSTEM SYNC: Verify the crowd manager is accessible
       if (typeof getAgents === "function") {
@@ -1772,7 +1781,7 @@ async function loadModel() {
     // 1. Create a promise for the model load. To make use the power of Promise 
     // which allow concurrently load , we will use loadAsync 
     const loadModelPromise = new Promise((resolve, reject) => {
-    // Use the GLTFLoader instance from your game logic.
+    // Use the GLTFLoader instance from game logic.
         loader.load(
             ModelPaths[currentMuseumId],
             (gltf) => {                    
@@ -2195,6 +2204,8 @@ async function loadModel() {
               annotationMesh[asset_mesh_name].mesh.userData.category = category;
               annotationMesh[asset_mesh_name].title = title;
               annotationMesh[asset_mesh_name].imageSRC = webp_cid;
+              annotationMesh[asset_mesh_name].viet_des = viet_des;
+              annotationMesh[asset_mesh_name].en_des = en_des;
               annotationMesh[asset_mesh_name].annotationDiv.setAnnotationDetails(title, viet_des, en_des , viet_audio_cid , eng_audio_cid);
               if (category === "Image"){
                 setImageToMesh(currentScene, asset_mesh_name, `https://${PINATA_URL}${asset_cid}`, `https://${PINATA_URL}${webp_cid}`);
@@ -2227,27 +2238,6 @@ function initMenu() {
 
     document.getElementById("menu-close").addEventListener("click", closeMenu);
 
-    // const menuList = document.getElementById("menu-selection-list");
-    // if (menuList) {
-    //     menuList.innerHTML = '';
-    //     const listItem1 = document.createElement("div");
-    //     listItem1.textContent = "Room1";
-    //     listItem1.className = "menu-item";
-    //     listItem1.addEventListener("click", () => {
-    //         setMuseumModel(Museum.ROOM1);
-    //         closeMenu();
-    //     });
-
-    //     const listItem2 = document.createElement("div");
-    //     listItem2.textContent = "Room2";
-    //     listItem2.className = "menu-item";
-    //     listItem2.addEventListener("click", () => {
-    //         setMuseumModel(Museum.ROOM2);
-    //         closeMenu();
-    //     });
-
-    //     menuList.append(listItem1, listItem2);
-    // }
     
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
@@ -2268,7 +2258,7 @@ function closeMenu(){
 if (menuContainer) menuContainer.style.display = "none";
 }
 
-// pointer lock mouse look (example — adapt to your app)
+// pointer lock mouse look (example — adapt to app)
 window.addEventListener('mousemove', (e) => {
   // Only rotate the camera if the mouse is "captured" by the browser
   if (document.pointerLockElement) {
@@ -2320,7 +2310,7 @@ function updateAudioListener(camera) {
    * We take the default 'Up' vector (0, 1, 0) and apply the camera's rotation.
    * This is crucial for "Roll." It tells the Audio Listener if character's head is 
    * tilted (xoay). Without this, if character tilted his head 90 degrees, the audio 
-   * wouldn't correctly flip between your ears.
+   * wouldn't correctly flip between player's ears.
  */
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
   listener.forwardX.setValueAtTime(forward.x, window.audioCtx.currentTime);
@@ -2361,7 +2351,7 @@ function animate() {
   LOD_SETTINGS.frames++;
   if (now - LOD_SETTINGS.startTime >= LOD_SETTINGS.FPS_CHECK_INTERVAL_MS) {
       const currentFPS = LOD_SETTINGS.frames / ((now - LOD_SETTINGS.startTime) / 1000);
-      if (currentFPS > currentFPS + 0.01 || currentFPS < currentFPS - 0.01 || currentFPS === prevFPS){
+      if (currentFPS > currentFPS + 1 || currentFPS < currentFPS - 1 || currentFPS === prevFPS){
         prevFPS = currentFPS;
         LOD_SETTINGS.frames = 0;
         LOD_SETTINGS.startTime = now;
@@ -2374,7 +2364,7 @@ function animate() {
       LOD_SETTINGS.startTime = now;
   }
   // Update property visibility dynamcally to reduce the bandwidth and GPU load 
-  updatePropVisibility();
+  // updatePropVisibility();
 
   // Update spatial audio for the whole scene
   updateSpatialAudio(scene);
@@ -3125,7 +3115,7 @@ export function addRemotePlayer(peerId, attempts = 1) {
 
 
 
-  // compute floor offset as you already do
+  // compute floor offset
   let floorOffset = computeFootOffsetForModel(model);
   if (floorOffset == null) floorOffset = 0;
   console.debug(`[AvatarOffset] floorOffset for ${peerId}:`, floorOffset);
@@ -3134,7 +3124,7 @@ export function addRemotePlayer(peerId, attempts = 1) {
   let mixer = null;
   let animCtrl = null; // controller returned by createAnimController
 
-  // If you have loaded characterGLTF (clips etc.), create controller for this clone
+  // If there is a  loaded characterGLTF (clips etc.), create controller for this clone
   if (typeof characterGLTF !== "undefined" && characterGLTF) {
     try {
       animCtrl = createAnimController(model, characterGLTF);
@@ -3157,7 +3147,7 @@ export function addRemotePlayer(peerId, attempts = 1) {
     model,
     mixer,
     animCtrl,        // may be null until characterGLTF exists
-    actions: {},     // kept for backward compat if you use it
+    actions: {},     
     currentAction: "idle",
     // authoritative / last received
     targetPos: new THREE.Vector3(),
@@ -3199,7 +3189,7 @@ export function addRemotePlayer(peerId, attempts = 1) {
       try {
         const prevYaw = new THREE.Euler().setFromQuaternion(this._prevTargetPos ? this._prevTargetPosQuaternion || new THREE.Quaternion() : new THREE.Quaternion(), "YXZ").y;
       } catch (e) {
-        // fallback: compute from _prev quaternion if you store it (we'll store below)
+        // fallback: compute from _prev quaternion if available
       }
 
       // store current quaternion for next delta
@@ -3444,7 +3434,7 @@ export function removeRemotePlayer(peerId) {
   if (!p) return;
   try {
     scene.remove(p.model);
-    // optionally dispose geometries / materials here if you want to free memory
+    // optionally dispose geometries / materials here to free memory
   } catch (e) { /* ignore */ }
   remotePlayers.delete(peerId);
   if (REMOTE_LOAD_RETRY[peerId]) {
@@ -3455,7 +3445,7 @@ export function removeRemotePlayer(peerId) {
   console.warn('[RemotePlayer] removeRemotePlayer', peerId);
 }
 
-// Call this from your main animate loop in index.js:
+// Call this from  main animate loop in index.js:
 export function updateRemotePlayers(dt) {
   for (const p of remotePlayers.values()){
     if (p.mixer) p.mixer.update(dt);
@@ -3633,7 +3623,6 @@ export function initializeGame(targetContainerId = 'model-container') {
     }
 
 
-  
     window.addEventListener('resize', onWindowResize);
 
     window.addEventListener('blur', clearAllInputs);
@@ -3676,7 +3665,9 @@ export function initializeGame(targetContainerId = 'model-container') {
             console.log("Stopping tour...");
             stopAgentTour(npc);
             npc.state.touring = false;
+            
             // Stop play audio
+            
             stopAudio();
           try {
             const npcName = npc.model?.name || (npc.model?.userData && npc.model.userData.tourId) || null;
@@ -3803,7 +3794,6 @@ export function initializeGame(targetContainerId = 'model-container') {
             console.log(`User clicked frame: ${frameName} → mapped to: ${imageMeshName}`);
             console.log("Viet description: ", annotationMesh[imageMeshName].annotationDiv.getVietDes())
             console.log("Eng description: ", annotationMesh[imageMeshName].annotationDiv.getEngDes())
-            // DisplayImageOnDiv(assetURL , annotationDiv.title , annotationDiv.vietnamese_description , annotationDiv.english_description)
             displayUploadModal(1/1, { roomID: currentMuseumId, asset_mesh_name: imageMeshName }, assetURL, annotationDiv);
          },
         onDoorClick: (clickedObject) => {
@@ -3834,6 +3824,7 @@ export function initializeGame(targetContainerId = 'model-container') {
 
         // onHoverPictureFrame: (object, isHovering) => {}
         onNPCPathFollow: (intersection) => {
+          if (tpView.isTouring || fpView.isTouring) return; // ignore clicks during tour mode
           if (!navQuery) {
             console.warn('NavMesh or NPC is not ready. Cannot find path.');
             return;
@@ -4034,7 +4025,7 @@ function showTypingIndicator() {
     if (!indicator) {
         indicator = document.createElement('div');
         indicator.id = 'gemini-typing';
-        indicator.className = 'message gemini typing'; // Uses your existing gemini styles
+        indicator.className = 'message gemini typing'; // Uses existing gemini styles
         
         indicator.innerHTML = `
             <div class="bubble">
@@ -4072,6 +4063,7 @@ window.showInquiryPanel = function(picture) {
         
         // 2. Set the UI Title
         titleElement.innerText = annotationMesh[correspondingImageMesh].title || "Unknown Artwork";
+        window.description = annotationMesh[correspondingImageMesh].viet_des;
         input.value = ""; 
 
         // 3. Extract the webp_cid from userData
@@ -4154,8 +4146,8 @@ window.hideInquiryPanel = function() {
 async function handleSendInquiry() {
     const inquiryInput = document.getElementById('user-inquiry');
     const prompt = inquiryInput.value;
-    if (!prompt.trim()) return;
-
+    const finalPrompt = prompt + "Base on the description of the artwork below and try to make the response relevant to the artwork. If you can find the related information then please add to the response.Here is the description:" + window.description;
+    if (!finalPrompt.trim()) return;
     // 1. Identify which picture the NPC is currently at
     const npcEntry = npcAgents[0]; 
     const currentPicture = npcEntry?.state?.currentPictureMesh;
@@ -4186,8 +4178,8 @@ async function handleSendInquiry() {
     showTypingIndicator(webp_cid); 
 
     try {
-        // 4. Call Backend (Passing the webp_cid to your Go backend)
-        const answer = await GenAI(webp_cid, prompt, playerID);
+        // 4. Call Backend (Passing the webp_cid to Go backend)
+        const answer = await GenAI(webp_cid, finalPrompt, playerID);
 
         // 5. Save AI Response & Remove Typing Indicator
         hideTypingIndicator();

@@ -1,4 +1,5 @@
-// gallery_logic.js
+// This handle the gallery page logic: fetching asset data, rendering gallery grid, pagination, 
+// filtering, and asset detail view.
 import galleryTemplate from '../template/gallery_template.js';
 import navigationPage from '../template/navigation_page_template.js';
 
@@ -9,9 +10,9 @@ let assetData = [];
 
 const BACKEND_URL =
   import.meta.env.MODE === "production"
-    ? import.meta.env.VITE_PROD_BACKEND_URL // Use VITE_ prefix
-    : import.meta.env.VITE_BACKEND_URL;     // Use VITE_ prefix
-console.log("BACKEND URL: ", BACKEND_URL)
+    ? import.meta.env.VITE_PROD_BACKEND_URL 
+    : import.meta.env.VITE_BACKEND_URL;     
+
 export function initGalleryPage(container) {
   container.innerHTML = navigationPage;
   const bottomContainer = container.querySelector(".BottomFunctionContainer");

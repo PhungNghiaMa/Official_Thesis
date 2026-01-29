@@ -1,3 +1,6 @@
+// This file contains utility functions for handling the upload modal, file selection, and 
+// displaying upload progress.
+
 import { UploadItem , StartWebSocket , SubscribeChannel} from "./services";
 import * as THREE from "three";
 import { audioCache, audioRawCache } from "./index.js";
@@ -14,7 +17,7 @@ const uploadEnDes = document.getElementById("upload-english-description");
 const uploadVietDes = document.getElementById("upload-vietnamese-description");
 const uploadSpinner = document.getElementById("upload-spinner");
 const uploadSubmit = document.getElementById("upload-btn");
-// const toastAlert = document.getElementById("toast-alert");
+const toastAlert = document.getElementById("toast-alert");
 const FirstIMGCol = document.getElementById('FirstIMGCol');
 const TitleContainer = document.getElementById('TitleContainer');
 const BottomContainer = document.getElementById('BottomContainer');
@@ -33,14 +36,18 @@ let uploadProperties = {
 let gameScene = null;
 let assetProgressState = new Map();
 
+const PINATA_URL = import.meta.env.MODE === "production"
+    ? import.meta.env.VITE_PINATA_PRIVATE_GATEWAY 
+    : import.meta.env.VITE_PINATA_PRIVATE_GATEWAY; 
 
-
+// Toast message display 
 export function toastMessage(message) {
     toastAlert.style.display = "flex";
     toastAlert.textContent = message;
-    setTimeout(() => { toastAlert.style.display = "none" }, 3000);
+    setTimeout(() => { toastAlert.style.display = "none" }, 2000);
 }
 
+// Close upload modal and reset fields
 export function closeUploadModal() {
     uploadModal.style.display = "none";
     uploadPreview.src = '';
@@ -54,6 +61,7 @@ export function closeUploadModal() {
     uploadVietDes.value = "";
 }
 
+// Display upload modal with options to show image or upload new one
 export function displayUploadModal(_aspectRatio, uploadProps, assetURL, annotationDiv) {
     // uploadModal.style.display = "block";
     ChoiceContainer.style.display = "block";
@@ -105,6 +113,7 @@ function ensureDashboard() {
   return dash;
 }
 
+// Create or get existing asset upload card
 function getOrCreateAssetCard(cid, assetTitle) {
   const dash = ensureDashboard();
   let card = document.getElementById(`asset-card-${cid}`);
@@ -142,7 +151,7 @@ function getOrCreateAssetCard(cid, assetTitle) {
       <!-- Sub-task Statuses -->
       <div style="margin-bottom:4px; font-weight:600; color:#ddd;">Asset Generation Status:</div>
       <div id="sub-task-container-${cid}">
-        ${createSubTaskRow(cid, 'image', 'Image Upload (KTX2/WebP)')}
+        ${createSubTaskRow(cid, 'image', 'Asset Upload')}
         ${createSubTaskRow(cid, 'tts_en', 'Audio (English)')}
         ${createSubTaskRow(cid, 'tts_vi', 'Audio (Vietnamese)')}
       </div>
@@ -152,7 +161,7 @@ function getOrCreateAssetCard(cid, assetTitle) {
   return card;
 }
 
-/** Helper to generate the HTML for a single sub-task row */
+// Helper to generate the HTML for a single sub-task row 
 function createSubTaskRow(cid, taskKey, taskLabel) {
     return `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -165,7 +174,7 @@ function createSubTaskRow(cid, taskKey, taskLabel) {
     `;
 }
 
-/** Helper to update a specific sub-task row's status and progress */
+// Helper to update a specific sub-task row's status and progress 
 function updateSubTask(cid, taskKey, status, progress, message) {
   if (!taskKey) return;
   const card = document.getElementById(`asset-card-${cid}`);
@@ -194,15 +203,9 @@ function updateSubTask(cid, taskKey, status, progress, message) {
           '#1e88e5';
   }
   
-  // Update global state
-  // if (assetProgressState.has(cid)) {
-  //     const state = assetProgressState.get(cid);
-  //     state[taskKey] = { stage: taskKey, status, progress, message };
-  //     assetProgressState.set(cid, state);
-  // }
 }
 
-
+// Show completion animation and remove card
 function showCompletionAnimation(card) {
   let dash = document.getElementById("upload-dashboard");
   card.innerHTML = `
@@ -228,19 +231,18 @@ function showCompletionAnimation(card) {
 }
 
 // Listen to progress messages from backend
-// Listen to progress messages from backend
 window.addEventListener("ws:upload-progress", (e) => {
   const msg = e.detail;
 
   if (msg.type === "upload") {
-    console.log("🖼️ Image pipeline update detected:", msg.stage, msg.status, msg.progress);
+    console.log("Image pipeline update detected:", msg.stage, msg.status, msg.progress);
   } else if (msg.type === "tts") {
-    console.log("🎵 Audio pipeline update detected:", msg.language, msg.status, msg.progress);
+    console.log("Audio pipeline update detected:", msg.language, msg.status, msg.progress);
   }
 
 
   // DEBUG
-  console.log("RAW WEBSOCKET MESSAGE:", msg);
+  // console.log("RAW WEBSOCKET MESSAGE:", msg);
     // 🔍 Debug trace to confirm message flow
   // console.groupCollapsed(`[UI] Received ws:upload-progress (${msg.type || "unknown"})`);
   // console.log("Stage:", msg.stage);
@@ -355,15 +357,10 @@ window.addEventListener("ws:upload-progress", (e) => {
 
   } // --- End of STEP 5
 
-  // ... (rest of function, STEP 6 and 7, are fine) ...
 
   // --- STEP 6: Completion handler ---
   if (msg.status === "completed") {
-    // if (msg.stage === "pipeline") {
-    //   // Entire pipeline complete (image + scheduling TTS)
-    //   showCompletionAnimation(card);
-    //   return;
-    // }
+    
 
     // If TTS individual job completes, check if all done
     const st = assetProgressState.get(cid);
@@ -385,8 +382,6 @@ window.addEventListener("ws:upload-progress", (e) => {
   }
 });
 
-
-
 // CSS animation for checkmark pop-in
 const effect = document.createElement("style");
 effect.textContent = `
@@ -399,7 +394,7 @@ effect.textContent = `
 document.head.appendChild(effect);
 
 
-
+// Display upload modal and initialize handlers
 export function initUploadModal(ktx2Loader) {
     console.log("init");
     const closeBtn = document.getElementById("upload-close");
@@ -416,15 +411,13 @@ export function initUploadModal(ktx2Loader) {
 
     const submitCallback = () => {
       const { roomID , asset_mesh_name } = uploadProperties;
-      // ⬇️ --- START FIX --- ⬇️
       // SUBSCRIBE FIRST!
       // Subscribe to the room channel *before* making the API call.
       // This ensures we catch all 'type: "upload"' messages from the start.
       SubscribeChannel(`room:${roomID}`);
       if (!file) return toastMessage("Select a file.");
 
-      // uploadSpinner.style.display = 'block';
-      // uploadSubmit.disabled = true;
+
       // Display dashboard
       const pendingCID = "pending-" + Date.now();
       getOrCreateAssetCard(pendingCID, uploadTitle.value || "New Asset");
@@ -470,6 +463,10 @@ export function initUploadModal(ktx2Loader) {
 
         if (response.success) closeUploadModal();
 
+        const vietnamese_description = uploadVietDes.value;
+        const english_description = uploadEnDes.value;
+
+
         if (!isVideo){
           updatePictureFrameTexture(ktx2Loader, asset_mesh_name, realCID, webpCID);
           return {asset_mesh_name , webpCID , vietnamese_description , english_description} ;
@@ -511,7 +508,7 @@ export function initUploadModal(ktx2Loader) {
 
 }
 
-
+// Handle file selection and preview
 function handleFile(file) {
     if (file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/webp' || file.type === 'video/mp4' || file.type === 'video/quicktime' || file.type === 'video/webm' || file.type === 'video/avi')) {
         const reader = new FileReader();
@@ -539,7 +536,7 @@ function handleFile(file) {
     }
 }
 
-
+// Mapping Picture Frames object to corresponding Image Meshes based on proximity (nearest distance)
 export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFramesArray, imageMeshesArray) {
   // Defensive copy of image meshes we can assign
   let availableImageMeshes = [...imageMeshesArray];
@@ -548,7 +545,7 @@ export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFrame
   const framePos = new THREE.Vector3();
   const imgPos = new THREE.Vector3();
 
-  // Debug: print arrays BEFORE mapping so you can inspect exporter order
+  // Debug: print arrays BEFORE mapping so we can inspect exporter order
   console.warn('--- Mapping debug: BEFORE mapping ---');
   for (const f of pictureFramesArray) {
     f.getWorldPosition(framePos);
@@ -559,8 +556,8 @@ export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFrame
     // console.warn(`ImageMesh: ${m.name} worldPos: ${imgPos.x.toFixed(3)}, ${imgPos.y.toFixed(3)}, ${imgPos.z.toFixed(3)}`);
   }
 
-  // Sort frames left -> right by world X (if your gallery layout is horizontal).
-  // If your layout runs on Z-axis instead, change to comparing .z instead.
+  // Sort frames left -> right by world X (if the gallery layout is horizontal).
+  // If the layout runs on Z-axis instead, change to comparing .z instead.
   pictureFramesArray.sort((a, b) => {
     a.getWorldPosition(framePos);
     b.getWorldPosition(imgPos); // reuse imgPos as temp
@@ -612,18 +609,18 @@ export function Mapping_PictureFrame_ImageMesh(FrameToImageMeshMap, pictureFrame
 //   console.warn('Final FrameToImageMeshMap:', JSON.stringify(FrameToImageMeshMap, null, 2));
 }
 
-
+// Display image and details in overlay div
 export function DisplayImageOnDiv(assetURL, title, vietnamese_description, english_description) {
     if (!FirstIMGCol || !TitleContainer || !BottomContainer || !ImageShowContainer) {
         console.error("Missing target DOM elements. Check your HTML structure.");
         return;
     }
 
-    console.log("Displaying Asset:", { assetURL, title });
-    if (!assetURL) {
-        console.error("LỖI: assetURL bị trống!");
-        return;
-    }
+    // console.log("Displaying Asset:", { assetURL, title });
+    // if (!assetURL) {
+    //     console.error("Lack assetURL!");
+    //     return;
+    // }
 
     const language = localStorage.getItem('language');
     const description = language === 'vi' ? vietnamese_description : english_description;
@@ -702,7 +699,7 @@ export function DisplayImageOnDiv(assetURL, title, vietnamese_description, engli
       FirstIMGCol.appendChild(videoElement);
   }
   else {
-          // Xử lý Ảnh
+          // Attach image to container
           const imgElement = document.createElement('img');
           imgElement.src = assetURL;
           imgElement.style.width = '100%';
@@ -734,12 +731,13 @@ export function DisplayImageOnDiv(assetURL, title, vietnamese_description, engli
             if (video._hlsInstance) {
                 video._hlsInstance.destroy();
             }
-            window.isPaused3D = true;
+            window.isPaused3D = false;
         }
         ImageShowContainer.style.display = 'none';
       };
 }
 
+// Audio Duration Caching and Retrieval
 export async function getCachedAudioDuration(audioCID) {
   if (!audioCID) return null;
   const context = window.context || getAudioContext(); 
@@ -769,10 +767,9 @@ export async function getCachedAudioDuration(audioCID) {
     return null;
   }
 }
-
 window.getAudioDuration = getCachedAudioDuration;
 
-
+// Set the global game scene reference
 export function setGameScene(scene) {
     gameScene = scene;
 }
@@ -786,6 +783,7 @@ const textureLoader = new THREE.TextureLoader();
  * @param {string} assetURL - The URL of the newly uploaded image.
  */
 
+// Hot -update picture frame texture after upload 
 export function updatePictureFrameTexture(ktx2Loader , meshName, ktx2CID, webpCID) {
     if (!gameScene) {
         console.error("Game scene not set. Cannot hot-update texture.");
@@ -833,8 +831,8 @@ export function updatePictureFrameTexture(ktx2Loader , meshName, ktx2CID, webpCI
 
 
     // --- ATTEMPT 1: Load KTX2 ---
-    const ktx2Url = `https://${window.PINATA_URL}${ktx2CID}`
-    const fallbackUrl = `https://${window.PINATA_URL}${webpCID}`
+    const ktx2Url = `https://${PINATA_URL}${ktx2CID}`
+    const fallbackUrl = `https://${PINATA_URL}${webpCID}`
     ktx2Loader.load(ktx2Url, 
         // KTX2 Success Callback
         (ktx2Texture) => {
@@ -869,13 +867,14 @@ export function updatePictureFrameTexture(ktx2Loader , meshName, ktx2CID, webpCI
     );
 }
 
+// Hot -update video texture after upload
 function updateVideoTexture(meshName, videoCID){
   if (!gameScene) {
     console.error("Game scene not set. Cannot hot-update texture.");
     return;
   }
   // 1. Find the mesh
-  const mesh = scene.getObjectByName(meshName);
+  const mesh = gameScene.getObjectByName(meshName);
   if (!mesh || !mesh.isMesh) {
     console.warn(`❌ Cannot find mesh for ${meshName}`);
     return;
@@ -883,17 +882,17 @@ function updateVideoTexture(meshName, videoCID){
 
   // 2. CLEANUP: Destroy old HLS instance and video if they exist on this mesh
   if (mesh.userData.hlsInstance) {
-    console.log("🧹 Cleaning up old HLS instance for:", meshName);
+    console.log("Cleaning up old HLS instance for:", meshName);
     try {
       mesh.userData.hlsInstance.destroy();
     } catch (e) {
-      console.warn("⚠️ Error destroying old HLS:", e);
+      console.warn("Error destroying old HLS:", e);
     }
     mesh.userData.hlsInstance = null;
   }
   
   if (mesh.userData.videoElement) {
-    console.log("🧹 Removing old video element for:", meshName);
+    // console.log("Removing old video element for:", meshName);
     try {
       const oldVideo = mesh.userData.videoElement;
       oldVideo.pause();
@@ -901,7 +900,7 @@ function updateVideoTexture(meshName, videoCID){
       oldVideo.load(); // Force unload
       oldVideo.remove(); // Remove from DOM (though it wasn't attached, good practice)
     } catch (e) {
-      console.warn("⚠️ Error cleaning video element:", e);
+      console.warn("Error cleaning video element:", e);
     }
     mesh.userData.videoElement = null;
   }
@@ -919,13 +918,13 @@ function updateVideoTexture(meshName, videoCID){
   
   // Store reference for later cleanup
   mesh.userData.videoElement = video;
+  const hlsURL = `https://${PINATA_URL}${videoCID}`;
 
-  console.log("🎬 HLS URL Base:", hlsURL);
+  console.log("LS URL Base:", hlsURL);
 
   let hls;
   let masterURL = hlsURL + "/master.m3u8";
   let streamURL = hlsURL + "/stream.m3u8";
-  let isLoadingMaster = true;
   if (Hls.isSupported()) {
     const hlsConfig = {
       startLevel: 0,             // Start at lowest quality for fast load
@@ -934,7 +933,7 @@ function updateVideoTexture(meshName, videoCID){
       lowLatencyMode: false,
       maxBufferLength: 30,
       maxMaxBufferLength: 60,
-      maxBufferHole: 0.5,        // Tolerate small gaps (CRITICAL for your issue)
+      maxBufferHole: 0.5,        // Tolerate small gaps 
       nudgeOffset: 0.1,          // Helper to jump gaps
       nudgeMaxRetry: 10,
       enableWorker: true,        // Use web worker for performance
@@ -1004,8 +1003,9 @@ function updateVideoTexture(meshName, videoCID){
     videoTexture.minFilter = THREE.LinearFilter;
     videoTexture.magFilter = THREE.LinearFilter;
     videoTexture.format = THREE.RGBAFormat; // Use RGBA for safety
-    videoTexture.colorSpace = THREE.SRGBColorSpace; // Match your renderer
-
+    videoTexture.colorSpace = THREE.SRGBColorSpace; // Match the renderer
+    videoTexture.flipY = false;
+    
     const material = new THREE.MeshBasicMaterial({ map: videoTexture });
 
     // Clean up old material properties

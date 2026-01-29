@@ -1,4 +1,8 @@
-// recastNav.js
+// This code handles the creation and management of a navigation mesh (NavMesh) for pathfinding 
+// in a 3D environment using the recast-navigation library.
+// It includes functions to initialize the recast library, build a NavMesh from Three.js meshes,
+// retrieve the NavMesh query object, and load an external NavMesh from a file.
+
 import * as THREE from 'three';
 import { init, NavMeshQuery , NavMesh , importNavMesh } from 'recast-navigation';
 import { threeToSoloNavMesh, NavMeshHelper } from '@recast-navigation/three';
@@ -44,7 +48,7 @@ export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
   console.info('NavMesh build will use the following meshes:');
   meshesToUse.forEach(m => console.info('  -', m.name || m.uuid));
 
-    // 🔥 Bake each mesh by applying its world matrix
+    // Bake each mesh by applying its world matrix
   const bakedMeshes = meshesToUse.map(mesh => {
     const geom = mesh.geometry.clone();
     geom.applyMatrix4(mesh.matrixWorld); // transform verts into world-space
@@ -74,25 +78,6 @@ export function buildNavMeshFromMeshes(meshes = [], config = {}, scene = null) {
           navHelper = null;
         }
 
-        // const navMeshMaterial = new THREE.MeshBasicMaterial({
-        //   color: 0x00ff00, // Change this to the color you want (e.g., 0x0000ff for blue, 0xff0000 for red)
-        //   wireframe: true,
-        //   transparent: true,
-        //   opacity: 0.5,
-        // });
-        // const helper = new NavMeshHelper(navMesh, { navMeshMaterial });
-
-        // const nmMat = new THREE.MeshBasicMaterial({
-        //   color: 0x00ff00,
-        //   wireframe: true,
-        //   transparent: true,
-        //   opacity: 1,
-        //   side: THREE.DoubleSide,
-        //   polygonOffset: true,
-        // });
-
-        // navHelper = new NavMeshHelper(navMesh, { navMeshMaterial: nmMat });
-        // scene.add(navHelper);
       } catch (err) {
         console.warn('Failed to create NavMeshHelper:', err);
       }
@@ -121,7 +106,6 @@ export async function LoadExternalNavMesh(scene, url) {
     const loader = new THREE.FileLoader();
     loader.setResponseType('arraybuffer');
 
-    // ✅ loadAsync returns a promise
     const data = await loader.loadAsync(url);
 
     if (!data) {
@@ -133,7 +117,7 @@ export async function LoadExternalNavMesh(scene, url) {
     const myUint8Array = new Uint8Array(data);
     console.log("MyUint8Array length:", myUint8Array.length);
 
-    // Your custom import function (must return { navMesh })
+    // Create navmesh by import the external navmesh data
     const { navMesh: nm } = importNavMesh(myUint8Array);
 
     if (!nm) {
@@ -144,7 +128,7 @@ export async function LoadExternalNavMesh(scene, url) {
     navMesh = nm;
     console.log("NavMesh:", navMesh);
 
-    // ✅ Create NavMeshQuery
+    // Create NavMeshQuery
     navQuery = new NavMeshQuery(navMesh);
     console.log("NavQuery:", navQuery);
 
@@ -153,6 +137,8 @@ export async function LoadExternalNavMesh(scene, url) {
       navHelper.parent.remove(navHelper);
       navHelper = null;
     }
+
+    // Debug function to visualize navmesh
     // const helper = new NavMeshHelper(navMesh);
     // scene.add(helper);
     // navHelper = helper;

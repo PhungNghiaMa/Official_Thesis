@@ -1,3 +1,10 @@
+// This is the ThirdPersonPlayer class that handles player movement, physics, and 
+// animation in a third-person perspective.
+// It uses a capsule collider for collision detection and integrates with BVH-accelerated meshes for 
+// efficient physics.
+// This handle the movement input, gravity, collision resolution, and animation state updates.
+// It also supports NPC characters by allowing external control of animation states.
+
 import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
@@ -94,17 +101,19 @@ export default class ThirdPersonPlayer {
     this.bvhReady = true;
   }
 
+  // Set object as NPC
   setIsNPC(){
     this.isNPC = true;
   }
 
-
+  // Reset controls
   resetControls() {
     this.input.forward = this.input.backward = this.input.left = this.input.right = this.input.run = false;
     this.playerVelocity.set(0, 0, 0);
     this.playerOnFloor = true; 
   }
 
+  // Rotate the player model to face a specific yaw angle
   faceYaw(yaw) {
     if (!this.model) return;
     this.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
@@ -116,7 +125,7 @@ export default class ThirdPersonPlayer {
     if (!model || !characterGLTF) return;
     this.model = model;
 
-    // compute footOffset as before
+    // compute footOffset from model bounds 
     const bbox = new THREE.Box3().setFromObject(this.model);
     this.footOffset = -bbox.min.y;
 
@@ -139,6 +148,7 @@ export default class ThirdPersonPlayer {
     this.model.userData.animCtrl = animCtrl;
 }
 
+  // Get the forward vector of the player model
   getForwardVector() {
     if (this.model) {
       // Detect the direction that the nose of character is pointing to
@@ -159,11 +169,14 @@ export default class ThirdPersonPlayer {
     return new THREE.Vector3(0, 0, 1);
   }
 
+  // Get the side vector of the player model
+  // In this function it will return the right side vector
   getSideVector() {
     const f = this.getForwardVector();
     return new THREE.Vector3().copy(f).cross(new THREE.Vector3(0, 1, 0)).normalize();
   }
 
+  // This activate the animation action with crossfade
   playAction(action) {
     if (!action) return; // safe-guard
     action.enabled = true;
@@ -185,6 +198,7 @@ export default class ThirdPersonPlayer {
     this.currentAction = action;
   }
 
+  // Handle key down events for movement input
   onKeyDown(event) {
     // NEW CHECK: Ignore event if an input element is focused
     // This isInput check is applied to avoid the character move while the admin input the text
@@ -202,6 +216,7 @@ export default class ThirdPersonPlayer {
     }
   }
 
+  // Handle key up events for movement input
   onKeyUp(event) {
     switch (event.code) {
       case 'KeyW': this.input.forward = false; break;
@@ -239,6 +254,7 @@ export default class ThirdPersonPlayer {
     }
   }
 
+  // Set the initial rotation of the player model based on a yaw angle
   setInitialRotationFromYaw(yaw) {
     if (this.model) {
       // Set the player model's rotation to match the camera's yaw
@@ -303,14 +319,13 @@ export default class ThirdPersonPlayer {
 
   /**
    * Public helper for NPC controllers:
-   * npcController should call this each frame with NPC horizontal speed and flags.
-   * Example: npcPlayer.setNPCAnimationState( speed, { left:false, right:false, run:false } )
+   * npcController call this each frame with NPC horizontal speed and flags.
    */
   setNPCAnimationState(speed, opts = {}) {
     this.updateAnimationState(speed, opts);
   }
 
-    /**
+  /**
    * Return a stable world position for the player. Prefer the smoothed capsule end
    * (this._smoothedPlayerPosition) if available (prevents jitter). Otherwise fall
    * back to playerCollider.end, model.position, or (0,0,0).
@@ -341,14 +356,15 @@ export default class ThirdPersonPlayer {
     return this.playerCollider;
   }
 
-
+  // This call inside animation loop in index.js to update the player each frame
   update(delta) {
     if (!this.bvhReady || !this.model) return;
       // Single-step physics update with variable delta (capped for safety)
       const safeDelta = Math.min(delta, 0.1);
       this._physicsStep(safeDelta);
-    }
+  }
 
+  // Real logic for handling movement and animation of third person view model
   _physicsStep(dt) {
     // Constants
     const ACCELERATION = 20.0;
@@ -504,7 +520,7 @@ export default class ThirdPersonPlayer {
           // If the triangle is closer than that radius, the capsule overlaps.
           // depth = how far the capsule has penetrated into the triangle.
 
-          // 👉 Example:
+          // Example:
           // Capsule radius = 0.5
           // Closest distance to triangle = 0.3
           // Depth = 0.5 − 0.3 = 0.2 → means the capsule is overlapping by 0.2 units.
@@ -556,6 +572,7 @@ export default class ThirdPersonPlayer {
     this.updateAnimationState(speed, this.input);
   }
   
+  // This function will be kicked off from index.js when the player want to follow an NPC agent
   startFollowAgent(npcEntry, options = {}) {
     this.isTouring = true;
     if (!npcEntry || !npcEntry.agent) {
@@ -606,30 +623,36 @@ export default class ThirdPersonPlayer {
     return true;
   }
 
-
+  // Stop following an agent
   stopFollowAgent() {
     this._follow = null;
     this.isTouring = false;
     this.resetControls();
   }
 
+  // Check if the player is currently touring (following an NPC)
   isTouring() {
     return this.isTouring;
   }
 
+  // Set host status
   setHost(value){
     this.isHost = value;
   }
 
+  // Return current host status
   getHost(){
     return this.isHost;
   }
 
+  // Return the camera object
   getCamera(){
     return this.camera
   }
 
-  // small helper: resolve agent position object -> {x,y,z}
+  // Resolve agent position safely for follow logic 
+  // Normally the agent object position will be an object with x,y,z properties
+  // but some crowd systems provide an interpolatedPosition() function for smoother movement 
   _resolveAgentPosition(agent) {
     if (!agent) return null;
     try {
@@ -643,7 +666,9 @@ export default class ThirdPersonPlayer {
     }
   }
 
-  // keep the player capsule aligned to the model position
+  // Keep the player capsule aligned to the model position
+  // This is important when moving because without this, the model maybe sink into the ground 
+  // if it encounter the ladder or slope and this will cause the visual glitch
   _updateCapsuleToModel() {
     if (!this.playerCollider || !this.model) return;
     const segLen = this.playerCollider.end.y - this.playerCollider.start.y;
@@ -652,8 +677,10 @@ export default class ThirdPersonPlayer {
     this.playerCollider.end.set(this.model.position.x, bottomY + segLen, this.model.position.z);
     this._smoothedPlayerPosition.copy(this.playerCollider.start);
   }
+
   // Call this each frame if following an agent
-  updateFollow(delta) {
+  // This function just called when the player is following an NPC agent
+  updateFollow() {
         if (!this.crowdAgent || !this.model || !this._follow) return;
 
         const agentPosData = this._resolveAgentPosition(this.crowdAgent);
@@ -710,10 +737,12 @@ export default class ThirdPersonPlayer {
         this.updateAnimationState(speed, { run: isRunning });
     }
 
+  // Set the crowd agent associated with this player
   setCrowdAgent(agent) {
     this.crowdAgent = agent;
   }
-
+  
+  // Sync the player model's position and rotation from the crowd agent
   syncFromCrowd() {
     if (!this.crowdAgent || !this.model) return;
 
@@ -771,21 +800,6 @@ export default class ThirdPersonPlayer {
     const vx = vel?.x ?? 0;
     const vz = vel?.z ?? 0;
     const speed = Math.sqrt(vx * vx + vz * vz);
-
-    // --- 5. Apply Rotation ---
-    // Make the model face the direction it's moving.
-    // if (isHost === true){
-    //   if (speed > 1e-3) {
-    //     let targetYaw = Math.atan2(vx, vz);
-    //     if (this.isNPC){
-    //       targetYaw -= Math.PI/2
-    //     }
-    //     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
-    //     // Slerp for smooth turning.
-    //     this.model.quaternion.slerp(targetQuat, 0.1);
-    //   }
-    // }
-
        
     if (speed > 1e-3) {
       let targetYaw = Math.atan2(vx, vz);
@@ -799,21 +813,7 @@ export default class ThirdPersonPlayer {
       return;
     }
 
-    // if (!this.remoteControlled) { // <--- The crucial check
-    //   if (speed > 1e-3) {
-    //     let targetYaw = Math.atan2(vx, vz);
-    //     if (this.isNPC){
-    //       targetYaw -= Math.PI/2
-    //     }
-    //     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, targetYaw, 0));
-    //     // Slerp for smooth turning.
-    //     this.model.quaternion.slerp(targetQuat, 0.1);
-    //   }
-    // }
-    
-
-
-    // --- 6. Update Animation ---
+    // --- 5. Update Animation ---
     // Use the agent's speed to decide whether to play the walk or run animation.
     const isRunning = speed > (2.4 * 1.1); // A little higher than walk speed
     this.updateAnimationState(speed, { run: isRunning });

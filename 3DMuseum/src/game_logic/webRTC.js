@@ -11,7 +11,8 @@
 // - Host/client role differentiation for coordinated tour experiences
 //
 // Dependencies:
-// - Requires './index.js' to be loaded first, as this module imports functions for player and NPC state management
+// - Requires './index.js' to be loaded first, as this module imports functions for player and 
+// NPC state management
 // - Assumes the presence of window.gameAPI for game integration
 //
 // Integration instructions:
@@ -105,7 +106,7 @@ async function enableVoiceChat(pc) {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
-        googEchoCancellation: true,    // Older, but sometimes necessary for max effect
+        googEchoCancellation: true,    
         googNoiseSuppression: true,    
         googAutoGainControl: true,
         googHighpassFilter: true,      // Filters out low-frequency rumbles/hums
@@ -113,22 +114,42 @@ async function enableVoiceChat(pc) {
     });
     console.log("[Voice] Microphone access enabled");
 
-    // --- 🎧 Clean and compress mic audio before sending ---
+    // Clean and compress mic audio before sending
     const audioCtx = new AudioContext();
     const source = audioCtx.createMediaStreamSource(localAudioStream);
     const compressor = audioCtx.createDynamicsCompressor();
+
+    // Sets the volume level (in decibels) where the compressor starts working.
+    // At -30dB, any sound louder than this will be turned down.
     compressor.threshold.setValueAtTime(-30, audioCtx.currentTime);
+
+    // Defines how "smoothly" the transition into compression happens.
+    // 40 is a high value (Soft Knee), making the compression feel natural rather than a sudden drop.
     compressor.knee.setValueAtTime(40, audioCtx.currentTime);
+
+    // Determines how much the volume is reduced once it crosses the threshold.
+    // 12:1 is a aggressive ratio—for every 12dB over the threshold, only 1dB comes out.
     compressor.ratio.setValueAtTime(12, audioCtx.currentTime);
+
+    // How fast the compressor reacts to loud sounds (in seconds).
+    // 0 means it reacts instantly (useful for catching sudden spikes).
     compressor.attack.setValueAtTime(0, audioCtx.currentTime);
+
+    // How fast the compressor stops working after the volume drops below the threshold.
+    // 0.25 seconds is a standard recovery time to avoid "pumping" artifacts.
     compressor.release.setValueAtTime(0.25, audioCtx.currentTime);
 
     const dest = audioCtx.createMediaStreamDestination();
     source.connect(compressor);
     compressor.connect(dest);
 
-    // --- 🎤 Use processed stream for WebRTC ---
+    // Use processed stream for WebRTC
     const processedStream = dest.stream;
+
+    // From the 'processedStream' object, get an array of all available audio tracks
+    // and select the first one (index 0) to assign to the variable 'audioTrack'.
+    // By using [0], the programmer tell the program that: "I don't care about the video or any other secondary audio; 
+    // just give me the primary audio source so I can use it."
     const audioTrack = processedStream.getAudioTracks()[0];
     if (audioTrack) {
       micSender = pc.addTrack(audioTrack, processedStream);
@@ -176,13 +197,13 @@ function initVoiceUI() {
       // If currently talking, stop it
       btn.style.background = "rgba(0,0,0,0.6)";
       stopTalking();
-      // Optional: You might want to update the button appearance here
+      // Optional: Update the button appearance here
       // btn.classList.remove('active');
     } else {
       // If currently silent, start talking
       btn.style.background = "green";
       startTalking();
-      // Optional: You might want to update the button appearance here
+      // Optional: Update the button appearance here
       // btn.classList.add('active');
     }
 
@@ -199,20 +220,21 @@ function initVoiceUI() {
 function startTalking() {
   if (!localAudioStream) return;
 
+  // Unmute all mic tracks of the localAudioStream to start transmitting
   localAudioStream.getAudioTracks().forEach(t => t.enabled = true);
   isMicActive = true;
   console.log("[Voice] Mic ON (talking)");
 
-  // 🔊 Create local playback if not already present
+  // Create local playback if not already present
   let loop = document.getElementById("local-loopback-audio");
   if (!loop) {
     loop = document.createElement("audio");
     loop.id = "local-loopback-audio";
     loop.srcObject = localAudioStream;
-    loop.autoplay = true;
-    loop.muted = false;
-    loop.playsInline = true;
-    loop.volume = 1;
+    loop.autoplay = true; // Start immediately
+    loop.muted = true; // IMPORTANT: 'false' means the speaker hears themselves , true make the speaker not hear themselves to avoid echo
+    loop.playsInline = true; // Necessary for mobile browsers to play without full-screen
+    loop.volume = 1;// Full volume
     document.body.appendChild(loop);
 
     loop.play().then(() => {
@@ -266,7 +288,7 @@ function getAgentsFunc() { return _sharedRefs.getAgents ? _sharedRefs.getAgents(
  * @param {Object} npc - The NPC object for which to stop the tour.
  * @returns {*} The result of the stopTour function or null if not available.
  */
-function stopTour(npc) {return _sharedRefs.stopTour ? _sharedRefs.stopTour(npc) : null;}
+function stopTour(npc) {return _sharedRefs.stopAgentTour ? _sharedRefs.stopAgentTour(npc) : null;}
 
 /**
  * Determines the room ID for WebRTC connections.
@@ -344,10 +366,11 @@ function getNPCState() {
  */
 function sendNPCStateBinaryFromState(st) {
   if (!dc || dc.readyState !== "open") throw new Error("dc not open");
-  // 1: This usually represents a 1-byte Header or "Type ID." 
+  // 1: This represents a "Type ID." In this case we use 4 to indicate it's an "npc_state" message. 
   // For example, 0 might mean "Player Position," while 1 might mean "Chat Message."
-  // 7: This represents seven numbers (usually the player's position and rotation).3 numbers for Position: $(x, y, z)$4 numbers for Rotation: $(x, y, z, w)$ — The Quaternion!
-  // *4: Each of those 7 numbers is a Float32 (a decimal number). In computer memory, one Float32 takes up 4 bytes.Total size: $1 + (7 \times 4) = 29$ bytes.
+  // 7: This represents seven numbers (usually the player's position and rotation).3 numbers for Position: (x, y, z) and
+  // 4 numbers for Rotation: (x, y, z, w) — The Quaternion!
+  // *4: Each of those 7 numbers is a Float32 (a decimal number). In computer memory, one Float32 takes up 4 bytes.Total size: 1 + (7 x 4) = 29$ bytes.
   const buf = new ArrayBuffer(1 + 7*4);
   const dv = new DataView(buf);
   dv.setUint8(0, 4); // type = 4 (npc_state)
@@ -359,25 +382,27 @@ function sendNPCStateBinaryFromState(st) {
   dv.setFloat32(1 + 5*4, st.q.z, true);
   dv.setFloat32(1 + 6*4, st.q.w, true);
 
-    // name length and name bytes
+  // name length and name bytes
   // This calculates the starting position for the name data.
 
   // As we saw before: 1 (Type ID) + 28 (Position/Rotation data) = 29.
 
-  // This means the name data begins at index 29 in your buffer.
+  // This means the name data begins at index 29 in buffer.
   const nameLenOffset = 1 + 7*4;
 
-  // dv is your DataView.
+  // dv is DataView.
 
   // This line writes one byte that stores the length of the name.
 
-  // Why? If the name is "Bob", nameLen is 3. The person receiving this data needs to read this number first so they know to look for exactly 3 letters next.
+  // Why? If the name is "Bob", nameLen is 3. The person receiving this data needs to read this 
+  // number first so they know to look for exactly 3 letters next.
   dv.setUint8(nameLenOffset, nameLen);
   if (nameLen > 0) {
-    /*
-      u8 is a Uint8Array (a view that lets you work with raw bytes).
 
-      nameBytes: This is likely your name string converted into UTF-8 bytes (e.g., using TextEncoder).
+    /*
+      u8 is a Uint8Array (a view that lets us work with raw bytes).
+
+      nameBytes: This is  name string converted into UTF-8 bytes (e.g., using TextEncoder).
 
       nameLenOffset + 1: We add +1 because index 29 holds the length. The actual letters start at index 30.
 
@@ -403,7 +428,7 @@ function sendNPCStateJSONFromState(st) {
 }
 
 // ============================================================================
-// 🧭 Tour lifecycle event handlers (non-host stop fix)
+// Tour lifecycle event handlers (non-host stop fix)
 // ============================================================================
 
 // When host stops the tour — make sure non-host regains control.
@@ -420,12 +445,14 @@ window.addEventListener("tour-stop", (ev) => {
     if (tp) {
       tp.isTouring = false;
       tp.remoteControlled = false;
+      tp.resetControls();
       if (typeof tp.stopFollowAgent === 'function') try { tp.stopFollowAgent(); } catch(e) {}
       if (typeof tp.setHost === 'function') try { tp.setHost(false); } catch(e) {}
     }
     if (fp) {
       fp.isTouring = false;
       fp.remoteControlled = false;
+      fp.resetControls();
       if (typeof fp.stopFollowAgent === 'function') try { fp.stopFollowAgent(); } catch(e) {}
       if (typeof fp.setHost === 'function') try { fp.setHost(false); } catch(e) {}
     }
@@ -444,10 +471,8 @@ window.addEventListener("tour-stop", (ev) => {
           try {
             // call CrowdManager stop if available. stopAgentTour expects entry or agent
             if (typeof stopTour === 'function') {
-              stopTour(entry);
-              entry.state.touring = false;
+              stopTour(entry.agent);
             } else if (entry.agent && typeof entry.agent.stop === 'function') {
-              entry.state.touring = false;
               entry.agent.stop();
             }
           } catch (e) {
@@ -464,10 +489,13 @@ window.addEventListener("tour-stop", (ev) => {
             }
             model.userData._smoothedSpeed = 0; // Reset smoothed speed to stop animation
             if (entry.state) {
-              entry.state.isOnTour = false;
-              entry.state.mode = 'idle';
-              entry.state.tourFacingQuat = null;
               entry.state.preventRotationUntil = null;
+              entry.state.tourFacingQuat = null;
+              entry.state.currentPictureMesh = null;
+              entry.state.mode = 'idle';
+              entry.state.requestedGait = null;
+              entry.state.isOnTour = false;
+              entry.state.atDestination = false;
             }
             // Force animation to idle
             const animCtrl = model.userData?.animationCtrl || model.userData?.animCtrl;
@@ -751,7 +779,7 @@ function createPlaceholderNPC(state) {
 
 
 
-// Called when user accepts tour invite. Hook your local NPC-follow behavior here.
+// Called when user accepts tour invite. Hook local NPC-follow behavior here.
 // index.js — helper to start local room tour following a host NPCName
 // requires: window.tpView (ThirdPersonPlayer instance), CrowdManager (imported or exposed), scene, navQuery
 
@@ -912,7 +940,7 @@ export async function initConnection() {
     const stream = event.streams[0];
     if (!stream) return;
 
-    // Derive peerId (you can enhance this later to map by sender)
+    // Derive peerId 
     const peerKey = `peer-${remoteAudioNodes.size + 1}`;
     console.log("[Voice] Received remote audio track:", peerKey);
 
@@ -953,14 +981,14 @@ export async function initConnection() {
   dc.onmessage = (e) => {
     try {
       if (typeof e.data === "string") {
-        console.debug("[WebRTC] DC recv (text):", e.data.slice(0,200));
+        // console.debug("[WebRTC] DC recv (text):", e.data.slice(0,200));
         onDataMessage(e.data);
       } else if (e.data instanceof ArrayBuffer || ArrayBuffer.isView(e.data)) {
         // Prefer binary handler
-        console.debug("[WebRTC] DC recv (binary)", e.data.byteLength || e.data.length);
+        // console.debug("[WebRTC] DC recv (binary)", e.data.byteLength || e.data.length);
         try { 
           // NOTE: SFU broadcasts will typically not attach sender metadata to datachannel payloads.
-          // If you rely on knowing the peer id for each binary packet, encode it into the packet
+          // If we rely on knowing the peer id for each binary packet, encode it into the packet
           // or ensure the client first sends a JSON "join" (we already do that on open).
           onDataMessageBinary({ data: e.data }, /*senderId=*/null);
         } catch (err) {
@@ -1018,7 +1046,7 @@ export async function initConnection() {
  */
 async function createAndSendOffer(pc, joinUrl) {
   const offer = await pc.createOffer({
-    // you can set offerToReceiveAudio/video if needed for getUserMedia flows
+    // Set offerToReceiveAudio/video if needed for getUserMedia flows
   });
   await pc.setLocalDescription(offer);
 
@@ -1098,7 +1126,7 @@ function onDataOpen() {
   // send binary states at freq
   if (sendTimer) clearInterval(sendTimer);
     sendTimer = setInterval(() => {
-    // if (!isHost) return; // 🚫 prevent non-host from sending
+    // if (!isHost) return; // prevent non-host from sending
 
       const st = getLocalPlayerState ? getLocalPlayerState() : null;
       if (!st) return;
@@ -1542,7 +1570,7 @@ function sendLocalState(obj) {
 // webRTC.js
 
 // This cache variable is important. Define it in the global scope of webRTC.js
-// let _remoteNPCEntry = null; // You already have this, just ensure it's there.
+// let _remoteNPCEntry = null; 
 
 /**
  * Updates the remote NPC state based on received data from the host.
@@ -1601,7 +1629,7 @@ function updateNPCRemoteState(state) {
     foundEntry.userData = ud; // Ensure it's attached
 
     // Mark as remote controlled
-    ud.remoteControlled = true;
+    // ud.remoteControlled = true;
     if (model) {
       model.userData = model.userData || {};
       model.userData.remoteControlled = true;
@@ -1781,7 +1809,9 @@ function stopRoomTourBroadcast(npcName = null) {
   if (!dc || dc.readyState !== "open") return;
   const payload = { t: "tour", cmd: "stop", ts: Date.now() };
   if (npcName) payload.npcName = npcName;
+  window.npcModelName = null;
   sendLocalState(payload);
+  stopNPCThrottledSender();
   console.log("[WebRTC] Tour stop broadcasted", npcName ? ("npc=" + npcName) : "");
 }
 
@@ -1884,5 +1914,4 @@ export async function updateLobbyState(inputRoomID){
 }
 
 
-// auto-init (optional) — comment out if you want manual control.
 // initConnection().catch(err => console.warn('webrtc init failed', err));

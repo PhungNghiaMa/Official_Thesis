@@ -1,3 +1,5 @@
+// Landing Page Template
+import "tailwindcss"
 export default 
 `<div id="landing_page" class="LandingPageContainer w-full overflow-hidden top-0">
       <div class="LandingPageWrapContainer w-full h-auto flex flex-row-reverse overlfow-hidden">

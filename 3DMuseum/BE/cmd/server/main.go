@@ -78,7 +78,7 @@ func main() {
 	CORS.AllowHeaders = []string{"Origin", "Content-Type", "Authorization", "Accept", "User-Agent", "Cache-Control", "Pragma"}
 	// Allow common methods (GET, POST, PUT, DELETE, PATCH, OPTIONS)
 	CORS.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
-	// If you use cookies or authorization headers that require credentials
+	// If use cookies or authorization headers that require credentials
 	CORS.AllowCredentials = true
 
 	router.Use(cors.New(CORS))

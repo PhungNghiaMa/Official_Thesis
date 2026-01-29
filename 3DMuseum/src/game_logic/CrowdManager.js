@@ -1,6 +1,10 @@
+// This code manages crowd simulation for NPC characters in the 3D museum application.
+// It initializes a Crowd instance using a navigation mesh, adds agents with specific parameters,
+// sets their movement targets, and updates their states each frame.
+
 import { Crowd } from 'recast-navigation';
 import * as THREE from 'three';
-import { prefetchAudio , playAudio , AssetDataMap , FrameToImageMeshMap, audioCache} from './index.js';
+import { prefetchAudio , playAudio , AssetDataMap , FrameToImageMeshMap, audioCache, npcAgents} from './index.js';
 import { getCachedAudioDuration } from './utils.js';
 import {hostStartTour} from './webRTC.js';
 export let crowd = null;
@@ -86,7 +90,7 @@ export function setAgentTarget(agentId, targetPosition, navQuery, options = {}) 
       return;
     }
 
-    // request move - use the point form (this matches your working click-path code)
+    // request move - use the point form 
     if (typeof agentHandle.requestMoveTarget === 'function') {
       agentHandle.requestMoveTarget(navPt.point);
     } else if (typeof agentId === 'number') {
@@ -320,7 +324,7 @@ const TOUR_DEFAULT = {
   fanSteps: 12, // Sampling resolution if direct snap fails
   holdTime: 25.0, // Seconds to wait for NPC to present at each picture 
   loop: false,  // Loop when finish . Set false to not loop when the NPC finish introduce product
-  arrivalDist: 0.5 // Arrival / distance threshold (horizontal)
+  arrivalDist: 1.5 // Arrival / distance threshold (horizontal)
 }
 
 function resolveEntry(agentEntry){
@@ -339,9 +343,9 @@ function resolveEntry(agentEntry){
 
 /**
  * Start a tour for agent/entry.
- * - agentEntry: the object returned by initNPC (recommended) OR the raw agent handle.
+ * - agentEntry: the object returned by initNPC, which return a map {agent,{agent,userData}}.
  * - meshes: array of THREE.Mesh (picture frames)
- * - navQuery: your navQuery (required)
+ * - navQuery: navQuery 
  * - options: { desiredDistance, fanSteps, holdTime, loop, gait }
  *
  * Returns true on success.
@@ -362,7 +366,7 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
     for (const pictureMesh of PictureMeshes) {
         if (!pictureMesh) continue;
 
-        // ✅ Look up the TourTarget for this picture
+        // Look up the TourTarget for this picture
         const explicitTarget = targetsMap.get(pictureMesh.name);
         if (!explicitTarget) {
             console.warn("No TourTarget found for", pictureMesh.name);
@@ -430,7 +434,7 @@ export function startAgentTour(agentEntry, PictureMeshes = [], navQuery, options
         console.warn("startAgentTour: initial setAgentTarget failed", e);
     }
 
-    console.warn("✅ Starting tour with", queue.length, "targets");
+    console.warn("Starting tour with", queue.length, "targets");
     return true;
 }
 
@@ -458,8 +462,11 @@ export function stopAgentTour(agentEntry) {
 export async function updateAgentTours(navQuery) {
   if (!navQuery) return;
 
+  // Get current time in seconds
   const now = (typeof performance !== 'undefined') ? performance.now() / 1000 : Date.now() / 1000;
 
+  // agentHandle -> Key in agentTours
+  // tour = { agent, entry, queue, index, status, nextActionTime, holdTime, loop, gait, ... } -> Value in agentTours
   for (const [agentHandle, tour] of agentTours.entries()) {
     try {
       if (!agentHandle || !tour || !Array.isArray(tour.queue) || tour.queue.length === 0) {
@@ -477,7 +484,6 @@ export async function updateAgentTours(navQuery) {
       if (entry && entry.state) entry.state.mode = tour.status;
 
       // get agent position (interpolated if available)
-      // get agent position (interpolated if available).
       // If agent is remoteControlled and has externalPos, prefer that (host-driven).
       let agentPosition = null;
       try {
@@ -486,10 +492,8 @@ export async function updateAgentTours(navQuery) {
           // externalPos is expected to be a THREE.Vector3-like {x,y,z}
           agentPosition = ud.externalPos;
         } else {
-          agentPosition =
-            (typeof agentHandle.interpolatedPosition === "function")
-              ? agentHandle.interpolatedPosition()
-              : (typeof agentHandle.position === "function" ? agentHandle.position() : agentHandle.position);
+          agentPosition = (typeof agentHandle.interpolatedPosition === "function") ? agentHandle.interpolatedPosition(): 
+          (typeof agentHandle.position === "function" ? agentHandle.position() : agentHandle.position);
         }
       } catch {
         agentPosition = agentHandle.position ?? null;
@@ -510,6 +514,7 @@ export async function updateAgentTours(navQuery) {
 
       const next = tour.queue[tour.index + 1];
 
+      // If no valid current target, advance to next
       if (!current || !current.navPt?.point) {
         tour.index = Math.min(tour.index + 1, tour.queue.length - 1);
         continue;
@@ -619,7 +624,7 @@ export async function updateAgentTours(navQuery) {
 
                   setTimeout(() => {
                     try {
-                      // Use onEnded callback so we resume exactly when audio finishes
+                      // Start play audio
                       playAudio(audioCID, () => {
                         if (entry && entry.state) entry.state.isPlayingAudio = false;
                         // make tour ready to continue immediately: set nextActionTime to now
@@ -674,12 +679,12 @@ export async function updateAgentTours(navQuery) {
             } catch (e) { /* ignore errors */ }
 
             // align model to agent pos (snap when arrived)
-            if (model) {
-              const footOffset = (typeof model.userData?.footOffset === 'number') ? model.userData.footOffset : 0;
-              model.position.set(agentPos.x, agentPos.y + footOffset, agentPos.z);
-            }
+            // if (model) {
+            //   const footOffset = (typeof model.userData?.footOffset === 'number') ? model.userData.footOffset : 0;
+            //   model.position.set(agentPos.x, agentPos.y + footOffset, agentPos.z);
+            // }
 
-            // face picture (same as before)
+            // face picture
             if (model) {
               const faceW = current.faceWorldPos?.clone() ?? new THREE.Vector3(targetPt.x, model.position.y, targetPt.z);
               let planeNormal = new THREE.Vector3(0, 0, 1);
@@ -690,12 +695,17 @@ export async function updateAgentTours(navQuery) {
                 }
               } catch (e) { planeNormal.set(0, 0, 1); }
 
+              // toAgent is vector to detect where the agent is located relative to the painting
+              // This vector point from painting to the agent
               const toAgent = new THREE.Vector3(agentPos.x - faceW.x, 0, agentPos.z - faceW.z);
               if (toAgent.lengthSq() < 1e-6) toAgent.set(0, 0, 1);
               else toAgent.normalize();
+              // Calculate vector from painting to the agent
+              // Dot product is used to compare the agent and the normal vector of the painting direction 
+              // If the dot product is negative, it means the agent is behind the painting, so we need to invert the normal vector
               if (planeNormal.dot(toAgent) < 0) planeNormal.negate();
 
-              const lookAtPoint = faceW.clone().addScaledVector(planeNormal, 0.5);
+              const lookAtPoint = faceW.clone().addScaledVector(planeNormal, 0);
               lookAtPoint.y = model.position.y;
 
               const dirH = new THREE.Vector3(lookAtPoint.x - agentPos.x, 0, lookAtPoint.z - agentPos.z);
@@ -705,6 +715,7 @@ export async function updateAgentTours(navQuery) {
                 const correction = (model.userData && typeof model.userData.forwardCorrection === 'number') ? model.userData.forwardCorrection : 0;
                 const desiredQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw + correction, 0));
                 model.quaternion.copy(desiredQuat);
+
                 if (!entry.state) entry.state = {};
                 entry.state.tourFacingQuat = desiredQuat.clone();
                 entry.state.preventRotationUntil = now + (tour.holdTime ?? TOUR_DEFAULT.holdTime);
@@ -766,7 +777,7 @@ export async function updateAgentTours(navQuery) {
           try {
             if (tour._restoreParamsScheduled) {
               if (typeof agentHandle.updateParameters === 'function') {
-                // restore sensible defaults (tune to your agent defaults)
+                // restore sensible defaults
                 agentHandle.updateParameters({
                   maxSpeed: tour.gait?.maxSpeed ?? 2.0,
                   maxAcceleration: tour.gait?.maxAcceleration ?? 6.0

@@ -16,7 +16,8 @@
         "guidance_1": "Use W-A-S-D to move around",
         "guidance_2": "Use Escape key to open/close menu",
         "guidance_3": "Hover on annotation for details",
-        "guidance_4": "Click I to activate room tour mode"
+        "guidance_4": "Click I to activate room tour mode",
+        "guidance_5": "Click V to change view mode"
     },
 
     "MenuBar": {

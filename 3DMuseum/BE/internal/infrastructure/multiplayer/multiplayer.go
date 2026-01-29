@@ -102,7 +102,6 @@ func NewSFURepo(sfuCfg *SFUConfig) *SFU {
 			ICEServers: iceServers,
 		},
 		api: api,
-		// You may need to add an 'api' field to your SFU struct to use it later
 	}
 }
 

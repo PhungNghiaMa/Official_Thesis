@@ -1,3 +1,7 @@
+// This class represents an annotation div in the 3D museum application. It creates a div element with annotation details and handles click events.
+// It also provides methods to set and retrieve annotation information.
+// To be more specific, this class create an annotation div so that when the user hover on this div, it will show the information about the artwork such as title, description in Vietnamese and English.
+// Or when the user click on the div, it will trigger the onAnnotationClick callback function passed in the constructor.
 export default class AnnotationDiv{
 
     constructor(text, id, onAnnotationClick){

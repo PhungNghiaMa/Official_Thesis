@@ -1,4 +1,7 @@
-// src/game_logic/AnimController.js
+// This function is an external utility function to create an animation controller for a 3D character model in the museum application.
+// It sets up an AnimationMixer and maps animation clips to actions, allowing for smooth transitions between different 
+// animations based on character movement and state.
+// This is apply to NPC character and ThirdPersonPlayer character
 import { AnimationMixer } from 'three';
 
 export function createAnimController(model, characterGLTF) {

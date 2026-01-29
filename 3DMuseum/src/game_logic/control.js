@@ -1,3 +1,7 @@
+// This code handle the first person view movement in the 3D museum application. It includes movement tuning, damping, steering, physics timestep, and camera smoothing.
+// The FirstPersonPlayer class manages the player's position, velocity, and interactions with the environment using a capsule collider and BVH for efficient collision detection.
+// It also supports following an NPC agent for guided tours within the museum.
+
 import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';

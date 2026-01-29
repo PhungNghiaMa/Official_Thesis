@@ -1,3 +1,6 @@
+// This code provides services for interacting with the backend of the 3D museum application.
+// It includes functions to fetch room assets, upload new items, generate AI responses, 
+// and manage WebSocket connections for real-time updates.
 
 const BACKEND_URL =
   import.meta.env.MODE === "production"
@@ -19,21 +22,22 @@ export async function GetRoomAsset(roomID) {
     return await response.json()
 }
 
-
+// This function is used to validate the data input before uploading to the backend
 const validateData = (data) => {
 
-	if (!data.title || data.title.length > 40) {
-		return 'Title is required and must be at most 40 characters.'
+	if (!data.title || data.title.length > 100) {
+		return 'Title is required and must be at most 100 characters.'
 	}
 	if (!data.vietnamese_description) {
-		return 'Vietnamese description is required and must be at most 500 characters.'
+		return 'Vietnamese description is required'
 	}
 	if (!data.english_description.length) {
-		return 'English description is required and must be at most 500 characters.'
+		return 'English description is required'
 	}
 	return ''
 }
 
+// API UPLOAD ITEM TO BACKEND
 export const UploadItem = async (file, mesh_name , title, vietnamese_description, english_description, roomID) => {
     const formData = new FormData()
 
@@ -78,11 +82,12 @@ export const UploadItem = async (file, mesh_name , title, vietnamese_description
  * @param {string} prompt - The user's question about the painting.
  * @param {string} playerID - The unique ID of the player.
  */
+// API GENERATE ANSWER FROM BACKEND USING AI MODEL
 export const GenAI = async (webpCID, prompt, playerID) => {
     try {
         const formData = new FormData();
         
-        // These keys MUST match the strings inside your Go c.PostForm("...") calls
+        // These keys MUST match the strings inside Go c.PostForm("...") calls
         // formData.append("player_id", playerID);
         formData.append("prompt", prompt);
         formData.append("webp_cid", webpCID);
@@ -108,16 +113,18 @@ export const GenAI = async (webpCID, prompt, playerID) => {
     }
 };
 
-// WEBSOCKET
+// WEBSOCKET instance and management
 let _ws = null 
 const _subscribed = new Set()
 let _reconnectTimer = null 
 
+// This function return the websocket URL based on the current protocol (ws or wss)
 function wsURL(){
     let protocol = window.location.protocol === "https:" ? "wss" : "ws";
     return `${protocol}://${BACKEND_BASE}/ws`;
 }
 
+// Start or return existing WebSocket connection
 export function StartWebSocket() {
   if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return _ws;
   _ws = new WebSocket(wsURL());
@@ -192,6 +199,7 @@ export function StartWebSocket() {
   return _ws;
 }
 
+// Infer message type from stage string
 function inferTypeFromStage(stage) {
   if (!stage) return "unknown";
   if (/tts/i.test(stage)) return "tts";
@@ -199,6 +207,7 @@ function inferTypeFromStage(stage) {
   return "unknown";
 }
 
+// Subscribe to a specific channel for updates
 export function SubscribeChannel(channel) {
   if (!channel) return;
   if (_subscribed.has(channel)) return;
@@ -226,7 +235,7 @@ export function SubscribeChannel(channel) {
   }
 }
 
-
+// Unsubscribe from a specific channel
 export function unsubscribeChannel(channel) {
   if (!_ws) return;
   _subscribed.delete(channel);
@@ -235,6 +244,7 @@ export function unsubscribeChannel(channel) {
   } catch (e) {}
 }
 
+// Close the WebSocket connection
 export function closeWebSocket() {
   if (_ws) _ws.close();
   _ws = null;
