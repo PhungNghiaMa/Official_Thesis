@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite App</title>
+<!-- Load the heavy sheet asynchronously (preload + onload swap) -->
+    <link rel="stylesheet" href="./main.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="./main.css"></noscript>
+    <!-- Bootstrap Icons: async as well -->
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css"
+      as="style" onload="this.onload=null;this.rel='stylesheet'" crossorigin="anonymous">
+  <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css"></noscript>  
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin = "anonymous" referrerpolicy="no-referrer">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet"  crossorigin="anonymous">
+
+  </head>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- <script type="module" src="./src/game_logic/index.js"></script>
+  <script type="module">
+    import { initConnection } from './src/game_logic/webRTC.js';
+    window.initConnection = initConnection; // optional global
+  </script> -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+  <body>
+    <div id="landingpageContainer" class="GeneralContainer w-full min-h-full overflow-y-auto overflow-x-hidden box-border" >
+      <div class="Page_1_Container w-full h-full overflow-hidden py-5">
+        <div class="NavigationContainer w-full h-auto flex flex-row py-3 text-gray-300">
+          <div class="MuseumNameContainer w-2/12 h-auto flex justify-center items-center">
+            <h1 class="museum_name text-2xl font-semibold" data-i18n="LandingPage.museum_name"></h1>
+          </div>
+
+          <div class="NavBarContainer w-10/12 h-fit flex flex-row items-center justify-end-safe px-5 box-border">
+            <nav class="NavBar w-1/ h-fit flex items-center justify-around text-md ">
+              <a data-i18n="LandingPage.about" id="about" class="navigation about px-2" href="/about">About</a>
+              <a data-i18n="LandingPage.gallery" id="gallery" class="navigation gallery px-2" href="/gallery">Gallery</a>
+              <a data-i18n="LandingPage.contact" id="contact" class="navigation contact px-2" href="/contact">Contact</a>
+            </nav>
+            <div class="LanguageSwitcherContainer max-w-fit max-h-fit flex flex-row items-center transition-all ease-in-out 10s text-xs font-semibold">
+              <div class="LangToogleContainer lang flex items-center justify-around mx-2 border-2 border-gray-200 rounded-lg text-gray-200" id="LangToogleContainer">
+                <button id="LangToggleBtn" class="LangToogleBtn" 
+                    type="button" onclick="changeLanguage()">
+                VI</button>
+              </div>
+            </div>
+          </div>
+      </div>
+
+      <div class="ContentContainer w-full max-h-full overflow-hidden my-3 bg-transparent">
+        <div class="WrapContainer w-auto overflow-hidden">
+          <div class="PagesContainer w-full h-fit overflow-auto">
+            <div id="landingpage" class="landingpage w-full"></div>
+          </div>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <!-- MODE SELECTION CONTAINER -->
+    <div id="ModeSelectionContainer" class="ModeSelectionContainer">
+        
+        <!-- MODE SELECTION SCREEN -->
+        <div id="SinglePlayer_MultiPlayer_Container" class="SinglePlayer_MultiPlayer_Container">
+            
+            <div class="mode-header">
+                <h1 class="mode-title">The Journey</h1>
+                <div class="mode-subtitle">Select Your Path</div>
+            </div>
+
+            <div class="SelectMode">
+                <!-- SOLO BUTTON -->
+                <button id="Solo" type="button" class="traditional-btn">
+                    <div class="btn-icon">✦</div> <!-- Or use <i class="fa-solid fa-user"></i> -->
+                    <span class="btn-label">Solo</span>
+                    <span class="btn-desc">Explore Alone</span>
+                </button>
+
+                <!-- MULTI BUTTON -->
+                <button id="Multi" type="button" class="traditional-btn">
+                    <div class="btn-icon">❖</div> <!-- Or use <i class="fa-solid fa-users"></i> -->
+                    <span class="btn-label">Co-Op</span>
+                    <span class="btn-desc">Join Friends</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ROOM ID SCREEN (Hidden by default, styled to match) -->
+        <div id="RoomIDContainer" class="RoomIDContainer" >
+            <label class="roomIDLabel" for="roomID">Share this Code</label>
+            <div id="roomID" class="RoomID">123456</div>
+            
+            <div class="ID_Input_Field" ></div>
+
+            <label for="inputID" >Or Enter Friend's Code</label>
+            <div id="inputID" class="InputRoomID">
+                <input class="inputIDValue" id="inputIDValue" type="text" placeholder="ROOM ID">
+            </div>
+        </div>
+
+        <!-- ALERT (Hidden) -->
+        <div id="AlertContainer" class="AlertContainer">
+            <div class="Alert">
+                <span class="alertText">⚠ ALERT</span>
+                <span id="alert_content">Invalid Room ID</span>
+            </div>
+        </div>
+
+        <!-- LOBBY SCREEN (Hidden) -->
+        <div id="PlayerContainer" class="PlayerContainer" >
+            <h3 class="waitText">Waiting for Players...</h3>
+            <div class="Player">
+                <div id="P1" class="player-slot" >A</div>
+                <div id="P2" class="player-slot">-</div>
+                <div id="P3" class="player-slot">-</div>
+            </div>
+            <div class="StartBtnContainer">
+                <button id="start_button" type="button" class="StartBtn">Start Journey</button>
+            </div>
+        </div>
+    </div>
+
+    <!--  Game Container -->
+    <div class="loading-container" id="loading-container">
+        <!-- The new loader with a wave effect and percentage display -->
+        <div id="loader-container" id="loader-container" class="loader">
+            <div id="loader-percentage" class="loader-percentage">0%</div>
+        </div>
+    </div>
+    
+    <div class="MenuContainerWrapper w-full h-auto flex items-center justify-center bg-transparent">
+      <div class="menu-container" id="menu-container">
+        <div class="MenuCloseContainer flex items-center justify-end">
+          <i class="menu_close bi bi-x bg-orange-400 rounded-2xl" id="menu-close" ></i>
+        </div>
+      
+        <h2 data-i18n="Guidance.guidance_title"></h2>
+      
+        <!-- <div style="font-size: 18px; font-weight: 600; color: ivory;">
+          Manual guidance
+        </div> -->
+      
+        <div id="menu-selection-list"></div>
+        <hr>
+        <div class="GuidanceContainer py-5 text-gray-300 text-center">
+          <ul>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_1"></li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_2"></li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_3"></li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_4"></li>
+            <li class="text-shadow-red" data-i18n="Guidance.guidance_5"></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    
+    <div class="toast-alert" id="toast-alert"></div>
+    
+    <div class="upload-modal" id="upload-modal">
+      <div id="upload-close" class="upload-modal-close">
+        <i class="bi bi-x"></i>
+      </div>
+    
+      <div class="upload-header">
+        <h2>Upload Image</h2>
+      </div>
+    
+      <div class="upload-container" id="upload-container">
+        <label for="upload-input" class="upload-label">
+          <div id="upload-text" class="flex items-center justify-center text-gray-300">Upload file here</div>
+          <img src="" alt="" class="upload-preview" id="upload-preview">
+          <video class="upload-preview" id="video-preview" controls></video>
+        </label>
+        <input type="file" id="upload-input" accept="image/png, image/jpeg, image/webP, image/jpg">
+      </div>
+
+    
+      <div class="upload-details overflow-auto">
+        <input type="text" name="" id="upload-title" placeholder="title" maxlength="100">
+        <textarea name="" id="upload-vietnamese-description" placeholder="Vietnamese Description"></textarea>
+        <textarea name="" id="upload-english-description" placeholder="English-description"></textarea>
+        <button type="submit" id="upload-btn" class="btn flex justify-center items-center gap-5">
+          Upload
+          <div class="spinner" id="upload-spinner"></div>
+        </button>
+      </div>
+    </div>
+
+    <div id="choice_container" class="AnnotationChoiceContainer w-fit h-auto absolute">
+      <div class="ChoiceContainer w-fit h-auto flex items-center justify-around">
+        <button type="button" id="choice_show_image" class="ChoiceShowImage w-fit" data-i18n="ChoiceBtn.show_image"></button>
+        <button type="button" id="choice_upload_image" class="ChoiceUploadImage" data-i18n="ChoiceBtn.upload_image"></button>
+      </div>
+    </div>
+
+    <div id="ImageShowContainer" class="ImageShowContainer" id="image-show-container">
+      <div class="FirstColContainer w-1/2 h-full flex items-center justify-center mx-5">
+        <div id="FirstIMGCol" class="FirstIMGCol w-auto max-w-full h-full py-5 rounded-xl object-contain"></div>
+      </div>
+      <div id="SecondIMGCol" class="SecondIMGCol w-1/2 h-auto overflow-hidden mx-5 my-5">
+        <div id="TopContainer" class="TopContainer w-full max-h-2/12 flex flex-row">
+          <div id="TitleContainer" class="TitleContainer w-11/12 flex items-center justify-center"></div>
+          <div id="CancelBtnContainer" class="CancelBtnContainer w-1/12 flex items-center justify-center cursor-pointer">
+            <i class="display_image_closeBtn bi bi-x"></i>
+          </div>
+        </div>
+        <hr class="Seperator">
+        <div id="BottomContainer" class="BottomContainer  w-full flex flex-wrap max-h-10/12 overflow-auto px-5 py-8"></div>
+      </div>
+    </div>
+
+    <div id="museum-ui" class="museum-panel">
+      <button class="close-panel" onclick="window.hideInquiryPanel()">✕</button>
+
+      <div class="panel-header">
+          <h3 id="picture-title" class="picture-title"></h3>
+      </div>
+
+      <div id="chat-history" class="chat-history-container scrollbar-hide">
+          </div>
+
+      <div class="input-container justify-center items-center py-4 px-4">
+        <textarea 
+            id="user-inquiry" 
+            class="scroll-smooth caret-amber-600 pl-1"
+            placeholder="Ask Museum Assistant about this piece..." 
+            rows="1"
+            oninput="autoScaleInput(this)"
+        ></textarea>
+          
+        <button type="submit" id="send-button" class="send-button">
+            <svg viewBox="0 0 24 24" width="20" height="20">
+                <path fill="currentColor" d="M2.01 21L23 12L2.01 3L2 10l15 2l-15 2z"></path>
+            </svg>
+        </button>
+      </div>
+    </div>
+
+    
+    <div id="model-container"></div> 
+    <script type="module">
+
+      // Render landing page quickly with template
+      import landingPageHTML from './template/landingpage_template.js';
+      // import {updateLobbyState} from './src/game_logic/webRTC.js';
+      let isMultiplayerMode = false;
+      window._IS_HOST = true;
+
+      document.getElementById('landingpage').innerHTML = landingPageHTML;
+      localStorage.setItem('language', 'vi');
+      //Lazy i18n loader
+      const lazyI18n = () =>
+        import('./src/i18next.js').then(({ initI18next, updateContent, changeLanguage }) => {
+          window.changeLanguage = changeLanguage;
+          return initI18next().then(updateContent);
+        });
+
+      //Run i18n initialization when idle (or asap via setTimeout)
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(() => lazyI18n());
+      } else {
+        setTimeout(() => lazyI18n(), 0);
+      }
+
+      let isGameInitialized = false;
+      let galleryContainer = null;
+
+      // DOM refs
+      const generalContainer = document.getElementById('landingpageContainer');
+      const modelContainer   = document.getElementById('model-container');
+      const menuContainer    = document.getElementById('menu-container');
+      const galleryLink      = document.getElementById('gallery');
+
+      // Handle mode selection
+      const handleModeSelection = async () =>{
+        const soloBtn = document.getElementById('Solo');
+        const multiBtn = document.getElementById('Multi');
+        const single_multiplayer_container = document.getElementById('SinglePlayer_MultiPlayer_Container');
+        const playerContainer = document.getElementById('PlayerContainer');
+        
+        if (!soloBtn || !multiBtn){
+          console.error("Cannot find the buttons!")
+          return;
+        } 
+        
+        soloBtn.addEventListener('click', () => {
+          isMultiplayerMode = false
+          startGame()
+        });
+        
+        multiBtn.addEventListener('click', () => {
+          isMultiplayerMode = true;
+          single_multiplayer_container.style.display = 'none';
+          
+          // Note: Using 'flex' because of the new CSS style
+          const roomIDContainer = document.getElementById('RoomIDContainer');
+          roomIDContainer.style.display = 'flex';
+          playerContainer.style.display = 'flex';
+          
+          waitForStartButton();
+        });
+      }
+      handleModeSelection();
+
+
+      // Handle Init button -> lazy load game
+      const waitForStartButton = () => {
+        const btn = document.getElementById('start_button');
+        if (!btn) return;
+
+        btn.addEventListener('click', async () => {
+          const {initConnection} = await import('./src/game_logic/webRTC.js');
+          initConnection().catch(console.error);
+          
+          if (!isGameInitialized) {
+            const { initializeGame } = await import('./src/game_logic/index.js');           
+            requestAnimationFrame(() => initializeGame('model-container'));
+            isGameInitialized = true;
+          }
+          
+          if (generalContainer) generalContainer.style.display = 'none';
+          if (modelContainer)   modelContainer.style.display   = 'block';
+          if (menuContainer)    menuContainer.style.display    = 'flex';
+          
+          // FIX: Hide the mode selection container explicitly
+          const modeContainer = document.getElementById('ModeSelectionContainer');
+          if(modeContainer) modeContainer.style.display = 'none';
+        });
+      };
+
+      const startGame = async () => {
+        if (!isGameInitialized) {
+          const { initializeGame } = await import('./src/game_logic/index.js');           
+          requestAnimationFrame(() => initializeGame('model-container'));
+          isGameInitialized = true;
+          
+          if (generalContainer) generalContainer.style.display = 'none';
+          if (modelContainer)   modelContainer.style.display   = 'block';
+          if (menuContainer)    menuContainer.style.display    = 'flex';
+          
+          // FIX: Hide the mode selection container explicitly
+          const modeContainer = document.getElementById('ModeSelectionContainer');
+          if(modeContainer) modeContainer.style.display = 'none';
+        }
+      }
+
+      const handleRoomJoinAuto = (roomIDValue) => {
+        // Basic validation: must be exactly 6 characters
+        const alertContainer = document.getElementById('AlertContainer');
+        const alertContent = document.getElementById("alert_content");
+        const inputElement = document.getElementById('inputIDValue');
+        if (roomIDValue.length === 6) {
+          alertContainer.style.display = 'none';
+          inputElement.style.color = 'black';
+          console.log("Automatically joining room:", roomIDValue);
+          window.WEBRTC_ROOM_ID = roomIDValue;
+          window._IS_HOST = false;
+          // // Call your webRTC function
+          // updateLobbyState(roomIDValue); 
+          history.pushState(null, '', `?room=${roomIDValue}`);
+        }else if (roomIDValue.length < 6 && roomIDValue.length > 0){
+          alertContent.textContent ="Invalid Room ID !  Please check again !";
+          alertContainer.style.display = 'flex';
+          inputElement.style.color = 'red';
+        }else{
+          alertContainer.style.display = 'none';
+          inputElement.style.color = 'black';
+        }
+      };
+
+      const waitForInputRoomID = () => {
+        const inputElement = document.getElementById('inputIDValue');
+
+        // Listen for the 'input' event (fires whenever the value changes)
+        inputElement.addEventListener('input', (event) => {
+          const inputIDValue = event.target.value;
+          handleRoomJoinAuto(inputIDValue);
+        });
+      };
+
+      // waitForInitButton()
+      const waitForInitButton = () => {
+        const initBtn = document.getElementById('init_button');
+        const modeContainer = document.getElementById('ModeSelectionContainer');
+        const landingPage = document.getElementById('landingpageContainer');
+        const roomID =  (Math.floor(Math.random() * 900000) + 100000).toString();
+        window.WEBRTC_ROOM_ID = roomID // Assign for use inside the multiplayer mode
+        
+        // Use JS to fill the RoomID since we changed the HTML structure
+        const roomIDEl = document.getElementById('roomID');
+        if(roomIDEl) roomIDEl.innerHTML = roomID;
+        
+        // NOTE: init_button comes from 'landingpage_template.js' so we might need to wait
+        // If this fails, move this logic inside a MutationObserver or a short timeout
+        if (!initBtn) return;
+        
+        initBtn.addEventListener('click', async () => {
+          console.log("window.WEBRTC_ROOM_ID: ", window.WEBRTC_ROOM_ID)
+          if (modeContainer && landingPage){
+            modeContainer.style.display = 'flex';
+            landingPage.style.display = 'none';
+            waitForInputRoomID();
+          } 
+        })
+      }
+      
+      // Since init_button is inside the template injected at the top, 
+      // we need to wait a moment or use event delegation.
+      // Simple fix: Wait for the next tick since we set innerHTML at start of script
+      setTimeout(waitForInitButton, 100);
+      
+      // Handle Gallery -> lazy load gallery code
+      if (galleryLink) {
+        galleryLink.addEventListener('click', async (e) => {
+          e.preventDefault();
+
+          if (!galleryContainer) {
+            galleryContainer = document.createElement('div');
+            galleryContainer.id = 'gallery-main-container';
+            Object.assign(galleryContainer.style, {
+              width: '100vw', height: '100vh', background: '#fff',
+              position: 'absolute', top: '0', left: '0', zIndex: '1000'
+            });
+            document.body.appendChild(galleryContainer);
+          }
+
+          if (generalContainer) generalContainer.style.display = 'none';
+          if (modelContainer)   modelContainer.style.display   = 'none';
+          if (menuContainer)    menuContainer.style.display    = 'none';
+          
+          // Hide mode container if gallery is clicked
+          const modeContainer = document.getElementById('ModeSelectionContainer');
+          if(modeContainer) modeContainer.style.display = 'none';
+          
+          galleryContainer.style.display = 'block';
+
+          const { initGalleryPage } = await import('./src/gallery_logic.js');
+          initGalleryPage(galleryContainer);
+        });
+      }
+
+      // Prefetch game bundle in idle time for smoother Start click
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(() => import('./src/game_logic/index.js'));
+      } else {
+        setTimeout(() => import('./src/game_logic/index.js'), 50);
+      }
+    </script>
+
+  </body>
+</html>
