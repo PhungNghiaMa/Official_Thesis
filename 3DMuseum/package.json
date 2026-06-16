@@ -27,7 +27,7 @@
     "get-audio-duration": "^4.0.1",
     "hls.js": "^1.6.15",
     "i18next": "^25.6.3",
-    "i18next-http-backend": "^3.0.2",
+    "i18next-http-backend": "^3.0.5",
     "recast-navigation": "^0.43.0",
     "tailwindcss": "^4.1.17",
     "three": "^0.181.2",
